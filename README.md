@@ -310,38 +310,51 @@ ResearchMind/
 │   ├── deploy_mcp_servers.sh
 │   ├── start_development.sh
 │   └── run_tests.sh
-├── requirements.txt                 # 主要依赖
-├── setup.py                        # 安装脚本
-├── main.py                         # 主程序入口
-└── docker-compose.yml              # 开发环境配置
+├── pyproject.toml                   # 项目配置和依赖 (uv)
+├── uv.lock                         # 依赖锁定文件 (uv)
+├── .python-version                 # Python版本指定
+├── Makefile                        # 常用命令快捷方式
+├── main_mcp.py                     # 主程序入口
+└── test_agents.py                  # 系统测试脚本
 ```
 
 ## 🚀 快速开始
 
 ### 环境要求
 - Python 3.9+
-- Node.js 16+ (用于某些MCP服务器)
+- [uv](https://docs.astral.sh/uv/) (推荐的Python包管理器)
 - Git
 
 ### 安装步骤
 
-1. **克隆项目**
+1. **安装uv (如果尚未安装)**
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 或使用pip
+pip install uv
+```
+
+2. **克隆项目**
 ```bash
 git clone https://github.com/your-org/researchmind.git
 cd researchmind
 ```
 
-2. **创建虚拟环境**
+3. **安装依赖 (uv会自动管理Python版本和虚拟环境)**
 ```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或
-venv\Scripts\activate     # Windows
-```
+# 安装基础依赖
+uv sync
 
-3. **安装依赖**
-```bash
-pip install -r requirements.txt
+# 或安装开发依赖
+uv sync --extra dev
+
+# 或安装所有依赖 (包括文档、Jupyter等)
+uv sync --extra all
 ```
 
 4. **配置环境变量**
@@ -350,32 +363,43 @@ cp .env.example .env
 # 编辑.env文件，填入必要的API密钥
 ```
 
-5. **启动开发环境**
+5. **验证安装**
 ```bash
-chmod +x scripts/start_development.sh
-./scripts/start_development.sh
+# 快速验证安装
+uv run python scripts/verify_installation.py
+# 或使用Makefile
+make verify
+
+# 运行完整测试
+uv run python test_agents.py
+# 或使用Makefile
+make test
 ```
 
 ### 使用方式
 
 #### 1. 交互式模式（推荐新手）
 ```bash
-python main_mcp.py --interactive
+uv run python main_mcp.py --interactive
+# 或使用Makefile
+make run
 ```
 
 #### 2. ADK Web界面（推荐开发者）
 ```bash
-python main_mcp.py --web --port 8080
+uv run python main_mcp.py --web --port 8080
+# 或使用Makefile
+make web
 ```
 然后在浏览器中访问 http://localhost:8080，选择 `research_coordinator` 智能体。
 
 #### 3. 命令行模式
 ```bash
 # 智能混合工作流 (推荐)
-python main_mcp.py --research "锂电池材料研究" --workflow hybrid
+uv run python main_mcp.py --research "锂电池材料研究" --workflow hybrid
 
 # 顺序工作流 (深度研究)
-python main_mcp.py --research "钙钛矿太阳能电池" --workflow sequential
+uv run python main_mcp.py --research "钙钛矿太阳能电池" --workflow sequential
 
 # 并行工作流 (快速研究)
 python main_mcp.py --research "石墨烯应用" --workflow parallel
@@ -387,25 +411,63 @@ python main_mcp.py --research "超导材料" --workflow specialized
 #### 4. 专业智能体模式
 ```bash
 # 文献调研专家
-python main_mcp.py --agent literature_agent --research "超导材料文献调研"
+uv run python main_mcp.py --agent literature_agent --research "超导材料文献调研"
 
 # 数据库检索专家
-python main_mcp.py --agent database_agent --research "钙钛矿结构搜索"
+uv run python main_mcp.py --agent database_agent --research "钙钛矿结构搜索"
 
 # 仿真计算专家
-python main_mcp.py --agent simulation_agent --research "材料性质计算"
+uv run python main_mcp.py --agent simulation_agent --research "材料性质计算"
 
 # 实验设计专家
-python main_mcp.py --agent experiment_agent --research "合成工艺设计"
+uv run python main_mcp.py --agent experiment_agent --research "合成工艺设计"
 ```
 
 #### 5. 系统测试和演示
 ```bash
 # 运行系统测试
-python test_agents.py
+uv run python test_agents.py
+# 或使用Makefile
+make test
 
 # 运行智能体演示
-python main_mcp.py --demo
+uv run python main_mcp.py --demo
+# 或使用Makefile
+make demo
+```
+
+### 🛠️ 开发工具和命令
+
+#### uv包管理器
+```bash
+# 安装依赖
+uv sync                    # 基础依赖
+uv sync --extra dev        # 开发依赖
+uv sync --extra all        # 所有依赖
+
+# 运行命令
+uv run python main_mcp.py  # 运行主程序
+uv run pytest             # 运行测试
+
+# 管理依赖
+uv add package-name        # 添加依赖
+uv remove package-name     # 移除依赖
+uv lock                    # 更新锁定文件
+```
+
+#### Makefile快捷命令
+```bash
+make help                  # 显示所有可用命令
+make install              # 安装依赖
+make dev                  # 安装开发依赖
+make verify               # 验证安装
+make test                 # 运行测试
+make lint                 # 代码检查
+make format               # 代码格式化
+make run                  # 交互式运行
+make demo                 # 演示模式
+make web                  # Web界面
+make clean                # 清理缓存
 ```
 
 ### 🔄 工作流模式详解

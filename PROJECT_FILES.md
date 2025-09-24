@@ -66,71 +66,84 @@ python main_mcp.py --agent literature_agent --research "文献调研"
 
 ---
 
-### 📦 包管理和安装文件
+### 📦 包管理和配置文件
 
-#### `setup.py` ⭐ **包安装配置**
-**作用**: Python包的安装和分发配置文件
+#### `pyproject.toml` ⭐ **现代Python项目配置**
+**作用**: 使用现代Python标准的项目配置文件，替代setup.py和requirements.txt
 **功能**:
-- 📦 定义包的元数据和依赖
-- 🔧 配置命令行工具入口点
-- 📋 指定包含的数据文件
-- 🏷️ 设置分类和关键词
+- 📦 定义项目元数据和依赖关系
+- 🔧 配置构建系统和工具
+- 📋 管理可选依赖组合
+- 🏷️ 设置开发工具配置
 
-**配置内容**:
-```python
-# 主要配置
-name="researchmind"
-version="0.1.0"
-packages=find_packages(where="src")  # 从src目录查找包
+**主要配置**:
+```toml
+[project]
+name = "researchmind"
+version = "0.1.0"
+dependencies = [
+    "google-adk>=1.0.0",
+    "mcp>=1.0.0",
+    # ... 其他依赖
+]
 
-# 命令行工具
-entry_points={
-    "console_scripts": [
-        "researchmind=researchmind.cli:main",
-        "researchmind-server=researchmind.server:main",
-        "researchmind-worker=researchmind.worker:main",
-    ],
-}
+[project.optional-dependencies]
+dev = ["pytest>=7.4.0", "black>=23.7.0", ...]
+docs = ["sphinx>=7.1.0", ...]
+all = ["researchmind[dev,docs,jupyter]"]
+
+[project.scripts]
+researchmind = "main_mcp:main"
+researchmind-test = "test_agents:main"
 ```
 
-**更新状态**: ✅ **已修复**
-- 更新包查找路径：`find_packages(include=["agents", "agents.*", "mcp_servers", "mcp_servers.*"])`
-- 修复命令行入口点：`researchmind=main_mcp:main`
-- 添加测试入口点：`researchmind-test=test_agents:main`
-- 更新包数据配置以匹配当前项目结构
-
-**重要性**: ⭐⭐⭐⭐ **已修复并保留** - 现在配置正确匹配项目结构
+**重要性**: ⭐⭐⭐⭐⭐ **核心配置** - 现代Python项目的标准配置
 
 ---
 
-#### `requirements.txt` ⭐ **依赖管理**
-**作用**: 项目依赖包的详细列表
-**内容分类**:
-```txt
-# 核心框架
-google-adk>=1.0.0          # Google Agent Developer Kit
-mcp>=1.0.0                 # Model Context Protocol
+#### `uv.lock` ⭐ **依赖锁定文件**
+**作用**: uv包管理器生成的精确依赖版本锁定文件
+**功能**:
+- 🔒 锁定所有依赖的精确版本
+- 🔄 确保环境一致性和可重现性
+- ⚡ 支持快速安装和缓存
+- 🛡️ 提供安全性和稳定性保证
 
-# 科学计算
-numpy, scipy, pandas       # 数据处理
-matplotlib, seaborn        # 可视化
-scikit-learn, torch        # 机器学习
+**重要性**: ⭐⭐⭐⭐ **自动生成** - 由uv自动管理，确保环境一致性
 
-# 材料科学
-pymatgen>=2023.5.10        # 材料计算
-ase>=3.22.0                # 原子模拟
-mattersim>=1.0.0           # 微软MatterSim
+---
 
-# Web和API
-fastapi, uvicorn           # Web服务
-httpx, aiohttp             # HTTP客户端
-beautifulsoup4, requests   # 网页抓取
+#### `.python-version` ⭐ **Python版本指定**
+**作用**: 指定项目使用的Python版本
+**内容**: `3.11`
+**功能**:
+- 🐍 自动选择正确的Python版本
+- 🔧 与uv和pyenv等工具集成
+- 📋 确保团队使用一致的Python版本
 
-# 开发工具
-pytest, black, mypy       # 测试和代码质量
+**重要性**: ⭐⭐⭐ **版本控制** - 确保Python版本一致性
+
+---
+
+#### `Makefile` ⭐ **开发命令快捷方式**
+**作用**: 提供常用开发命令的快捷方式
+**功能**:
+- 🚀 简化常用操作：`make run`, `make test`, `make dev`
+- 🔧 标准化开发流程
+- 📋 提供帮助和文档
+- ⚡ 提高开发效率
+
+**常用命令**:
+```bash
+make install    # 安装依赖
+make dev        # 安装开发依赖
+make test       # 运行测试
+make run        # 交互式运行
+make web        # 启动Web界面
+make format     # 代码格式化
 ```
 
-**重要性**: ⭐⭐⭐⭐⭐ **必须保留** - 项目依赖的核心定义
+**重要性**: ⭐⭐⭐⭐ **开发便利** - 大大提高开发效率
 
 ---
 
@@ -189,15 +202,21 @@ MCP_CONNECTION_TIMEOUT=30    # 连接超时
 ### ✅ **保留的核心文件**
 1. **`main_mcp.py`** - 主程序入口，用户交互的核心
 2. **`test_agents.py`** - 系统测试和验证工具
-3. **`requirements.txt`** - 项目依赖定义
-4. **`.env.example`** - 环境配置模板
-5. **`setup.py`** - 包安装配置（已修复）
-6. **`README.md`** - 项目主说明文档
+3. **`pyproject.toml`** - 现代Python项目配置（替代setup.py和requirements.txt）
+4. **`uv.lock`** - 依赖锁定文件（uv自动生成）
+5. **`.python-version`** - Python版本指定
+6. **`Makefile`** - 开发命令快捷方式
+7. **`.env.example`** - 环境配置模板
+8. **`README.md`** - 项目主说明文档
 
 ### ✅ **已完成的操作**
 1. **删除** `main.py` - 避免与main_mcp.py混淆
-2. **修复** `setup.py` - 更新配置匹配当前项目结构
-3. **确认** `README.md` - 与docs/README.md作用不同，都需保留
+2. **删除** `setup.py` 和 `requirements.txt` - 替换为现代的pyproject.toml
+3. **创建** `pyproject.toml` - 现代Python项目配置
+4. **创建** `uv.lock` - 依赖锁定文件
+5. **创建** `.python-version` - Python版本指定
+6. **创建** `Makefile` - 开发命令快捷方式
+7. **更新** `README.md` - 反映uv的使用方式
 
 ### ⚠️ **发现的其他文件**
 #### `src/` 目录 - **早期包结构**
@@ -214,13 +233,15 @@ MCP_CONNECTION_TIMEOUT=30    # 连接超时
 
 ## 🎯 最终项目结构
 
-清理和修复后，核心文件结构为：
+使用uv现代化管理后，核心文件结构为：
 ```
 ResearchMind/
 ├── main_mcp.py              # 主程序入口 ⭐
 ├── test_agents.py           # 系统测试 ⭐
-├── requirements.txt         # 依赖管理 ⭐
-├── setup.py                 # 包配置 ✅ (已修复)
+├── pyproject.toml           # 项目配置和依赖 ⭐ (现代标准)
+├── uv.lock                  # 依赖锁定文件 🔒 (uv自动生成)
+├── .python-version          # Python版本指定 🐍
+├── Makefile                 # 开发命令快捷方式 🛠️
 ├── .env.example            # 环境配置模板 ⭐
 ├── README.md               # 项目主说明 ⭐
 ├── PROJECT_FILES.md        # 文件说明文档 📋
@@ -232,17 +253,29 @@ ResearchMind/
 └── scripts/                # 脚本工具
 ```
 
-## 📊 文件清理总结
+## 📊 现代化改造总结
 
-### ✅ **完成的操作**
+### ✅ **完成的现代化操作**
 - ❌ **删除** `main.py` - 避免与main_mcp.py功能重复
-- 🔧 **修复** `setup.py` - 更新包配置匹配项目结构
-- 📋 **创建** `PROJECT_FILES.md` - 详细说明各文件作用
+- ❌ **删除** `setup.py` 和 `requirements.txt` - 替换为现代标准
+- ✅ **创建** `pyproject.toml` - 现代Python项目配置标准
+- ✅ **创建** `uv.lock` - 精确依赖版本锁定
+- ✅ **创建** `.python-version` - Python版本管理
+- ✅ **创建** `Makefile` - 开发命令标准化
+- 🔄 **更新** `README.md` - 反映uv使用方式
 
-### 🎯 **达成的效果**
-- 🚫 **消除混淆**: 删除冗余的main.py，用户只需使用main_mcp.py
-- ✅ **配置正确**: setup.py现在正确指向实际的项目结构
-- 📖 **文档清晰**: 每个文件的作用和重要性都有明确说明
-- 🎯 **结构简洁**: 保留所有必要文件，删除冗余内容
+### 🎯 **达成的现代化效果**
+- ⚡ **更快的依赖管理**: uv比pip快10-100倍
+- 🔒 **精确的环境控制**: uv.lock确保完全一致的环境
+- 🛠️ **简化的开发流程**: Makefile提供标准化命令
+- 📦 **现代化配置**: pyproject.toml符合Python最新标准
+- 🐍 **版本一致性**: .python-version确保团队使用相同Python版本
+- 📖 **清晰的文档**: 更新的README反映现代化工具链
 
-这样的结构清晰、简洁，避免了文件冗余和用户混淆，同时保持了所有必要的功能。用户现在可以清楚地知道每个文件的作用，并且能够正确地安装和使用ResearchMind系统。
+### 🌟 **使用优势**
+- **开发者体验**: `make run`, `make test`, `make dev` 等简单命令
+- **环境一致性**: uv确保所有开发者使用完全相同的依赖版本
+- **快速安装**: uv的并行下载和缓存机制大大加速安装
+- **现代标准**: 符合Python生态系统的最新最佳实践
+
+这样的现代化结构不仅清晰、简洁，还采用了Python生态系统的最新最佳实践，为开发者提供了更好的体验和更高的效率。
