@@ -1,0 +1,273 @@
+# ResearchMind MCP服务器配置文件
+# 定义各个MCP服务器的连接参数和工具配置
+
+# 全局配置
+global:
+  timeout: 30  # 默认超时时间（秒）
+  max_retries: 3  # 最大重试次数
+  log_level: "INFO"  # 日志级别
+  
+# MCP服务器配置
+mcp_servers:
+  
+  # 文献检索MCP服务器
+  literature:
+    name: "literature-research-mcp-server"
+    description: "文献检索和分析服务器"
+    connection_type: "stdio"  # stdio 或 sse
+    command: "python"
+    args: 
+      - "mcp_servers/literature/server.py"
+    timeout: 60
+    env:
+      PYTHONPATH: "."
+    tools:
+      - name: "search_arxiv"
+        description: "搜索ArXiv论文数据库"
+        enabled: true
+      - name: "search_scholar"
+        description: "搜索Google Scholar学术论文"
+        enabled: true
+      - name: "search_web"
+        description: "网络搜索相关文献和资料"
+        enabled: true
+      - name: "analyze_paper"
+        description: "分析论文内容，提取关键信息"
+        enabled: true
+      - name: "generate_report"
+        description: "生成文献调研报告"
+        enabled: true
+    
+  # 材料数据库MCP服务器
+  materials:
+    name: "materials-database-mcp-server"
+    description: "材料数据库检索和结构生成服务器"
+    connection_type: "stdio"
+    command: "python"
+    args:
+      - "mcp_servers/materials/server.py"
+    timeout: 120  # 材料计算可能需要更长时间
+    env:
+      PYTHONPATH: "."
+      MATERIALS_PROJECT_API_KEY: "${MATERIALS_PROJECT_API_KEY}"
+      CRYSTALLM_MODEL_PATH: "${CRYSTALLM_MODEL_PATH}"
+    tools:
+      - name: "search_structure"
+        description: "搜索晶体结构数据库"
+        enabled: true
+      - name: "generate_structure"
+        description: "使用CrystaLLM生成新结构"
+        enabled: true
+      - name: "predict_properties"
+        description: "预测材料性质"
+        enabled: true
+      - name: "validate_structure"
+        description: "验证结构稳定性"
+        enabled: true
+      - name: "visualize_structure"
+        description: "可视化晶体结构"
+        enabled: true
+    
+  # 仿真计算MCP服务器
+  simulation:
+    name: "simulation-mcp-server"
+    description: "多尺度仿真计算服务器"
+    connection_type: "stdio"
+    command: "python"
+    args:
+      - "mcp_servers/simulation/server.py"
+    timeout: 300  # 仿真计算需要更长时间
+    env:
+      PYTHONPATH: "."
+      MATTERSIM_LICENSE: "${MATTERSIM_LICENSE}"
+      MATTERSIM_MODEL_PATH: "${MATTERSIM_MODEL_PATH}"
+      CUDA_VISIBLE_DEVICES: "0"  # GPU设备
+    tools:
+      - name: "setup_calculation"
+        description: "设置计算参数"
+        enabled: true
+      - name: "run_mattersim"
+        description: "运行MatterSim计算"
+        enabled: true
+      - name: "analyze_results"
+        description: "分析仿真结果"
+        enabled: true
+      - name: "optimize_structure"
+        description: "结构优化"
+        enabled: true
+      - name: "calculate_properties"
+        description: "计算物理性质"
+        enabled: true
+    
+  # 实验设计MCP服务器
+  experiment:
+    name: "experiment-design-mcp-server"
+    description: "实验设计和优化服务器"
+    connection_type: "stdio"
+    command: "python"
+    args:
+      - "mcp_servers/experiment/server.py"
+    timeout: 60
+    env:
+      PYTHONPATH: "."
+    tools:
+      - name: "design_experiment"
+        description: "设计实验方案"
+        enabled: true
+      - name: "optimize_parameters"
+        description: "优化实验参数"
+        enabled: true
+      - name: "assess_risk"
+        description: "评估实验风险"
+        enabled: true
+      - name: "generate_protocol"
+        description: "生成实验协议"
+        enabled: true
+      - name: "estimate_cost"
+        description: "估算实验成本"
+        enabled: true
+
+# 智能体配置
+agents:
+  
+  # 主协调器智能体
+  coordinator:
+    name: "research_coordinator"
+    model: "gemini-2.0-flash"
+    description: "ResearchMind主协调器智能体"
+    mcp_servers:
+      - "literature"
+      - "materials"
+      - "simulation"
+      - "experiment"
+    
+  # 文献调研智能体
+  literature_agent:
+    name: "literature_researcher"
+    model: "gemini-2.0-flash"
+    description: "专业文献调研和分析专家"
+    mcp_servers:
+      - "literature"
+    
+  # 材料数据库智能体
+  database_agent:
+    name: "database_specialist"
+    model: "gemini-2.0-flash"
+    description: "材料数据库检索和结构生成专家"
+    mcp_servers:
+      - "materials"
+    
+  # 仿真计算智能体
+  simulation_agent:
+    name: "simulation_expert"
+    model: "gemini-2.0-flash"
+    description: "多尺度仿真建模和计算专家"
+    mcp_servers:
+      - "simulation"
+    
+  # 实验设计智能体
+  experiment_agent:
+    name: "experiment_designer"
+    model: "gemini-2.0-flash"
+    description: "实验设计和优化专家"
+    mcp_servers:
+      - "experiment"
+
+# 工作流配置
+workflows:
+  
+  # 顺序工作流
+  sequential:
+    name: "research_pipeline"
+    type: "sequential"
+    agents:
+      - "literature_agent"
+      - "database_agent"
+      - "simulation_agent"
+      - "experiment_agent"
+    
+  # 并行工作流
+  parallel:
+    name: "parallel_research"
+    type: "parallel"
+    parallel_agents:
+      - "literature_agent"
+      - "database_agent"
+      - "simulation_agent"
+    gather_agent: "experiment_agent"
+    
+  # 迭代工作流
+  iterative:
+    name: "iterative_research"
+    type: "loop"
+    max_iterations: 3
+    base_workflow: "sequential"
+
+# 部署配置
+deployment:
+  
+  # 开发环境
+  development:
+    platform: "local"
+    mcp_connection_type: "stdio"
+    log_level: "DEBUG"
+    
+  # 生产环境
+  production:
+    platform: "cloud_run"
+    mcp_connection_type: "sse"  # 生产环境使用HTTP连接
+    log_level: "INFO"
+    scaling:
+      min_instances: 1
+      max_instances: 10
+      cpu: "2"
+      memory: "4Gi"
+    
+  # Kubernetes环境
+  kubernetes:
+    platform: "gke"
+    mcp_connection_type: "sse"
+    namespace: "researchmind"
+    service_mesh: true
+    monitoring: true
+
+# 安全配置
+security:
+  api_keys:
+    materials_project: "${MATERIALS_PROJECT_API_KEY}"
+    google_scholar: "${GOOGLE_SCHOLAR_API_KEY}"
+    openai: "${OPENAI_API_KEY}"
+  
+  access_control:
+    enable_authentication: true
+    rate_limiting:
+      requests_per_minute: 100
+      burst_size: 20
+  
+  data_privacy:
+    encrypt_data: true
+    log_retention_days: 30
+    anonymize_logs: true
+
+# 监控配置
+monitoring:
+  metrics:
+    enable_prometheus: true
+    custom_metrics:
+      - "mcp_tool_calls_total"
+      - "agent_response_time"
+      - "research_pipeline_success_rate"
+  
+  logging:
+    structured_logging: true
+    log_format: "json"
+    include_trace_id: true
+  
+  alerting:
+    enable_alerts: true
+    alert_channels:
+      - "email"
+      - "slack"
+    thresholds:
+      error_rate: 0.05
+      response_time_p95: 30000  # 30秒

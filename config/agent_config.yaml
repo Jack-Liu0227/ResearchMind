@@ -1,0 +1,190 @@
+# ResearchMind Agent Configuration
+# 智能体配置文件
+
+# 应用基础配置
+app:
+  name: "ResearchMind"
+  version: "0.1.0"
+  description: "智能科研助手"
+  debug: true
+  log_level: "INFO"
+
+# 模型配置
+models:
+  # 主要LLM配置
+  primary_llm:
+    provider: "google"  # google, openai, anthropic
+    model: "gemini-2.0-flash"
+    temperature: 0.7
+    max_tokens: 4096
+    
+  # 备用LLM配置
+  fallback_llm:
+    provider: "openai"
+    model: "gpt-4o"
+    temperature: 0.7
+    max_tokens: 4096
+
+# 智能体配置
+agents:
+  # 协调器智能体
+  coordinator:
+    name: "ResearchCoordinator"
+    description: "科研流程协调器，负责任务分配和流程管理"
+    model: "primary_llm"
+    max_iterations: 10
+    timeout: 300
+    
+  # 文献调研智能体
+  literature_agent:
+    name: "LiteratureResearcher"
+    description: "专业文献调研专家，擅长多源检索和分析"
+    model: "primary_llm"
+    max_papers: 15
+    search_depth: 3
+    languages: ["en", "zh"]
+    
+  # 数据库检索智能体
+  database_agent:
+    name: "DatabaseSearcher"
+    description: "材料数据库检索专家，专注晶体结构搜索"
+    model: "primary_llm"
+    max_results: 50
+    databases: ["mp", "oqmd", "nomad"]
+    
+  # 仿真模拟智能体
+  simulation_agent:
+    name: "SimulationExpert"
+    description: "多尺度仿真模拟专家，使用MatterSim进行计算"
+    model: "primary_llm"
+    max_atoms: 1000
+    simulation_steps: 1000
+    
+  # 实验设计智能体
+  experiment_agent:
+    name: "ExperimentDesigner"
+    description: "实验设计优化专家，提供可行的实验方案"
+    model: "primary_llm"
+    max_experiments: 10
+    optimization_rounds: 5
+
+# 工具配置
+tools:
+  # 文献检索工具
+  literature_search:
+    arxiv:
+      enabled: true
+      max_results: 50
+      sort_by: "relevance"
+    google_scholar:
+      enabled: true
+      max_results: 50
+      sort_by: "relevance"
+    web_search:
+      enabled: true
+      max_results: 20
+      
+  # 数据库工具
+  database_search:
+    materials_project:
+      enabled: true
+      api_key: "${MP_API_KEY}"
+    oqmd:
+      enabled: true
+      api_key: "${OQMD_API_KEY}"
+    nomad:
+      enabled: true
+      api_key: "${NOMAD_API_KEY}"
+      
+  # 仿真工具
+  simulation:
+    mattersim:
+      enabled: true
+      model_path: "MatterSim-v1.0.0-5M.pth"
+      device: "cuda"
+    crystallm:
+      enabled: true
+      model_path: "crystallm_v1_small"
+      
+  # 分析工具
+  analysis:
+    structure_analysis:
+      enabled: true
+    property_prediction:
+      enabled: true
+    visualization:
+      enabled: true
+
+# 会话管理
+session:
+  service_type: "memory"  # memory, redis, database
+  timeout: 3600  # 1 hour
+  max_sessions: 1000
+  
+# 安全配置
+security:
+  input_validation:
+    enabled: true
+    max_input_length: 10000
+    blocked_keywords: ["BLOCK", "HARMFUL"]
+  output_filtering:
+    enabled: true
+    max_output_length: 50000
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+    
+# 缓存配置
+cache:
+  enabled: true
+  backend: "redis"  # memory, redis, file
+  ttl: 3600  # 1 hour
+  max_size: "1GB"
+  
+# 监控配置
+monitoring:
+  enabled: true
+  metrics:
+    - "request_count"
+    - "response_time"
+    - "error_rate"
+    - "agent_usage"
+  logging:
+    level: "INFO"
+    format: "json"
+    file: "logs/researchmind.log"
+    
+# 外部服务配置
+external_services:
+  # API配置
+  apis:
+    openai:
+      base_url: "https://api.openai.com/v1"
+      timeout: 30
+    google:
+      base_url: "https://generativelanguage.googleapis.com"
+      timeout: 30
+    anthropic:
+      base_url: "https://api.anthropic.com"
+      timeout: 30
+      
+  # 数据库配置
+  databases:
+    postgresql:
+      host: "${DB_HOST}"
+      port: 5432
+      database: "${DB_NAME}"
+      username: "${DB_USER}"
+      password: "${DB_PASSWORD}"
+    redis:
+      host: "${REDIS_HOST}"
+      port: 6379
+      database: 0
+      password: "${REDIS_PASSWORD}"
+
+# 开发配置
+development:
+  auto_reload: true
+  debug_mode: true
+  test_mode: false
+  mock_external_apis: false

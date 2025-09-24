@@ -1,0 +1,10 @@
+# Materials Database MCP Server Dependencies
+mcp>=1.0.0
+asyncio
+aiohttp
+numpy
+pandas
+pymatgen
+requests
+json5
+pyyaml

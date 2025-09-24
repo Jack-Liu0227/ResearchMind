@@ -1,0 +1,12 @@
+# Simulation MCP Server Dependencies
+mcp>=1.0.0
+asyncio
+numpy
+scipy
+matplotlib
+pandas
+ase
+pymatgen
+requests
+json5
+pyyaml

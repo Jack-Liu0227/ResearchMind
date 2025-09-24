@@ -1,0 +1,10 @@
+# Experiment Design MCP Server Dependencies
+mcp>=1.0.0
+asyncio
+numpy
+pandas
+matplotlib
+scipy
+requests
+json5
+pyyaml
