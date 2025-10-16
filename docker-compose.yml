@@ -1,0 +1,188 @@
+services:
+  # ============================================
+  # Paper Search MCP Server
+  # ============================================
+  paper-search-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: researchmind-paper-search-mcp
+    command: python mcp_servers/paper_search/server.py
+    ports:
+      - "50005:50005"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - MODEL_BASE_URL=${MODEL_BASE_URL:-https://api.deepseek.com/v1}
+      - MODEL_USE=${MODEL_USE:-deepseek/deepseek-chat}
+    volumes:
+      - ./session_data:/app/session_data
+      - paper-search-data:/app/mcp_servers/paper_search/data
+    networks:
+      - researchmind-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:50005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================
+  # Database MCP Server
+  # ============================================
+  database-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: researchmind-database-mcp
+    command: python mcp_servers/database_call/server.py
+    ports:
+      - "50003:50003"
+    environment:
+      - MP_API_KEY=${MP_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    volumes:
+      - ./session_data:/app/session_data
+      - database-cache:/app/mcp_servers/database_call/cache
+    networks:
+      - researchmind-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:50003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================
+  # Simulation MCP Server
+  # ============================================
+  simulation-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: researchmind-simulation-mcp
+    command: python mcp_servers/simulation/server.py
+    ports:
+      - "50004:50004"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - VITE_API_URL=http://backend:8000
+    volumes:
+      - ./session_data:/app/session_data
+      - simulation-data:/app/mcp_servers/simulation/data
+    networks:
+      - researchmind-network
+    restart: unless-stopped
+    # Note: GPU support can be added with deploy.resources.reservations.devices
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:50004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================
+  # Main Backend Server (WebSocket + HTTP)
+  # ============================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: researchmind-backend
+    command: python main.py
+    ports:
+      - "50001:50001"
+      - "50002:50002"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - MP_API_KEY=${MP_API_KEY}
+      - MODEL_BASE_URL=${MODEL_BASE_URL:-https://api.deepseek.com/v1}
+      - MODEL_USE=${MODEL_USE:-deepseek/deepseek-chat}
+      - RESEARCHMIND_HOST=0.0.0.0
+      - RESEARCHMIND_PORT=50001
+      - RESEARCHMIND_DEBUG=${RESEARCHMIND_DEBUG:-false}
+      - RESEARCHMIND_LOG_LEVEL=${RESEARCHMIND_LOG_LEVEL:-INFO}
+      - RESEARCHMIND_ALLOW_ORIGINS=["http://localhost:5173","http://localhost:80","http://localhost","http://10.69.141.31:5173","http://10.69.141.31:80","http://10.69.141.31","http://10.147.18.45:5173","http://10.147.18.45:80","http://10.147.18.45"]
+      # MCP Server hosts (use Docker service names)
+      - PAPER_SEARCH_HOST=paper-search-mcp
+      - DATABASE_HOST=database-mcp
+      - SIMULATION_HOST=simulation-mcp
+      - PAPER_SEARCH_PORT=50005
+      - DATABASE_PORT=50003
+      - SIMULATION_PORT=50004
+    volumes:
+      - ./session_data:/app/session_data
+    networks:
+      - researchmind-network
+    depends_on:
+      paper-search-mcp:
+        condition: service_healthy
+      database-mcp:
+        condition: service_healthy
+      simulation-mcp:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:50001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ============================================
+  # Frontend UI (React + Nginx)
+  # ============================================
+  frontend:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: researchmind-frontend
+    ports:
+      - "80:80"
+    environment:
+      - VITE_API_URL=http://10.69.141.31:50001
+      - VITE_WS_URL=ws://10.69.141.31:50002/ws
+    networks:
+      - researchmind-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  researchmind-network:
+    driver: bridge
+    name: researchmind-network
+
+# ============================================
+# Volumes for persistent data
+# ============================================
+volumes:
+  paper-search-data:
+    name: researchmind-paper-search-data
+  database-cache:
+    name: researchmind-database-cache
+  simulation-data:
+    name: researchmind-simulation-data
+
