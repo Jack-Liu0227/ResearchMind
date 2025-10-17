@@ -3,7 +3,7 @@
  * 用于保存和检索晶体结构数据
  */
 
-const API_BASE_URL = 'http://localhost:8002';
+const API_BASE_URL = 'http://0.0.0.0:50002';
 
 export interface StructureStorageResponse {
   success: boolean;

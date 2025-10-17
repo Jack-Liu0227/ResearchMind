@@ -21,13 +21,13 @@ if str(services_path) not in sys.path:
 env_path = Path(__file__).parent.parent.parent / ".env"
 if env_path.exists():
     load_dotenv(env_path)
-    print(f"✅ Loaded environment variables from {env_path}")
+    print(f"Loaded environment variables from {env_path}")
 else:
-    print(f"⚠️ Environment file not found: {env_path}")
+    print(f"WARNING: Environment file not found: {env_path}")
 
 # Get API URL from environment variable
-API_BASE_URL = os.getenv("VITE_API_URL", "http://localhost:8000")
-print(f"📡 API Base URL: {API_BASE_URL}")
+API_BASE_URL = os.getenv("VITE_API_URL", "http://0.0.0.0:50002")
+print(f"API Base URL: {API_BASE_URL}")
 
 # 设置输出编码为UTF-8（解决Windows Unicode问题）
 if os.name == 'nt':  # Windows
@@ -83,7 +83,7 @@ try:
 
     from session_manager import SessionManager
     SESSION_MANAGER_AVAILABLE = True
-    logger.info("✅ SessionManager imported successfully")
+    logger.info("SessionManager imported successfully")
 except ImportError as e:
     logger.warning(f"SessionManager not available: {e}")
     SESSION_MANAGER_AVAILABLE = False
@@ -306,9 +306,9 @@ async def relax_structure(
 
                 # Add to result
                 result["frontend_structures"] = [frontend_structure]
-                logger.info(f"✅ 弛豫结构已转换为前端格式: {frontend_structure.get('formula')}")
+                logger.info(f"Relaxed structure converted to frontend format: {frontend_structure.get('formula')}")
         except Exception as e:
-            logger.warning(f"⚠️ Failed to convert relaxed structure to frontend format: {e}")
+            logger.warning(f"WARNING: Failed to convert relaxed structure to frontend format: {e}")
 
     return result
 
@@ -458,9 +458,9 @@ async def calculate_phonon(
         if images:
             result["images"] = images
             if SESSION_MANAGER_AVAILABLE and session_id:
-                logger.info(f"✅ 声子谱计算完成，保存了 {len(images)} 个图片到会话 {session_id}")
+                logger.info(f"Phonon calculation completed, saved {len(images)} images to session {session_id}")
             else:
-                logger.info(f"✅ 声子谱计算完成，保存了 {len(images)} 个图片到全局目录")
+                logger.info(f"Phonon calculation completed, saved {len(images)} images to global directory")
 
     return result
 
@@ -699,7 +699,7 @@ async def batch_calculate_kappa(
         cif_content = structure.get("cifContent")
         
         if not cif_content:
-            logger.warning(f"⚠️ Structure {i+1} ({formula}) has no CIF content, skipping")
+            logger.warning(f"WARNING: Structure {i+1} ({formula}) has no CIF content, skipping")
             results.append({
                 "structure_id": structure_id,
                 "formula": formula,
@@ -727,15 +727,15 @@ async def batch_calculate_kappa(
             
             if result.get("success", False):
                 completed += 1
-                logger.info(f"✅ Structure {i+1} ({formula}): κ = {result.get('kappa_total', 'N/A')} W/mK")
+                logger.info(f"Structure {i+1} ({formula}): kappa = {result.get('kappa_total', 'N/A')} W/mK")
             else:
                 failed += 1
-                logger.warning(f"❌ Structure {i+1} ({formula}) calculation failed: {result.get('error', 'Unknown error')}")
+                logger.warning(f"ERROR: Structure {i+1} ({formula}) calculation failed: {result.get('error', 'Unknown error')}")
             
             results.append(result)
             
         except Exception as e:
-            logger.error(f"❌ Error calculating structure {i+1} ({formula}): {e}")
+            logger.error(f"ERROR: Error calculating structure {i+1} ({formula}): {e}")
             results.append({
                 "structure_id": structure_id,
                 "formula": formula,
@@ -773,7 +773,7 @@ async def batch_calculate_kappa(
         avg_kappa = sum(k["kappa_total"] for k in successful_kappas) / len(successful_kappas)
         summary["average_kappa"] = round(avg_kappa, 4)
     
-    logger.info(f"✅ Batch calculation completed: {completed}/{len(structures)} successful")
+    logger.info(f"Batch calculation completed: {completed}/{len(structures)} successful")
     
     return {
         "success": True,
@@ -835,11 +835,11 @@ async def generate_crystal_structure(
         # 将结构数据存储到全局变量，供主服务器获取
         global latest_generated_structures
         latest_generated_structures = result["frontend_structures"]
-        logger.info(f"✅ 缓存了 {len(latest_generated_structures)} 个前端格式结构")
+        logger.info(f"Cached {len(latest_generated_structures)} frontend format structures")
         
         # 确保返回结果包含正确的字段名，以便主服务器可以识别
         result["structures"] = result["frontend_structures"]  # 添加structures字段作为备选
-        logger.info(f"✅ 结构生成完成: {result.get('composition')}, {len(result['frontend_structures'])} 个结构")
+        logger.info(f"Structure generation completed: {result.get('composition')}, {len(result['frontend_structures'])} structures")
     
     return result
 
@@ -945,13 +945,13 @@ if __name__ == "__main__":
     import uvicorn
     # Get configuration from environment
     host = "0.0.0.0"  # Always bind to all interfaces
-    port = int(os.getenv("SIMULATION_MCP_PORT", "50004"))
-    external_url = os.getenv("SIMULATION_MCP_URL", f"http://localhost:{port}/sse")
+    port = int(os.getenv("SIMULATION_MCP_PORT", "50005"))
+    external_url = os.getenv("SIMULATION_MCP_URL", f"http://0.0.0.0:{port}/sse")
     
-    logger.info(f"🚀 Starting Simulation MCP Server in SSE mode on http://{host}:{port}")
-    logger.info("📡 Using SSE transport")
-    logger.info(f"📡 External URL: {external_url}")
-    logger.info(f"📡 Internal Endpoint: http://{host}:{port}/sse")
+    logger.info(f"Starting Simulation MCP Server in SSE mode on http://{host}:{port}")
+    logger.info("Using SSE transport")
+    logger.info(f"External URL: {external_url}")
+    logger.info(f"Internal Endpoint: http://{host}:{port}/sse")
 
     # Create HTTP app
     http_app = app.http_app(transport="sse")

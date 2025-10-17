@@ -47,7 +47,7 @@ export const PhononViewer: React.FC<PhononViewerProps> = ({ composition, classNa
 
   const getImageUrl = (filename: string): string => {
     // 直接返回URL而不是Promise
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:50001';
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002';
     return `${API_BASE_URL}/api/images/phonon_results/${filename}`;
   };
 

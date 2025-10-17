@@ -102,7 +102,7 @@ const defaultSettings: UserSettings = {
   defaultAgent: 'deep_research_agent',
   autoSave: true,
   notifications: true,
-  apiEndpoint: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  apiEndpoint: import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002',
 }
 
 const defaultAgents: Agent[] = [

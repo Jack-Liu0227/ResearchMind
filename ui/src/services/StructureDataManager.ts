@@ -70,7 +70,7 @@ class StructureDataManager {
   private defaultCacheTime = 5 * 60 * 1000 // 5分钟缓存
 
   constructor() {
-    this.baseUrl = API_CONFIG.BASE_URL || 'http://localhost:8000'
+    this.baseUrl = API_CONFIG.BASE_URL || 'http://0.0.0.0:50002'
   }
 
   /**

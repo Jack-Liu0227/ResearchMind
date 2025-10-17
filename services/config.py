@@ -17,8 +17,8 @@ class ServerConfig:
     WEBSOCKET_PORT = int(os.getenv("RESEARCHMIND_WS_PORT", os.getenv("RESEARCHMIND_PORT", "50002")))
 
     # HTTP API Server
-    HTTP_HOST = os.getenv("RESEARCHMIND_HOST", "localhost")
-    HTTP_PORT = int(os.getenv("RESEARCHMIND_HTTP_PORT", os.getenv("RESEARCHMIND_PORT", "8000")))
+    HTTP_HOST = os.getenv("RESEARCHMIND_HOST", "0.0.0.0")
+    HTTP_PORT = int(os.getenv("RESEARCHMIND_HTTP_PORT", os.getenv("RESEARCHMIND_PORT", "50002")))
 
     # Debug: Print configuration on load
     @classmethod
@@ -40,6 +40,9 @@ class ServerConfig:
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "http://0.0.0.0:3000",
+        "http://0.0.0.0:5173",
+        "*",  # Allow all origins for development
     ]
     
     # Static Files
@@ -83,7 +86,7 @@ class MCPConfig:
     """MCP Server configuration"""
 
     # Use environment variables for MCP server URLs (for Docker support)
-    # Default to localhost for local development
+    # 注意：客户端连接默认使用 127.0.0.1，服务器监听使用 0.0.0.0
     PAPER_SEARCH_HOST = os.getenv("PAPER_SEARCH_HOST", "127.0.0.1")
     DATABASE_HOST = os.getenv("DATABASE_HOST", "127.0.0.1")
     SIMULATION_HOST = os.getenv("SIMULATION_HOST", "127.0.0.1")

@@ -1,7 +1,7 @@
 // API 配置
 export const API_CONFIG = {
-  BASE_URL: import.meta.env.VITE_API_URL || 'http://localhost:50001',
-  WS_URL: import.meta.env.VITE_WS_URL || 'ws://localhost:50002/ws',
+  BASE_URL: import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002',
+  WS_URL: import.meta.env.VITE_WS_URL || 'ws://0.0.0.0:50003/ws',
   TIMEOUT: 30000,
 } as const
 

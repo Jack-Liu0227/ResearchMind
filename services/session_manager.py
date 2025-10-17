@@ -9,6 +9,7 @@ import os
 import json
 import logging
 import shutil
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -28,18 +29,47 @@ class SessionManager:
     # Session registry
     _sessions: Dict[str, Dict[str, Any]] = {}
     _session_registry_file = BASE_DATA_DIR / "session_registry.json"
+    _initialized: bool = False
     
     @classmethod
     def initialize(cls):
         """Initialize session manager and create base directories"""
-        cls.BASE_DATA_DIR.mkdir(exist_ok=True)
-        cls.STRUCTURES_DIR.mkdir(exist_ok=True)
-        cls.IMAGES_DIR.mkdir(exist_ok=True)
-        cls.METADATA_DIR.mkdir(exist_ok=True)
+        # Prevent duplicate initialization
+        if cls._initialized:
+            logger.debug("Session Manager already initialized, skipping")
+            return
+        
+        # Create directories with retry logic to handle race conditions
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Create base directory first
+                if not cls.BASE_DATA_DIR.exists():
+                    cls.BASE_DATA_DIR.mkdir(exist_ok=True)
+                
+                # Create subdirectories
+                for directory in [cls.STRUCTURES_DIR, cls.IMAGES_DIR, cls.METADATA_DIR]:
+                    if not directory.exists():
+                        directory.mkdir(parents=True, exist_ok=True)
+                
+                break  # Success, exit retry loop
+                
+            except FileExistsError:
+                # Directory was created by another process, which is fine
+                logger.debug(f"Directory already exists (attempt {attempt + 1}/{max_retries})")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Failed to create directories (attempt {attempt + 1}/{max_retries}): {e}")
+                    time.sleep(0.1)  # Brief delay before retry
+                else:
+                    logger.error(f"Failed to create directories after {max_retries} attempts: {e}")
+                    return
         
         # Load session registry
         cls._load_session_registry()
         
+        cls._initialized = True
         logger.info(f"✅ Session Manager initialized")
         logger.info(f"📁 Base data directory: {cls.BASE_DATA_DIR.absolute()}")
     

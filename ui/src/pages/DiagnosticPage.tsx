@@ -75,7 +75,7 @@ const DiagnosticPage: React.FC = () => {
 
     // 4. 检查 WebSocket 端点
     try {
-      const wsUrl = 'ws://localhost:8002'
+      const wsUrl = 'ws://0.0.0.0:50003'
       diagnostics.push({
         name: 'WebSocket 配置',
         status: 'success',
@@ -227,7 +227,7 @@ const DiagnosticPage: React.FC = () => {
             <h3 className="font-semibold text-blue-900 mb-2">💡 提示</h3>
             <ul className="text-sm text-blue-800 space-y-1">
               <li>• 如果界面空白，尝试清除存储并刷新页面</li>
-              <li>• 确保后端服务器在 localhost:8002 运行</li>
+              <li>• 确保后端服务器在 0.0.0.0:50003 运行</li>
               <li>• 检查浏览器控制台（F12）查看详细错误</li>
               <li>• 使用隐私模式/无痕模式测试是否是缓存问题</li>
             </ul>

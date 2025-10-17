@@ -82,7 +82,7 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
   }
 
   // 从文本中提取URL（备用方案）
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:50001'
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002'
   const urlRegex = new RegExp(`${apiUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/api\\/download\\/[^\\s)]+\\.(csv|md)`, 'g')
   let match
   while ((match = urlRegex.exec(content)) !== null) {

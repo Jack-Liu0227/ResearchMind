@@ -5,7 +5,7 @@
 
 import { CrystalStructure } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:50001';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002';
 
 export interface APIStructureResponse {
   formula: string;

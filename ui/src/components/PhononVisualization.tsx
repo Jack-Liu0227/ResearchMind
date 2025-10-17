@@ -125,7 +125,7 @@ const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' 
   const getImageUrl = (image: PhononImage): string => {
     if (image.url) return image.url
     if (image.base64) return `data:image/png;base64,${image.base64}`
-    if (image.filename) return `http://localhost:8003/api/images/phonon_results/${image.filename}`
+    if (image.filename) return `http://0.0.0.0:50002/api/images/phonon_results/${image.filename}`
     if (image.path) return `/api/images/${image.path}`
     return ''
   }
