@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { X, Download, ZoomIn, ZoomOut, RotateCcw, Info, Maximize, Minimize, ExternalLink, Layout } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { API_CONFIG } from '../constants'
 
 interface PhononImage {
   name: string
@@ -125,7 +126,7 @@ const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' 
   const getImageUrl = (image: PhononImage): string => {
     if (image.url) return image.url
     if (image.base64) return `data:image/png;base64,${image.base64}`
-    if (image.filename) return `http://0.0.0.0:50002/api/images/phonon_results/${image.filename}`
+    if (image.filename) return `${API_CONFIG.BASE_URL}/api/images/phonon_results/${image.filename}`
     if (image.path) return `/api/images/${image.path}`
     return ''
   }

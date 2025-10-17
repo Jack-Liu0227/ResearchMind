@@ -45,15 +45,15 @@ class WebSocketServer:
         logger.info(f"🔗 Frontend connection: ws://{server_config.WEBSOCKET_HOST}:{server_config.WEBSOCKET_PORT}/{{client_id}}")
         logger.info("")
         logger.info("🤖 Available Agents:")
-        
+
         from .config import agent_config
         for agent_id, config in agent_config.AGENTS.items():
             logger.info(f"   {config['icon']} {config['name']} ({agent_id})")
-        
+
         logger.info("")
         logger.info("Press Ctrl+C to stop server")
         logger.info("=" * 60)
-        
+
         async with serve(
             self.handle_client,
             server_config.WEBSOCKET_HOST,

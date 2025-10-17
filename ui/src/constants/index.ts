@@ -1,7 +1,49 @@
+const trimEnv = (value: string | undefined | null) => {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+const resolveRuntimeLocation = () => {
+  if (typeof window === 'undefined') {
+    return {
+      protocol: 'http:' as const,
+      hostname: '127.0.0.1',
+      isHttps: false,
+    }
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+  const hostname = window.location.hostname || '127.0.0.1'
+  return {
+    protocol,
+    hostname,
+    isHttps: protocol === 'https:',
+  }
+}
+
+const buildDefaultApiUrl = () => {
+  const { protocol, hostname } = resolveRuntimeLocation()
+  const port = trimEnv(import.meta.env.VITE_API_PORT) || '50002'
+  return `${protocol}//${hostname}:${port}`
+}
+
+const buildDefaultWsUrl = () => {
+  const { hostname, isHttps } = resolveRuntimeLocation()
+  const protocol = isHttps ? 'wss:' : 'ws:'
+  const port = trimEnv(import.meta.env.VITE_WS_PORT) || '50003'
+  const path = trimEnv(import.meta.env.VITE_WS_PATH) || '/ws'
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${protocol}//${hostname}:${port}${normalizedPath}`
+}
+
+const ENV_API_URL = trimEnv(import.meta.env.VITE_API_URL)
+const ENV_WS_URL = trimEnv(import.meta.env.VITE_WS_URL)
+
 // API 配置
 export const API_CONFIG = {
-  BASE_URL: import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002',
-  WS_URL: import.meta.env.VITE_WS_URL || 'ws://0.0.0.0:50003/ws',
+  BASE_URL: ENV_API_URL || buildDefaultApiUrl(),
+  WS_URL: ENV_WS_URL || buildDefaultWsUrl(),
   TIMEOUT: 30000,
 } as const
 

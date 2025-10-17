@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { Agent, ChatSession, Message, UserSettings, CrystalStructure } from '../types'
 import { forceSaveState, validateSessionData } from '../utils/storage'
+import { API_CONFIG } from '../constants'
 
 // 声子谱图片接口
 export interface PhononImage {
@@ -102,7 +103,7 @@ const defaultSettings: UserSettings = {
   defaultAgent: 'deep_research_agent',
   autoSave: true,
   notifications: true,
-  apiEndpoint: import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002',
+  apiEndpoint: API_CONFIG.BASE_URL,
 }
 
 const defaultAgents: Agent[] = [

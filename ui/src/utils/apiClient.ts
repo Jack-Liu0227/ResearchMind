@@ -4,8 +4,9 @@
  */
 
 import { CrystalStructure } from '../types';
+import { API_CONFIG } from '../constants';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002';
+const API_BASE_URL = API_CONFIG.BASE_URL;
 
 export interface APIStructureResponse {
   formula: string;

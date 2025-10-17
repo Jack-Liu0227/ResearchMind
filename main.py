@@ -108,12 +108,14 @@ async def main():
     logger.info("=" * 60)
     logger.info("")
     
-    # Run both servers concurrently
+    # Run both servers concurrently with proper error handling
     try:
-        await asyncio.gather(
-            websocket_server.start(),
-            start_http_server(http_server)
-        )
+        # Create tasks for both servers
+        http_task = asyncio.create_task(start_http_server(http_server))
+        ws_task = asyncio.create_task(websocket_server.start())
+
+        # Wait for both tasks
+        await asyncio.gather(http_task, ws_task)
     except KeyboardInterrupt:
         logger.info("")
         logger.info("=" * 60)

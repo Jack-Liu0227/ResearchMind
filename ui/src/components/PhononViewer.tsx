@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getPhononResults } from '../utils/apiClient';
+import { API_CONFIG } from '../constants';
 
 interface PhononViewerProps {
   composition?: string;  // 化学式,用于过滤
@@ -47,8 +48,7 @@ export const PhononViewer: React.FC<PhononViewerProps> = ({ composition, classNa
 
   const getImageUrl = (filename: string): string => {
     // 直接返回URL而不是Promise
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002';
-    return `${API_BASE_URL}/api/images/phonon_results/${filename}`;
+    return `${API_CONFIG.BASE_URL}/api/images/phonon_results/${filename}`;
   };
 
   const handleImageLoad = () => {

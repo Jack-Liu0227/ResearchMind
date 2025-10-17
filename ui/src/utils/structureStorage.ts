@@ -3,7 +3,9 @@
  * 用于保存和检索晶体结构数据
  */
 
-const API_BASE_URL = 'http://0.0.0.0:50002';
+import { API_CONFIG } from '../constants'
+
+const API_BASE_URL = API_CONFIG.BASE_URL;
 
 export interface StructureStorageResponse {
   success: boolean;

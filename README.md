@@ -1,355 +1,162 @@
-# ResearchMind
+# ResearchMind 一键启动
 
-> 智能材料科学研究助手系统 - 基于 Google ADK 和 MCP 的多 Agent 协作平台
+## 🚀 快速启动
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Google ADK](https://img.shields.io/badge/Google-ADK-4285F4.svg)](https://github.com/google/adk)
-[![FastMCP](https://img.shields.io/badge/FastMCP-MCP-green.svg)](https://github.com/jlowin/fastmcp)
+### 完整启动脚本（推荐）
 
-## 📖 项目简介
+#### Windows PowerShell
+```powershell
+# 基本启动
+.\start_complete.ps1
 
-**ResearchMind** 是一个基于 Google ADK 和 MCP (Model Context Protocol) 的智能材料科学研究助手系统。它通过协调多个专业 AI Agent 和 MCP Server，为材料科学研究人员提供从文献调研、数据库检索到仿真计算的一站式研究解决方案。
+# 指定IP地址
+.\start_complete.ps1 -IP "192.168.1.100"
 
-**详细介绍**: [INTRO.md](./INTRO.md)
-
-## ✨ 核心特性
-
-### 🔬 全流程研究支持
-- **文献调研**：多源检索（ArXiv + Tavily）、智能分析、报告生成
-- **数据库检索**：查询多个材料数据库（Materials Project, OQMD, COD, AFLOW）
-- **仿真计算**：晶体结构生成、热导率计算、能量属性预测、声子谱计算
-
-### 🤖 智能多 Agent 协作
-- **Deep Research Agent**：专注于学术文献检索和分析（17 个工具）
-- **Database Agent**：专注于材料数据库查询和结构获取（8 个工具）
-- **Simulation Agent**：专注于计算模拟和性能预测（8 个工具）
-
-### 🔌 模块化 MCP 架构
-- **Paper Search MCP Server**：提供文献检索和分析工具
-- **Database MCP Server**：提供多数据库查询和结构获取工具
-- **Simulation MCP Server**：提供结构生成、弛豫、声子谱、热导率、能量计算工具
-
-### 💾 持久化向量存储
-- 支持将论文全文向量化存储到 ChromaDB
-- 支持基于向量相似度的语义搜索
-- 支持长期追问和知识积累
-
-## 🏗️ 系统架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    User Interface (UI)                      │
-│                  (React + TypeScript + Vite)                │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Google ADK Agents                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │Deep Research │  │   Database   │  │  Simulation  │     │
-│  │    Agent     │  │    Agent     │  │    Agent     │     │
-│  │  (17 tools)  │  │  (8 tools)   │  │  (8 tools)   │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼ (SSE Transport)
-┌─────────────────────────────────────────────────────────────┐
-│                    MCP Servers (FastMCP)                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │Paper Search  │  │Materials DB  │  │  Simulation  │     │
-│  │ MCP Server   │  │  MCP Server  │  │  MCP Server  │     │
-│  │              │  │              │  │              │     │
-│  │Port: 50001   │  │Port: 5002    │  │Port: 5003    │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│              External Services & Models                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │ArXiv + Tavily│  │MP+OQMD+COD   │  │CrystaLLM     │     │
-│  │              │  │+AFLOW        │  │+AI4Kappa     │     │
-│  │              │  │              │  │+MatterSim    │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└─────────────────────────────────────────────────────────────┘
+# 强制重启服务
+.\start_complete.ps1 -Force
 ```
 
-## 🚀 快速开始
+#### Linux/Mac
+```bash
+# 基本启动
+./start_complete.sh
 
-### 方式一: Docker 部署 (推荐用于生产环境)
+# 指定IP地址
+./start_complete.sh --ip "192.168.1.100"
 
-**前置要求:**
-- Docker 20.10+ 和 Docker Compose 2.0+
-- Google API Key (必需)
+# 强制重启服务
+./start_complete.sh --force
+```
 
-**一键启动:**
+#### Windows Git Bash（推荐）
+```bash
+# 基本启动
+./start_windows.sh
 
+# 指定IP地址
+./start_windows.sh --ip "192.168.1.100"
+
+# 强制重启服务
+./start_windows.sh --force
+```
+
+### 简单启动脚本
+
+#### Linux/Mac/Git Bash
+```bash
+./start.sh
+```
+
+#### Windows PowerShell
+```powershell
+.\start.ps1
+```
+
+## 📋 系统要求
+
+- Python 3.10+
+- Node.js 18+
+- uv (Python包管理器)
+
+### 安装uv
 ```bash
 # Linux/Mac
-chmod +x docker-start.sh
-./docker-start.sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Windows PowerShell
-.\docker-start.ps1
+irm https://astral.sh/uv/install.ps1 | iex
 ```
 
-**手动启动:**
+## 🌐 访问地址
 
+启动后可通过以下地址访问：
+
+- **前端界面**: `http://localhost:50001`
+- **外部访问**: `http://your-ip:50001`
+- **API文档**: `http://your-ip:50002/docs`
+
+## 🔧 配置
+
+脚本会自动创建基本的 `.env` 配置文件，包含正确的网络配置：
+
+### 重要的网络配置
+- **前端UI**: 必须使用 `0.0.0.0` 才能支持外部访问
+- **后端API**: 使用 `0.0.0.0` 支持外部访问  
+- **MCP服务**: 使用 `localhost` 作为内部服务
+
+### API密钥配置
+请在 `.env` 文件中填写您的API密钥：
+```env
+GOOGLE_API_KEY=your_google_api_key
+DEEPSEEK_API_KEY=your_deepseek_api_key
+TAVILY_API_KEY=your_tavily_api_key
+MP_API_KEY=your_materials_project_api_key
+```
+
+### 自动生成的配置示例
+```env
+# 前端配置 - UI必须使用 0.0.0.0 才能外部访问
+VITE_FRONTEND_HOST=0.0.0.0
+VITE_API_URL=http://your-ip:50002
+VITE_WS_URL=ws://your-ip:50003/ws
+
+# 后端服务 - 需要外部访问
+RESEARCHMIND_HOST=0.0.0.0
+
+# MCP 服务器配置 - 内部服务使用 localhost
+PAPER_SEARCH_HOST=localhost
+DATABASE_HOST=localhost  
+SIMULATION_HOST=localhost
+```
+
+## 🛑 停止服务
+
+按 `Ctrl+C` 停止所有服务，或使用：
 ```bash
-# 1. 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，填入你的 API 密钥
-
-# 2. 启动所有服务
-docker-compose up -d
-
-# 3. 查看服务状态
-docker-compose ps
-
-# 4. 查看日志
-docker-compose logs -f
+./stop_all.sh
 ```
 
-**访问地址:**
-- 前端 UI: http://localhost
-- API 文档: http://localhost:8000/docs
-- WebSocket: ws://localhost:8000/ws
+## ✨ 完整启动脚本特性
 
-**详细文档:** 查看 [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md)
+### 🔧 自动化功能
+- ✅ **环境检查** - 自动检测uv、npm、Python等依赖
+- ✅ **IP地址检测** - 自动获取本机IP地址
+- ✅ **端口冲突处理** - 检测并处理端口占用
+- ✅ **配置文件生成** - 自动创建正确的.env配置
+- ✅ **服务健康检查** - 验证服务启动状态
+- ✅ **防火墙配置** - 自动添加防火墙规则（Linux）
+- ✅ **服务监控** - 实时监控服务运行状态
 
----
+### 🎯 智能特性
+- 🔄 **强制重启** - 自动停止现有服务并重启
+- 🌐 **外部访问** - 正确配置外部IP访问
+- 📊 **状态显示** - 清晰显示所有服务状态和访问地址
+- 🚀 **一键启动** - 无需手动配置，一键完成所有设置
 
-### 方式二: 本地开发部署
+## 📝 日志文件
 
-**前置要求:**
-- Python 3.11+
-- UV (Python 包管理工具)
-- Node.js 18+ (用于 UI)
-- Google API Key (用于 Gemini 2.0 Flash)
-- Tavily API Key (可选，用于网页搜索)
+- `logs/backend.log` - 后端服务日志
+- `logs/database.log` - 数据库服务日志
+- `logs/paper_search.log` - 论文搜索服务日志
+- `logs/simulation.log` - 仿真服务日志
+- `logs/frontend.log` - 前端服务日志
 
-**安装依赖:**
+## 🔧 故障排除
 
-```bash
-# 安装 Python 依赖
-uv sync
-
-# 安装 UI 依赖
-cd ui
-npm install
-cd ..
-```
-
-**配置环境变量:**
-
-创建 `.env` 文件：
-
-```bash
-# Google API Key
-GOOGLE_API_KEY=your_google_api_key_here
-
-# Tavily API Key (可选)
-TAVILY_API_KEY=your_tavily_api_key_here
-
-# Materials Project API Key (可选)
-MP_API_KEY=your_mp_api_key_here
-```
-
-**🎯 一键启动 (推荐):**
-
-**Windows PowerShell:**
+### 端口被占用
 ```powershell
-# 启动所有服务器 (MCP + 统一服务器)
-.\start_all.ps1
+# Windows
+.\start_complete.ps1 -Force
 
-# 停止所有服务器
-.\stop_all.ps1
+# Linux/Mac
+./start_complete.sh --force
 ```
 
-**手动启动 (需要 4 个终端):**
-
-**重要**: 必须先启动所有 MCP Servers，否则主服务器会报连接错误！
-
-```bash
-# 终端 1: Paper Search MCP Server (端口 50001)
-uv run python mcp_servers/paper_search/server.py
-
-# 终端 2: Database MCP Server (端口 5002)
-uv run python mcp_servers/database_call/server.py
-
-# 终端 3: Simulation MCP Server (端口 5003)
-uv run python mcp_servers/simulation/server.py
+### IP地址配置错误
+```powershell
+# 修复环境配置
+.\fix_env.ps1
 ```
 
-等待所有服务器显示 "Starting ... MCP Server in SSE mode" 后再继续！
-
-**启动统一服务器 (WebSocket + HTTP):**
-
-```bash
-# 终端 4: 统一服务器 (端口 8000)
-uv run python main.py
-```
-
-**服务端点:**
-- WebSocket: `ws://localhost:8000`
-- HTTP API: `http://localhost:8000`
-- API 文档: `http://localhost:8000/docs`
-
-**启动前端 UI:**
-
-```bash
-# 新终端
-cd ui
-npm run dev
-```
-
-访问 `http://localhost:5173` 即可使用。
-
-## 📚 使用示例
-
-### 示例 1：完整研究流程
-
-```
-用户："研究 GaN 的热导率"
-
-1. Deep Research Agent: 搜索 GaN 热导率相关文献 → 生成文献综述
-2. Database Agent: 查询 GaN 结构 → 获取 CIF 文件
-3. Simulation Agent: 弛豫结构 → 计算热导率 → 计算能量属性
-4. 整合结果: 文献背景 + 结构信息 + 计算结果
-```
-
-### 示例 2：文献调研
-
-```
-用户："搜索量子计算相关的论文并生成报告"
-
-1. 规划搜索词
-2. 综合检索（ArXiv + Tavily）
-3. 批量分析论文
-4. 生成研究报告
-5. 向量化存储（可选）
-```
-
-### 示例 3：材料计算
-
-```
-用户："生成 GaN 结构并计算声子谱"
-
-1. 生成 GaN 晶体结构
-2. 结构弛豫（必须）
-3. 计算声子谱
-4. 展示声子色散图和态密度
-```
-
-## 📁 项目结构
-
-```
-ResearchMind/
-├── agents/                      # AI Agents
-│   ├── deep_research/          # 文献研究 Agent
-│   │   ├── agent.py            # Agent 实现
-│   │   ├── prompts.py          # 提示词
-│   │   ├── README.md           # 文档
-│   │   └── ARCHITECTURE.md     # 架构说明
-│   ├── database_agent/         # 数据库检索 Agent
-│   │   ├── agent.py
-│   │   ├── README.md
-│   │   └── ARCHITECTURE.md
-│   └── simulation_agent/       # 仿真计算 Agent
-│       ├── agent.py
-│       ├── prompts.py
-│       ├── README.md
-│       └── ARCHITECTURE.md
-├── mcp_servers/                # MCP Servers
-│   ├── paper_search/           # 文献检索 Server (14 tools)
-│   │   ├── server.py
-│   │   ├── modules/            # 功能模块
-│   │   ├── README.md
-│   │   └── ARCHITECTURE.md
-│   ├── database_call/          # 数据库查询 Server (8 tools)
-│   │   ├── server.py
-│   │   ├── README.md
-│   │   └── ARCHITECTURE.md
-│   └── simulation/             # 仿真计算 Server (8 tools)
-│       ├── server.py
-│       ├── modules/            # 功能模块
-│       ├── crystallm/          # CrystaLLM 模块
-│       ├── kappa_lib/          # AI4Kappa 模块
-│       ├── README.md
-│       └── ARCHITECTURE.md
-├── ui/                         # Web UI (React + TypeScript)
-│   ├── src/
-│   ├── package.json
-│   └── README.md
-├── README.md                   # 项目文档（本文件）
-├── INTRO.md                    # 项目简介
-└── pyproject.toml              # Python 项目配置
-```
-
-## 🛠️ 技术栈
-
-### 核心框架
-- **Google ADK (Agent Development Kit)**: AI Agent 开发框架
-- **FastMCP**: MCP Server 开发框架
-- **SSE (Server-Sent Events)**: Agent 与 Server 通信协议
-
-### AI 模型
-- **Gemini 2.0 Flash**: Google 最新的多模态大语言模型
-- **CrystaLLM**: 晶体结构生成模型
-- **AI4Kappa**: 热导率计算模型（Kappa-P/Kappa-MTP）
-- **MatterSim**: 能量属性和声子谱计算模型
-
-### 数据库
-- **ChromaDB**: 向量数据库，用于论文全文存储和语义搜索
-- **Materials Project**: 材料数据库
-- **OQMD**: 开放量子材料数据库
-- **COD**: 晶体学开放数据库
-- **AFLOW**: 自动流程材料数据库
-
-### 搜索引擎
-- **ArXiv API**: 学术预印本搜索
-- **Tavily API**: 学术和网页搜索
-
-### 开发工具
-- **UV**: Python 包管理工具
-- **Structlog**: 结构化日志
-- **Uvicorn**: ASGI 服务器
-- **React + TypeScript**: UI 开发
-- **Vite**: 前端构建工具
-
-## 📖 文档
-
-### 架构文档
-- **系统架构**: [ARCHITECTURE.md](./ARCHITECTURE.md) - 完整系统架构详解
-- **Agents 架构**: [agents/ARCHITECTURE.md](./agents/ARCHITECTURE.md)
-- **Services 架构**: [services/ARCHITECTURE.md](./services/ARCHITECTURE.md)
-- **UI 架构**: [ui/ARCHITECTURE.md](./ui/ARCHITECTURE.md)
-
-### 使用文档
-- **项目简介**: [INTRO.md](./INTRO.md)
-- **Agents 文档**: [agents/README.md](./agents/README.md)
-- **Services 文档**: [services/README.md](./services/README.md)
-- **UI 文档**: [ui/README.md](./ui/README.md)
-
-### Agent 文档
-- **Deep Research Agent**: [agents/deep_research/README.md](./agents/deep_research/README.md)
-- **Database Agent**: [agents/database_agent/README.md](./agents/database_agent/README.md)
-- **Simulation Agent**: [agents/simulation_agent/README.md](./agents/simulation_agent/README.md)
-
-### MCP Server 文档
-- **Paper Search Server**: [mcp_servers/paper_search/README.md](./mcp_servers/paper_search/README.md)
-- **Database Server**: [mcp_servers/database_call/README.md](./mcp_servers/database_call/README.md)
-- **Simulation Server**: [mcp_servers/simulation/README.md](./mcp_servers/simulation/README.md)
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 📄 许可证
-
-MIT License
-
-## 📧 联系方式
-
-如有问题或建议，请提交 Issue 或 Pull Request。
+### 服务启动失败
+检查对应的日志文件，查看具体错误信息。

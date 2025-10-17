@@ -387,7 +387,15 @@ async def search_papers(
             file_path = file_path[len('mcp_servers/paper_search/'):]
         elif file_path.startswith('paper_search/'):
             file_path = file_path[len('paper_search/'):]
-        api_base_url = os.getenv("VITE_API_URL", "http://0.0.0.0:50002")
+        # 获取 API 基础 URL（支持动态配置）
+        api_base_url = os.getenv("VITE_API_URL") or os.getenv("RESEARCHMIND_API_URL")
+        if not api_base_url:
+            http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
+            http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+            if http_host == "0.0.0.0":
+                http_host = "127.0.0.1"
+            api_base_url = f"http://{http_host}:{http_port}"
+
         download_url = f"{api_base_url}/api/download/{file_path}"
         final_result['csv_download_url'] = download_url
         final_result['csv_file_path'] = csv_result['file_path']  # 保留原始路径用于调试
@@ -861,7 +869,14 @@ async def batch_paper_analysis(
                 file_path = file_path[len('mcp_servers/paper_search/'):]
             elif file_path.startswith('paper_search/'):
                 file_path = file_path[len('paper_search/'):]
-            api_base_url = os.getenv("VITE_API_URL", "http://0.0.0.0:50002")
+            # 获取 API 基础 URL（支持动态配置）
+            api_base_url = os.getenv("VITE_API_URL") or os.getenv("RESEARCHMIND_API_URL")
+            if not api_base_url:
+                http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
+                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                if http_host == "0.0.0.0":
+                    http_host = "127.0.0.1"
+                api_base_url = f"http://{http_host}:{http_port}"
             result['md_download_url'] = f"{api_base_url}/api/download/{file_path}"
 
         # 保存分析结果到 CSV 文件（包含中文摘要和关键信息）
@@ -881,7 +896,14 @@ async def batch_paper_analysis(
                 file_path = file_path[len('mcp_servers/paper_search/'):]
             elif file_path.startswith('paper_search/'):
                 file_path = file_path[len('paper_search/'):]
-            api_base_url = os.getenv("VITE_API_URL", "http://0.0.0.0:50002")
+            # 获取 API 基础 URL（支持动态配置）
+            api_base_url = os.getenv("VITE_API_URL") or os.getenv("RESEARCHMIND_API_URL")
+            if not api_base_url:
+                http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
+                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                if http_host == "0.0.0.0":
+                    http_host = "127.0.0.1"
+                api_base_url = f"http://{http_host}:{http_port}"
             result['csv_download_url'] = f"{api_base_url}/api/download/{file_path}"
 
         # 简化results字段,只保留重要信息
@@ -1124,7 +1146,14 @@ async def generate_research_report(
                     file_path = file_path[len('mcp_servers/paper_search/'):]
                 elif file_path.startswith('paper_search/'):
                     file_path = file_path[len('paper_search/'):]
-                api_base_url = os.getenv("VITE_API_URL", "http://0.0.0.0:50002")
+                # 获取 API 基础 URL（支持动态配置）
+                api_base_url = os.getenv("VITE_API_URL") or os.getenv("RESEARCHMIND_API_URL")
+                if not api_base_url:
+                    http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
+                    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                    if http_host == "0.0.0.0":
+                        http_host = "127.0.0.1"
+                    api_base_url = f"http://{http_host}:{http_port}"
                 result['md_download_url'] = f"{api_base_url}/api/download/{file_path}"
 
             # 保存论文信息到 CSV 文件（使用专门的报告论文保存函数）
@@ -1149,7 +1178,14 @@ async def generate_research_report(
                     
                     # 使用全局导入的os模块
                     import os as os_module
-                    api_base_url = os_module.getenv("VITE_API_URL", "http://0.0.0.0:50002")
+                    # 获取 API 基础 URL（支持动态配置）
+                    api_base_url = os_module.getenv("VITE_API_URL") or os_module.getenv("RESEARCHMIND_API_URL")
+                    if not api_base_url:
+                        http_host = os_module.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
+                        http_port = os_module.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                        if http_host == "0.0.0.0":
+                            http_host = "127.0.0.1"
+                        api_base_url = f"http://{http_host}:{http_port}"
                     result['csv_download_url'] = f"{api_base_url}/api/download/{file_path}"
                     logger.info(f"✅ CSV file saved and download URL generated: {result['csv_download_url']}")
                 else:
@@ -1379,10 +1415,10 @@ if __name__ == "__main__":
     # Run in SSE mode
     import uvicorn
     # Get configuration from environment
-    host = "0.0.0.0"  # Always bind to all interfaces
+    host = os.getenv("PAPER_SEARCH_MCP_HOST", "0.0.0.0")  # Bind to all interfaces by default
     port = int(os.getenv("PAPER_SEARCH_MCP_PORT", "50004"))
     external_url = os.getenv("PAPER_SEARCH_MCP_URL", f"http://0.0.0.0:{port}/sse")
-    
+
     logger.info(f"🚀 Starting Paper Search MCP Server in SSE mode on http://{host}:{port}")
     logger.info("📡 Using SSE transport")
     logger.info(f"📡 External URL: {external_url}")

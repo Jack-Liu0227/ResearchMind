@@ -13,12 +13,12 @@ class ServerConfig:
     """Server configuration"""
 
     # WebSocket Server
-    WEBSOCKET_HOST = os.getenv("RESEARCHMIND_HOST", "0.0.0.0")
-    WEBSOCKET_PORT = int(os.getenv("RESEARCHMIND_WS_PORT", os.getenv("RESEARCHMIND_PORT", "50002")))
+    WEBSOCKET_HOST = os.getenv("RESEARCHMIND_WS_HOST", os.getenv("RESEARCHMIND_HOST", "0.0.0.0"))
+    WEBSOCKET_PORT = int(os.getenv("RESEARCHMIND_WS_PORT", "50003"))
 
     # HTTP API Server
-    HTTP_HOST = os.getenv("RESEARCHMIND_HOST", "0.0.0.0")
-    HTTP_PORT = int(os.getenv("RESEARCHMIND_HTTP_PORT", os.getenv("RESEARCHMIND_PORT", "50002")))
+    HTTP_HOST = os.getenv("RESEARCHMIND_HTTP_HOST", os.getenv("RESEARCHMIND_HOST", "0.0.0.0"))
+    HTTP_PORT = int(os.getenv("RESEARCHMIND_HTTP_PORT", "50002"))
 
     # Debug: Print configuration on load
     @classmethod
@@ -34,16 +34,33 @@ class ServerConfig:
         print(f"   - WEBSOCKET_HOST: {cls.WEBSOCKET_HOST}")
         print(f"   - WEBSOCKET_PORT: {cls.WEBSOCKET_PORT}")
     
-    # CORS Settings
-    CORS_ORIGINS = [
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-        "http://0.0.0.0:3000",
-        "http://0.0.0.0:5173",
-        "*",  # Allow all origins for development
-    ]
+    # CORS Settings - Support dynamic configuration
+    @staticmethod
+    def get_cors_origins():
+        """Get CORS origins from environment or use defaults"""
+        cors_env = os.getenv("RESEARCHMIND_ALLOW_ORIGINS")
+        if cors_env:
+            try:
+                import json
+                return json.loads(cors_env)
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Default CORS origins
+        return [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:50001",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:50001",
+            "http://0.0.0.0:3000",
+            "http://0.0.0.0:5173",
+            "http://0.0.0.0:50001",
+            "*",  # Allow all origins for development
+        ]
+
+    CORS_ORIGINS = get_cors_origins()
     
     # Static Files
     STATIC_FILES_ROOT = os.path.abspath(os.path.dirname(__file__) + "/..")
@@ -86,26 +103,37 @@ class MCPConfig:
     """MCP Server configuration"""
 
     # Use environment variables for MCP server URLs (for Docker support)
-    # 注意：客户端连接默认使用 127.0.0.1，服务器监听使用 0.0.0.0
+    # 注意：
+    # - 服务器监听使用 *_MCP_HOST 和 *_MCP_PORT
+    # - 客户端连接使用 *_HOST 和 *_MCP_URL（支持分布式部署）
+
+    # Paper Search MCP
     PAPER_SEARCH_HOST = os.getenv("PAPER_SEARCH_HOST", "127.0.0.1")
+    PAPER_SEARCH_URL = os.getenv("PAPER_SEARCH_MCP_URL", "http://127.0.0.1:50004/sse")
+
+    # Database MCP
     DATABASE_HOST = os.getenv("DATABASE_HOST", "127.0.0.1")
+    DATABASE_URL = os.getenv("DATABASE_MCP_URL", "http://127.0.0.1:50006/sse")
+
+    # Simulation MCP
     SIMULATION_HOST = os.getenv("SIMULATION_HOST", "127.0.0.1")
+    SIMULATION_URL = os.getenv("SIMULATION_MCP_URL", "http://127.0.0.1:50005/sse")
 
     SERVERS = {
         "paper_search": {
             "name": "Paper Search MCP",
-            "url": f"http://{PAPER_SEARCH_HOST}:50005/sse",
-            "port": 50005,
+            "url": PAPER_SEARCH_URL,
+            "port": 50004,
         },
         "database": {
             "name": "Database MCP",
-            "url": f"http://{DATABASE_HOST}:50003/sse",
-            "port": 50003,
+            "url": DATABASE_URL,
+            "port": 50006,
         },
         "simulation": {
             "name": "Simulation MCP",
-            "url": f"http://{SIMULATION_HOST}:50004/sse",
-            "port": 50004,
+            "url": SIMULATION_URL,
+            "port": 50005,
         },
     }
 

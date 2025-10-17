@@ -47,7 +47,7 @@ const ChatPage: React.FC = () => {
       } catch (error) {
         console.error('❌ WebSocket 连接失败:', error)
         setConnected(false)
-        toast.error('连接服务器失败，请确保后端服务器正在运行 (端口 8002)')
+        toast.error('连接服务器失败，请确保后端服务器正在运行 (端口 50003)')
       }
     }
 

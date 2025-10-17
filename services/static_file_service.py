@@ -18,8 +18,21 @@ logger = logging.getLogger(__name__)
 
 
 def get_api_base_url() -> str:
-    """Get API base URL from environment variable"""
-    return os.getenv('VITE_API_URL', f'http://{server_config.HTTP_HOST}:{server_config.HTTP_PORT}')
+    """Get API base URL from environment variable or construct from config"""
+    # Try to get from environment first
+    api_url = os.getenv('VITE_API_URL')
+    if api_url:
+        return api_url
+
+    # Fallback: construct from host and port
+    http_host = server_config.HTTP_HOST
+    http_port = server_config.HTTP_PORT
+
+    # If host is 0.0.0.0, use 127.0.0.1 for local connections
+    if http_host == "0.0.0.0":
+        http_host = "127.0.0.1"
+
+    return f'http://{http_host}:{http_port}'
 
 
 class StaticFileService:

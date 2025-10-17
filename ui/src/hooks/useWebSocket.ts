@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { WebSocketMessage } from '../types'
+import { API_CONFIG } from '../constants'
 
 interface UseWebSocketOptions {
   url?: string
@@ -14,7 +15,7 @@ interface UseWebSocketOptions {
 
 export function useWebSocket(options: UseWebSocketOptions = {}) {
   const {
-    url = import.meta.env.VITE_WS_URL || 'ws://0.0.0.0:50003/ws',
+    url = API_CONFIG.WS_URL,
     onMessage,
     onConnect,
     onDisconnect,

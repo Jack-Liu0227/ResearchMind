@@ -1,10 +1,9 @@
 import axios from 'axios'
 import { ApiResponse } from '../types'
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002'
+import { API_CONFIG } from '../constants'
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: API_CONFIG.BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',

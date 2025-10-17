@@ -11,14 +11,19 @@ export default defineConfig({
     },
   },
   server: {
-    port: 50001,
-    host: '0.0.0.0',
-    strictPort: false,
-    open: true,
+    port: parseInt(process.env.VITE_FRONTEND_PORT || '50001'),
+    host: process.env.VITE_FRONTEND_HOST || '0.0.0.0',
+    strictPort: true,
+    open: false, // 改为false，避免自动打开浏览器
     cors: true,
+    allowedHosts: ['all'],
     hmr: {
       overlay: true,
       timeout: 30000,
+      // 支持跨主机访问时的 HMR 配置
+      host: process.env.VITE_HMR_HOST || 'localhost',
+      port: parseInt(process.env.VITE_HMR_PORT || process.env.VITE_FRONTEND_PORT || '50001'),
+      protocol: process.env.VITE_HMR_PROTOCOL || 'ws',
     },
     watch: {
       usePolling: true,

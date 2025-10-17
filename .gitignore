@@ -184,6 +184,9 @@ data/external/
 *.csv
 *.tsv
 *.json
+!package.json
+!tsconfig.json
+!*config*.json
 *.jsonl
 *.parquet
 *.feather

@@ -13,6 +13,7 @@ import { useAppStore } from '../store/useAppStore'
 import { hasStructureData, smartParseStructure } from '../utils/structureParser'
 import { CrystalStructure } from '../types'
 import { CsvViewer, MarkdownViewer } from './FileViewer'
+import { API_CONFIG } from '../constants'
 
 /**
  * 从文本中提取多个 CIF 块
@@ -82,7 +83,7 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
   }
 
   // 从文本中提取URL（备用方案）
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://0.0.0.0:50002'
+  const apiUrl = API_CONFIG.BASE_URL
   const urlRegex = new RegExp(`${apiUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/api\\/download\\/[^\\s)]+\\.(csv|md)`, 'g')
   let match
   while ((match = urlRegex.exec(content)) !== null) {
