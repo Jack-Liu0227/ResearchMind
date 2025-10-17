@@ -135,11 +135,11 @@ log_info "\n启动后端服务..."
 log_info "WebSocket 服务 (端口 50003)"
 log_info "HTTP API 服务 (端口 50002)"
 
-# uv run python main.py > logs/backend.log 2>&1 &
-# BACKEND_PID=$!
-# echo $BACKEND_PID >> .service_pids
-# sleep 3
-# log_success "✓ 后端服务已启动 (PID: $BACKEND_PID)"
+uv run python main.py > logs/backend.log 2>&1 &
+BACKEND_PID=$!
+echo $BACKEND_PID >> .service_pids
+sleep 3
+log_success "✓ 后端服务已启动 (PID: $BACKEND_PID)"
 
 # ============================================
 # 启动前端服务
