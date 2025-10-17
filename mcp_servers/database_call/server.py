@@ -684,18 +684,9 @@ async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
                 species_list = []
 
             # 获取每个原子的类型
-            composition_list = []
-            try:
-                composition_attr = getattr(entry, 'composition', None)
-                if composition_attr is not None:
-                    # composition 可能包含每个原子的元素类型
-                    if hasattr(composition_attr, 'tolist'):
-                        composition_list = composition_attr.tolist()
-                    elif isinstance(composition_attr, (list, tuple)):
-                        composition_list = list(composition_attr)
-            except Exception as e:
-                logger.debug(f"Failed to parse composition: {e}")
-                composition_list = []
+            # 注意：AFLOW 的 composition 字段是数量数组 [1, 1]，不是元素名称
+            # 我们需要使用 species 字段来获取元素名称
+            composition_list = []  # 不使用 composition 字段
 
             # 生成 CIF 内容
             cif_text = None
@@ -711,6 +702,13 @@ async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
                 try:
                     from pymatgen.core import Structure, Lattice
                     
+                    compound = getattr(entry, 'compound', '')
+                    natoms = len(positions)
+                    
+                    logger.info(f"Processing AFLOW entry: {compound}, natoms={natoms}, positions={len(positions)}")
+                    logger.info(f"  composition_list: {composition_list}")
+                    logger.info(f"  species_list: {species_list}")
+                    
                     # 创建晶格
                     lattice = Lattice.from_parameters(
                         a=float(lattice_params[0]),
@@ -722,23 +720,58 @@ async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
                     )
                     
                     # AFLOW positions_fractional 格式: [[x1,y1,z1], [x2,y2,z2], ...]
-                    # 需要从 composition 或其他字段获取元素类型
+                    # 需要从 species 和 composition 字段获取元素类型
                     species = []
                     coords = []
                     
-                    # 尝试从 composition 获取元素列表
-                    if composition_list and len(composition_list) == len(positions):
-                        for i, pos in enumerate(positions):
-                            if len(pos) >= 3:
-                                species.append(composition_list[i])
-                                coords.append([float(pos[0]), float(pos[1]), float(pos[2])])
-                    # 如果没有 composition，尝试从 compound 解析
-                    elif species_list:
-                        # 简单分配：假设元素按顺序重复
-                        compound = getattr(entry, 'compound', '')
-                        natoms = len(positions)
+                    # 方法1：使用 AFLOW 的 species 和 composition 字段
+                    # species = ['Cl', 'Na'], composition = [1, 1]
+                    # 这意味着有 1 个 Cl 原子和 1 个 Na 原子
+                    if species_list:
+                        logger.info(f"  Using AFLOW species field: {species_list}")
                         
-                        # 从 compound 解析元素和数量，例如 "Na1Cl1" -> ["Na", "Cl"]
+                        # 获取 composition 数量
+                        try:
+                            composition_attr = getattr(entry, 'composition', None)
+                            if composition_attr is not None:
+                                if hasattr(composition_attr, 'tolist'):
+                                    composition_counts = composition_attr.tolist()
+                                elif isinstance(composition_attr, (list, tuple)):
+                                    composition_counts = list(composition_attr)
+                                else:
+                                    composition_counts = []
+                                
+                                logger.info(f"  Composition counts: {composition_counts}")
+                                
+                                # 根据 composition 扩展 species
+                                if len(species_list) == len(composition_counts):
+                                    element_sequence = []
+                                    for elem, count in zip(species_list, composition_counts):
+                                        element_sequence.extend([elem] * int(count))
+                                    
+                                    logger.info(f"  Expanded element_sequence: {element_sequence} (len={len(element_sequence)})")
+                                    
+                                    if len(element_sequence) == natoms:
+                                        for i, pos in enumerate(positions):
+                                            if len(pos) >= 3:
+                                                species.append(element_sequence[i])
+                                                coords.append([float(pos[0]), float(pos[1]), float(pos[2])])
+                                    else:
+                                        logger.warning(f"  Element sequence length mismatch: {len(element_sequence)} != {natoms}")
+                                        # 回退到方法2
+                                        species = []
+                                        coords = []
+                                else:
+                                    logger.warning(f"  Species/composition length mismatch: {len(species_list)} != {len(composition_counts)}")
+                                    # 回退到方法2
+                        except Exception as e:
+                            logger.warning(f"  Failed to use species/composition: {e}")
+                            # 回退到方法2
+                    
+                    # 方法2：如果方法1失败，从 compound 解析
+                    if not species:
+                        logger.info(f"  Parsing compound '{compound}' for species")
+                        # 从 compound 解析元素和数量，例如 "Cl1Na1" -> ["Cl", "Na"]
                         import re
                         elements_with_counts = re.findall(r'([A-Z][a-z]?)(\d*)', compound)
                         element_sequence = []
@@ -747,22 +780,42 @@ async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
                                 count = int(count) if count else 1
                                 element_sequence.extend([elem] * count)
                         
+                        logger.info(f"  Parsed element_sequence: {element_sequence} (len={len(element_sequence)})")
+                        
                         if len(element_sequence) == natoms:
                             for i, pos in enumerate(positions):
                                 if len(pos) >= 3:
                                     species.append(element_sequence[i])
                                     coords.append([float(pos[0]), float(pos[1]), float(pos[2])])
+                        else:
+                            logger.warning(f"  Element sequence length mismatch: {len(element_sequence)} != {natoms}")
+                    
+                    logger.info(f"  Final species: {species} (len={len(species)})")
+                    logger.info(f"  Final coords: {len(coords)} positions")
                     
                     if species and coords and len(species) == len(coords):
                         # 创建结构
                         structure = Structure(lattice, species, coords)
+                        
+                        logger.info(f"  Created structure with composition: {structure.composition}")
+                        logger.info(f"  Structure formula: {structure.composition.formula}")
+                        logger.info(f"  Structure reduced formula: {structure.composition.reduced_formula}")
                         
                         # 生成 CIF
                         from pymatgen.io.cif import CifWriter
                         cif_writer = CifWriter(structure, symprec=0.1)
                         cif_text = str(cif_writer)
                         auid = getattr(entry, 'auid', 'unknown')
-                        logger.info(f"✓ Generated CIF for AFLOW entry {auid}")
+                        
+                        # 验证 CIF 内容是否正确
+                        cif_formula = structure.composition.reduced_formula
+                        if cif_formula not in cif_text:
+                            logger.error(f"  CIF VALIDATION FAILED! Expected {cif_formula} not found in CIF")
+                            logger.error(f"  CIF first 500 chars: {cif_text[:500]}")
+                            # 不使用错误的 CIF
+                            cif_text = None
+                        else:
+                            logger.info(f"✓ Generated valid CIF for AFLOW entry {auid} ({compound}), formula={cif_formula}")
                     else:
                         logger.warning(f"No valid species/coords for CIF generation (species={len(species)}, coords={len(coords)}, positions={len(positions)})")
                         
@@ -799,12 +852,25 @@ async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
             }
 
             # Create material record with CIF content
+            auid = getattr(entry, 'auid', 'N/A')
+            compound = getattr(entry, 'compound', 'N/A')
+            
+            # Log the final CIF status
+            if cif_text:
+                logger.info(f"CIF generated successfully for {compound} ({auid}), length={len(cif_text)}")
+                # Check if CIF contains the correct compound
+                if compound != 'N/A' and compound not in cif_text and 'H2' in cif_text:
+                    logger.error(f"CIF MISMATCH! Expected {compound} but CIF contains H2")
+                    cif_text = None  # Discard incorrect CIF
+            else:
+                logger.warning(f"No CIF generated for {compound} ({auid})")
+            
             material_record = {
-                "aflow_id": getattr(entry, 'auid', 'N/A'),
-                "compound": getattr(entry, 'compound', 'N/A'),
-                "material_id": getattr(entry, 'auid', 'N/A'),
-                "formula_pretty": getattr(entry, 'compound', 'N/A'),
-                "cifContent": cif_text  # Include generated CIF
+                "aflow_id": auid,
+                "compound": compound,
+                "material_id": auid,
+                "formula_pretty": compound,
+                "cifContent": cif_text  # Include generated CIF (or None if failed)
             }
             
             # Add complete structure info
