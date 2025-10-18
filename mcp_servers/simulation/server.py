@@ -26,12 +26,11 @@ else:
     print(f"WARNING: Environment file not found: {env_path}")
 
 # Get API URL from environment variable
-# Support both VITE_API_URL and direct configuration
-API_BASE_URL = os.getenv("VITE_API_URL") or os.getenv("RESEARCHMIND_API_URL")
+# 优先使用 VITE_API_URL（前端调用的API地址）
+API_BASE_URL = os.getenv("VITE_API_URL")
 if not API_BASE_URL:
-    # Fallback: construct from host and port
     http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
     # Use 127.0.0.1 if host is 0.0.0.0 (for local connections)
     if http_host == "0.0.0.0":
         http_host = "127.0.0.1"
@@ -953,14 +952,14 @@ if __name__ == "__main__":
     # Run in SSE mode
     import uvicorn
     # Get configuration from environment
-    host = os.getenv("SIMULATION_MCP_HOST", "0.0.0.0")  # Bind to all interfaces by default
+    host = os.getenv("SIMULATION_MCP_HOST", "127.0.0.1")  # Bind to localhost by default
     port = int(os.getenv("SIMULATION_MCP_PORT", "50005"))
-    external_url = os.getenv("SIMULATION_MCP_URL", f"http://0.0.0.0:{port}/sse")
+    external_url = os.getenv("SIMULATION_MCP_URL", f"http://127.0.0.1:{port}/sse")
 
-    logger.info(f"🚀 Starting Simulation MCP Server in SSE mode on http://{host}:{port}")
-    logger.info("📡 Using SSE transport")
-    logger.info(f"📡 External URL: {external_url}")
-    logger.info(f"📡 Internal Endpoint: http://{host}:{port}/sse")
+    logger.info(f"[START] Starting Simulation MCP Server in SSE mode on http://{host}:{port}")
+    logger.info("[INFO] Using SSE transport")
+    logger.info(f"[INFO] External URL: {external_url}")
+    logger.info(f"[INFO] Internal Endpoint: http://{host}:{port}/sse")
 
     # Create HTTP app
     http_app = app.http_app(transport="sse")

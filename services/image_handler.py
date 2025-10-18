@@ -18,14 +18,32 @@ logger = logging.getLogger(__name__)
 
 class ImageHandler:
     """Handle image data and URL generation"""
-    
+
     # Base URL for static files (will be set by server)
-    BASE_URL = os.getenv('VITE_API_URL', f"http://{server_config.HTTP_HOST}:{server_config.HTTP_PORT}")
-    
+    # 优先使用 VITE_API_URL（前端调用的API地址）
+    _vite_api_url = os.getenv("VITE_API_URL")
+    if _vite_api_url:
+        BASE_URL = _vite_api_url
+    else:
+        _default_host = os.getenv("RESEARCHMIND_HTTP_HOST", server_config.HTTP_HOST)
+        _default_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
+        if _default_host == "0.0.0.0":
+            _default_host = "127.0.0.1"
+        BASE_URL = f"http://{_default_host}:{_default_port}"
+
     @staticmethod
     def set_base_url(host: str, port: int):
         """Set base URL for image access"""
-        ImageHandler.BASE_URL = os.getenv('VITE_API_URL', f"http://{host}:{port}")
+        # 优先使用 VITE_API_URL（前端调用的API地址）
+        vite_api_url = os.getenv("VITE_API_URL")
+        if vite_api_url:
+            ImageHandler.BASE_URL = vite_api_url
+        else:
+            http_host = os.getenv("RESEARCHMIND_HTTP_HOST", host)
+            http_port = os.getenv("RESEARCHMIND_HTTP_PORT", str(port))
+            if http_host == "0.0.0.0":
+                http_host = "127.0.0.1"
+            ImageHandler.BASE_URL = f"http://{http_host}:{http_port}"
     
     @staticmethod
     def extract_images_from_tool_result(result: Dict[str, Any]) -> List[Dict[str, Any]]:

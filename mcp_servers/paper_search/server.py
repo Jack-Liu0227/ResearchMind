@@ -388,10 +388,11 @@ async def search_papers(
         elif file_path.startswith('paper_search/'):
             file_path = file_path[len('paper_search/'):]
         # 获取 API 基础 URL（支持动态配置）
-        api_base_url = os.getenv("VITE_API_URL") or os.getenv("RESEARCHMIND_API_URL")
+        # 优先使用 VITE_API_URL（前端调用的API地址）
+        api_base_url = os.getenv("VITE_API_URL")
         if not api_base_url:
             http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-            http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+            http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
             if http_host == "0.0.0.0":
                 http_host = "127.0.0.1"
             api_base_url = f"http://{http_host}:{http_port}"
@@ -870,10 +871,11 @@ async def batch_paper_analysis(
             elif file_path.startswith('paper_search/'):
                 file_path = file_path[len('paper_search/'):]
             # 获取 API 基础 URL（支持动态配置）
-            api_base_url = os.getenv("VITE_API_URL") or os.getenv("RESEARCHMIND_API_URL")
+            # 优先使用 VITE_API_URL（前端调用的API地址）
+            api_base_url = os.getenv("VITE_API_URL")
             if not api_base_url:
                 http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
                 if http_host == "0.0.0.0":
                     http_host = "127.0.0.1"
                 api_base_url = f"http://{http_host}:{http_port}"
@@ -897,10 +899,11 @@ async def batch_paper_analysis(
             elif file_path.startswith('paper_search/'):
                 file_path = file_path[len('paper_search/'):]
             # 获取 API 基础 URL（支持动态配置）
-            api_base_url = os.getenv("VITE_API_URL") or os.getenv("RESEARCHMIND_API_URL")
+            # 优先使用 VITE_API_URL（前端调用的API地址）
+            api_base_url = os.getenv("VITE_API_URL")
             if not api_base_url:
                 http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
                 if http_host == "0.0.0.0":
                     http_host = "127.0.0.1"
                 api_base_url = f"http://{http_host}:{http_port}"
@@ -1147,10 +1150,11 @@ async def generate_research_report(
                 elif file_path.startswith('paper_search/'):
                     file_path = file_path[len('paper_search/'):]
                 # 获取 API 基础 URL（支持动态配置）
-                api_base_url = os.getenv("VITE_API_URL") or os.getenv("RESEARCHMIND_API_URL")
+                # 优先使用 VITE_API_URL（前端调用的API地址）
+                api_base_url = os.getenv("VITE_API_URL")
                 if not api_base_url:
                     http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
                     if http_host == "0.0.0.0":
                         http_host = "127.0.0.1"
                     api_base_url = f"http://{http_host}:{http_port}"
@@ -1179,10 +1183,11 @@ async def generate_research_report(
                     # 使用全局导入的os模块
                     import os as os_module
                     # 获取 API 基础 URL（支持动态配置）
-                    api_base_url = os_module.getenv("VITE_API_URL") or os_module.getenv("RESEARCHMIND_API_URL")
+                    # 优先使用 VITE_API_URL（前端调用的API地址）
+                    api_base_url = os_module.getenv("VITE_API_URL")
                     if not api_base_url:
                         http_host = os_module.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                        http_port = os_module.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                        http_port = os_module.getenv("RESEARCHMIND_HTTP_PORT", "50006")
                         if http_host == "0.0.0.0":
                             http_host = "127.0.0.1"
                         api_base_url = f"http://{http_host}:{http_port}"
@@ -1415,14 +1420,14 @@ if __name__ == "__main__":
     # Run in SSE mode
     import uvicorn
     # Get configuration from environment
-    host = os.getenv("PAPER_SEARCH_MCP_HOST", "0.0.0.0")  # Bind to all interfaces by default
+    host = os.getenv("PAPER_SEARCH_MCP_HOST", "127.0.0.1")  # Bind to localhost by default
     port = int(os.getenv("PAPER_SEARCH_MCP_PORT", "50004"))
-    external_url = os.getenv("PAPER_SEARCH_MCP_URL", f"http://0.0.0.0:{port}/sse")
+    external_url = os.getenv("PAPER_SEARCH_MCP_URL", f"http://127.0.0.1:{port}/sse")
 
-    logger.info(f"🚀 Starting Paper Search MCP Server in SSE mode on http://{host}:{port}")
-    logger.info("📡 Using SSE transport")
-    logger.info(f"📡 External URL: {external_url}")
-    logger.info(f"📡 Internal Endpoint: http://{host}:{port}/sse")
+    logger.info(f"[START] Starting Paper Search MCP Server in SSE mode on http://{host}:{port}")
+    logger.info("[INFO] Using SSE transport")
+    logger.info(f"[INFO] External URL: {external_url}")
+    logger.info(f"[INFO] Internal Endpoint: http://{host}:{port}/sse")
 
     # Create HTTP app
     http_app = mcp.http_app(transport="sse")

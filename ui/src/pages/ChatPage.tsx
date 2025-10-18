@@ -286,9 +286,11 @@ const ChatPage: React.FC = () => {
         // 处理文件元数据（CSV和MD文件链接）
         console.log('📄 收到文件元数据:', message.data.metadata)
 
-        // 将文件元数据添加到最后一条消息的metadata中
-        const currentMessage = messages[messages.length - 1]
-        if (currentMessage && currentMessage.role === 'assistant') {
+        // 找到最后一条assistant消息，而不是最后一条消息
+        // 因为最后一条消息可能是status消息或其他消息
+        const currentMessage = messages.filter(m => m.role === 'assistant').pop()
+        if (currentMessage) {
+          console.log('📄 更新消息metadata:', currentMessage.id)
           updateMessage(currentMessage.id, {
             metadata: {
               ...currentMessage.metadata,

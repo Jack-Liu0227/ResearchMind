@@ -272,8 +272,8 @@ if [ ! -d "ui/node_modules" ]; then
     cd ..
 fi
 
-# 启动前端开发服务器 (必须为 0.0.0.0:50001)
-log_info "启动前端开发服务器 (${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT})..."
+# 启动前端开发服务器 (内部端口 8001)
+log_info "启动前端开发服务器 (127.0.0.1:8001)..."
 cd ui
 npm run dev 2>&1 | tee ../logs/frontend.log &
 FRONTEND_PID=$!
@@ -283,22 +283,38 @@ sleep 3
 log_success "✓ 前端服务已启动 (PID: $FRONTEND_PID)"
 
 # ============================================
+# Nginx 反向代理已禁用
+# ============================================
+# 注意: 已移除 Nginx 反向代理
+# 所有服务现在直接访问，无需反向代理
+#
+# 服务地址:
+#   - 前端 UI: http://127.0.0.1:50001
+#   - 后端 API: http://127.0.0.1:50006
+#   - WebSocket: ws://127.0.0.1:50003/ws
+#   - Paper Search MCP: http://127.0.0.1:50004/sse
+#   - Simulation MCP: http://127.0.0.1:50005/sse
+#   - Database MCP: http://127.0.0.1:50002/sse
+
+# ============================================
 # 服务状态总结
 # ============================================
 echo -e "\n${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║                    所有服务已启动                         ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}\n"
 
-echo -e "${BLUE}📡 服务访问地址:${NC}"
-echo -e "   ${YELLOW}前端 UI:${NC}        http://${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT}"
+echo -e "${BLUE}📡 访问地址 (直接访问，无反向代理):${NC}"
+echo -e "   ${YELLOW}前端 UI:${NC}        http://127.0.0.1:${VITE_FRONTEND_PORT}"
 echo -e "   ${YELLOW}后端 API:${NC}       http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
-echo -e "   ${YELLOW}WebSocket:${NC}      ws://${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}"
 echo -e "   ${YELLOW}API 文档:${NC}       http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}/docs"
 echo ""
+echo -e "${BLUE}🔌 实时通信:${NC}"
+echo -e "   ${YELLOW}WebSocket:${NC}      ws://127.0.0.1:${RESEARCHMIND_WS_PORT}/ws"
+echo ""
 echo -e "${BLUE}🔧 MCP 服务:${NC}"
-echo -e "   ${YELLOW}论文搜索:${NC}       http://${PAPER_SEARCH_MCP_HOST}:${PAPER_SEARCH_MCP_PORT}/sse"
-echo -e "   ${YELLOW}模拟服务:${NC}       http://${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT}/sse"
-echo -e "   ${YELLOW}数据库服务:${NC}     http://${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT}/sse"
+echo -e "   ${YELLOW}论文搜索:${NC}       http://127.0.0.1:${PAPER_SEARCH_MCP_PORT}/sse"
+echo -e "   ${YELLOW}模拟服务:${NC}       http://127.0.0.1:${SIMULATION_MCP_PORT}/sse"
+echo -e "   ${YELLOW}数据库服务:${NC}     http://127.0.0.1:${DATABASE_MCP_PORT}/sse"
 echo ""
 echo -e "${BLUE}📝 日志文件:${NC}"
 echo -e "   logs/backend.log"
@@ -307,10 +323,11 @@ echo -e "   logs/paper_search.log"
 echo -e "   logs/simulation.log"
 echo -e "   logs/frontend.log"
 echo ""
-echo -e "${BLUE}💡 分布式部署提示:${NC}"
-echo -e "   如需在不同主机运行服务，请修改 .env 文件中的 HOST 配置："
-echo -e "   - 服务监听: *_MCP_HOST, RESEARCHMIND_*_HOST (默认 0.0.0.0)"
-echo -e "   - 客户端连接: *_HOST, *_MCP_URL (改为目标主机 IP)"
+echo -e "${BLUE}💡 远程部署提示:${NC}"
+echo -e "   如需在不同主机运行服务，请修改 .env 文件中的配置："
+echo -e "   - 前端监听: VITE_FRONTEND_HOST=0.0.0.0 (允许外部访问)"
+echo -e "   - 后端监听: RESEARCHMIND_HTTP_HOST=0.0.0.0 (允许外部访问)"
+echo -e "   - 客户端连接: VITE_API_URL, VITE_WS_URL, *_MCP_URL (改为目标主机 IP 或域名)"
 echo ""
 echo -e "${YELLOW}按 Ctrl+C 停止所有服务${NC}\n"
 

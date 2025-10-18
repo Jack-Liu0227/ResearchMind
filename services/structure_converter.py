@@ -45,6 +45,17 @@ class StructureConverter:
                 logger.warning(f"No CIF content provided for {name}, skipping conversion")
                 return None
 
+            # 关键修复：验证CIF内容的完整性
+            logger.info(f"🔍 Processing CIF for {name}: {len(cif_content)} characters")
+            if len(cif_content) < 100:
+                logger.warning(f"⚠️ CIF content seems too short ({len(cif_content)} chars), may be truncated")
+
+            # 检查CIF内容是否包含必要的关键字
+            required_keywords = ['data_', 'loop_', '_cell_length_a']
+            missing_keywords = [kw for kw in required_keywords if kw not in cif_content]
+            if missing_keywords:
+                logger.warning(f"⚠️ CIF content missing keywords: {missing_keywords}")
+
             structure_id = str(uuid.uuid4())
             
             # Extract space group from CIF
@@ -64,8 +75,14 @@ class StructureConverter:
             try:
                 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
+                # 关键修复：添加详细的CIF解析日志
+                logger.info(f"🔍 Attempting to parse CIF with pymatgen...")
+                logger.info(f"   CIF content length: {len(cif_content)} characters")
+                logger.info(f"   CIF content starts with: {cif_content[:100]}")
+
                 # Parse CIF using pymatgen
                 struct = Structure.from_str(cif_content, fmt="cif")
+                logger.info(f"✅ CIF parsed successfully")
 
                 # Analyze symmetry and get primitive and conventional cells
                 try:
@@ -598,6 +615,8 @@ class StructureConverter:
         structure["metadata"]["uploadedAt"] = datetime.now().isoformat()
 
         logger.info(f"✅ Structure marked as Upload: {structure['source']}")
+        logger.info(f"✅ Final structure source field: {structure.get('source', {}).get('database')}")
+        logger.info(f"✅ Final structure metadata source: {structure.get('metadata', {}).get('source')}")
 
         return structure
 

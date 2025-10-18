@@ -51,12 +51,15 @@ class ServerConfig:
             "http://localhost:3000",
             "http://localhost:5173",
             "http://localhost:50001",
+            "http://localhost:50006",
             "http://127.0.0.1:3000",
             "http://127.0.0.1:5173",
             "http://127.0.0.1:50001",
+            "http://127.0.0.1:50006",
             "http://0.0.0.0:3000",
             "http://0.0.0.0:5173",
             "http://0.0.0.0:50001",
+            "http://0.0.0.0:50006",
             "*",  # Allow all origins for development
         ]
 

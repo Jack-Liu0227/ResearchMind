@@ -91,7 +91,11 @@ async def main():
     logger.info("✅ HTTP server initialized")
     
     # Set base URL for image handler
-    ImageHandler.set_base_url(server_config.HTTP_HOST, server_config.HTTP_PORT)
+    # 使用 RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
+    import os
+    api_host = os.getenv("RESEARCHMIND_HTTP_HOST", server_config.HTTP_HOST)
+    api_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
+    ImageHandler.set_base_url(api_host, int(api_port))
     logger.info(f"✅ Image handler configured: {ImageHandler.BASE_URL}")
     
     # Initialize WebSocket server

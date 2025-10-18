@@ -94,7 +94,18 @@ class HTTPServer:
     
     def _setup_routes(self):
         """Setup API routes"""
-        
+
+        @self.app.get("/api/debug/cif-validation")
+        async def debug_cif_validation():
+            """Debug endpoint to check CIF validation"""
+            return {
+                "status": "ok",
+                "message": "CIF validation endpoint is working",
+                "pymatgen_available": PYMATGEN_AVAILABLE,
+                "nginx_buffering": "disabled (proxy_request_buffering off)",
+                "max_file_size": f"{self.MAX_FILE_SIZE // (1024*1024)}MB"
+            }
+
         @self.app.get("/")
         async def root():
             """API root endpoint"""
@@ -311,26 +322,38 @@ class HTTPServer:
                 FileResponse with the file content
             """
             try:
+                # 关键修复：记录下载请求信息
+                logger.info(f"📥 Download request received")
+                logger.info(f"   Original file_path: {file_path}")
+
                 # Normalize path: remove ./ prefix, convert backslashes to forward slashes
                 file_path = file_path.replace('\\', '/').lstrip('./')
+                logger.info(f"   Normalized file_path: {file_path}")
 
                 # Remove paper_search/ prefix if present
                 if file_path.startswith('paper_search/'):
                     file_path = file_path[len('paper_search/'):]
+                    logger.info(f"   Removed paper_search/ prefix: {file_path}")
 
                 # Security: Only allow files from papers directory
                 if not file_path.startswith("mcp_servers/paper_search/papers/"):
                     # Try to prepend the base path
                     if file_path.startswith("papers/"):
                         file_path = f"mcp_servers/paper_search/{file_path}"
+                        logger.info(f"   Prepended base path: {file_path}")
                     else:
+                        logger.error(f"❌ Access denied: {file_path}")
                         raise HTTPException(
                             status_code=403,
                             detail="Access denied: Only files from papers directory are allowed"
                         )
 
                 # Check if file exists
+                logger.info(f"   Checking if file exists: {file_path}")
                 if not os.path.exists(file_path):
+                    logger.error(f"❌ File not found: {file_path}")
+                    logger.info(f"   Current working directory: {os.getcwd()}")
+                    logger.info(f"   Absolute path: {os.path.abspath(file_path)}")
                     raise HTTPException(
                         status_code=404,
                         detail=f"File not found: {file_path}"
@@ -353,7 +376,10 @@ class HTTPServer:
                 elif filename.endswith('.json'):
                     media_type = "application/json"
 
-                logger.info(f"📥 Downloading file: {file_path}")
+                logger.info(f"✅ Downloading file: {file_path}")
+                logger.info(f"   Media type: {media_type}")
+                logger.info(f"   Filename: {filename}")
+                logger.info(f"   File size: {os.path.getsize(file_path)} bytes")
 
                 return FileResponse(
                     path=file_path,
@@ -403,7 +429,10 @@ class HTTPServer:
                         status_code=400,
                         detail="Empty file provided"
                     )
-                
+
+                # 关键修复：记录接收到的内容大小
+                logger.info(f"📥 Received file: {file.filename}, size: {len(content)} bytes")
+
                 # Check file size
                 if len(content) > self.MAX_FILE_SIZE:
                     raise HTTPException(
@@ -413,6 +442,10 @@ class HTTPServer:
 
                 try:
                     cif_content = content.decode('utf-8')
+                    # 关键修复：验证CIF内容的完整性
+                    logger.info(f"✅ CIF content decoded successfully: {len(cif_content)} characters")
+                    logger.debug(f"🔍 CIF content preview (first 200 chars): {cif_content[:200]}")
+                    logger.debug(f"🔍 CIF content preview (last 200 chars): {cif_content[-200:]}")
                 except UnicodeDecodeError:
                     raise HTTPException(
                         status_code=400,
@@ -430,6 +463,7 @@ class HTTPServer:
                     logger.warning(f"Failed to extract formula from CIF: {e}")
 
                 # Convert CIF to structure
+                logger.info(f"🔄 Converting CIF to structure format...")
                 structure = StructureConverter.convert_cif_to_structure(
                     cif_content=cif_content,
                     name=file.filename.replace('.cif', ''),
@@ -438,15 +472,26 @@ class HTTPServer:
                 )
 
                 if not structure:
+                    logger.error(f"❌ Failed to convert CIF to structure")
                     raise HTTPException(
                         status_code=400,
                         detail="Failed to parse CIF file"
                     )
 
+                # 关键修复：验证转换后的结构完整性
+                logger.info(f"✅ Structure converted successfully")
+                logger.info(f"   Formula: {structure.get('formula', 'Unknown')}")
+                logger.info(f"   Space Group: {structure.get('spaceGroup', 'Unknown')}")
+                logger.info(f"   Atoms: {len(structure.get('atoms', []))}")
+                logger.info(f"   Lattice Parameters: {structure.get('latticeParameters', {})}")
+                logger.info(f"   CIF Content Length: {len(structure.get('cifContent', ''))}")
+
                 # Mark as uploaded
                 structure = StructureConverter.mark_as_uploaded(structure)
 
                 logger.info(f"✅ Uploaded structure: {formula} from {file.filename}")
+                logger.info(f"📋 Final structure source: {structure.get('source')}")
+                logger.info(f"📋 Final structure metadata: {structure.get('metadata')}")
 
                 return UploadResponse(
                     success=True,
@@ -506,7 +551,11 @@ class HTTPServer:
                             failed_files.append(f"{file.filename}: Empty file")
                             continue
 
+                        # 关键修复：记录接收到的内容大小
+                        logger.info(f"📥 Received file: {file.filename}, size: {len(content)} bytes")
+
                         cif_content = content.decode('utf-8')
+                        logger.info(f"✅ CIF content decoded: {len(cif_content)} characters")
 
                         # Parse CIF to extract formula
                         formula = "Unknown"

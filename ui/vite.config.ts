@@ -11,8 +11,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: parseInt(process.env.VITE_FRONTEND_PORT || '50001'),
-    host: process.env.VITE_FRONTEND_HOST || '0.0.0.0',
+    // Internal port (behind Nginx reverse proxy)
+    port: 8001,
+    host: '127.0.0.1',
     strictPort: true,
     open: false, // 改为false，避免自动打开浏览器
     cors: true,
@@ -20,9 +21,9 @@ export default defineConfig({
     hmr: {
       overlay: true,
       timeout: 30000,
-      // 支持跨主机访问时的 HMR 配置
+      // HMR configuration for frontend UI
       host: process.env.VITE_HMR_HOST || 'localhost',
-      port: parseInt(process.env.VITE_HMR_PORT || process.env.VITE_FRONTEND_PORT || '50001'),
+      port: parseInt(process.env.VITE_HMR_PORT || '50001'),
       protocol: process.env.VITE_HMR_PROTOCOL || 'ws',
     },
     watch: {

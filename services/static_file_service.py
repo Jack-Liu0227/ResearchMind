@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 def get_api_base_url() -> str:
     """Get API base URL from environment variable or construct from config"""
-    # Try to get from environment first
+    # 优先使用 VITE_API_URL（前端调用的API地址）
     api_url = os.getenv('VITE_API_URL')
     if api_url:
         return api_url
 
     # Fallback: construct from host and port
-    http_host = server_config.HTTP_HOST
-    http_port = server_config.HTTP_PORT
+    http_host = os.getenv("RESEARCHMIND_HTTP_HOST") or server_config.HTTP_HOST
+    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
 
     # If host is 0.0.0.0, use 127.0.0.1 for local connections
     if http_host == "0.0.0.0":
@@ -107,15 +107,17 @@ class StaticFileService:
     def get_file_url(filename: str, file_type: str = "phonon_results") -> str:
         """
         Get URL for a static file
-        
+
         Args:
             filename: File name
             file_type: Type of file (phonon_results, generated_structures, etc.)
-            
+
         Returns:
             Full URL to access the file
         """
-        return f"http://{server_config.HTTP_HOST}:{server_config.HTTP_PORT}/api/images/{file_type}/{filename}"
+        # 关键修复：使用get_api_base_url()确保使用50001端口
+        api_base_url = get_api_base_url().rstrip('/')
+        return f"{api_base_url}/api/images/{file_type}/{filename}"
     
     @staticmethod
     def verify_file_exists(filepath: str) -> bool:
