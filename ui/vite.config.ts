@@ -29,9 +29,9 @@ export default defineConfig({
     strictPort: true,
     open: false, // 改为false，避免自动打开浏览器
     cors: true,
-    // Disable allowedHosts check to allow all domains
+    // Allow all hosts - set to true to disable Host header validation
     // This is safe when behind a reverse proxy that validates the Host header
-    allowedHosts: [],
+    allowedHosts: true,
     hmr: {
       overlay: true,
       timeout: 30000,
