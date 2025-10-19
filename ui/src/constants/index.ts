@@ -13,8 +13,20 @@ const resolveRuntimeLocation = () => {
     }
   }
 
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
-  const hostname = window.location.hostname || '127.0.0.1'
+  // 处理本地开发时的 file:// 协议
+  let protocol: string
+  let hostname: string
+
+  if (window.location.protocol === 'file:') {
+    // 本地开发（file:// 协议）
+    protocol = 'http:'
+    hostname = 'localhost'
+  } else {
+    // 正常部署
+    protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+    hostname = window.location.hostname || '127.0.0.1'
+  }
+
   return {
     protocol,
     hostname,
@@ -41,10 +53,45 @@ const buildDefaultWsUrl = () => {
 const ENV_API_URL = trimEnv(import.meta.env.VITE_API_URL)
 const ENV_WS_URL = trimEnv(import.meta.env.VITE_WS_URL)
 
+// 处理相对路径 API URL
+const resolveApiUrl = (envUrl?: string): string => {
+  if (!envUrl) {
+    return buildDefaultApiUrl()
+  }
+
+  // 如果是相对路径（以 / 开头），转换为完整 URL
+  if (envUrl.startsWith('/')) {
+    const { protocol, hostname } = resolveRuntimeLocation()
+    const port = trimEnv(import.meta.env.VITE_API_PORT) || '50002'
+    return `${protocol}//${hostname}:${port}${envUrl}`
+  }
+
+  // 如果是完整 URL，直接返回
+  return envUrl
+}
+
+// 处理相对路径 WebSocket URL
+const resolveWsUrl = (envUrl?: string): string => {
+  if (!envUrl) {
+    return buildDefaultWsUrl()
+  }
+
+  // 如果是相对路径（以 / 开头），转换为完整 URL
+  if (envUrl.startsWith('/')) {
+    const { hostname, isHttps } = resolveRuntimeLocation()
+    const protocol = isHttps ? 'wss:' : 'ws:'
+    const port = trimEnv(import.meta.env.VITE_WS_PORT) || '50003'
+    return `${protocol}//${hostname}:${port}${envUrl}`
+  }
+
+  // 如果是完整 URL，直接返回
+  return envUrl
+}
+
 // API 配置
 export const API_CONFIG = {
-  BASE_URL: ENV_API_URL || buildDefaultApiUrl(),
-  WS_URL: ENV_WS_URL || buildDefaultWsUrl(),
+  BASE_URL: resolveApiUrl(ENV_API_URL),
+  WS_URL: resolveWsUrl(ENV_WS_URL),
   TIMEOUT: 30000,
 } as const
 

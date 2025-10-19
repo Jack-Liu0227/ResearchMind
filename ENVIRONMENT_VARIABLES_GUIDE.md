@@ -256,3 +256,174 @@ DATABASE_MCP_URL=http://database-mcp-service:50002/sse  # 使用Service名称
    - 所有外部请求通过前端UI和后端API
    - 后端API负责权限验证
 
+---
+
+## 8. 自动域名检测方案（推荐）
+
+### 8.1 概述
+
+当不知道具体的部署域名时，可以使用自动域名检测方案。前端会自动检测当前访问的域名，无需在环境变量中指定具体的域名。
+
+### 8.2 环境变量配置
+
+```bash
+# 后端监听配置 - 监听所有接口
+RESEARCHMIND_HTTP_HOST=0.0.0.0
+RESEARCHMIND_HTTP_PORT=50002
+RESEARCHMIND_WS_HOST=0.0.0.0
+RESEARCHMIND_WS_PORT=50003
+
+# 前端连接配置 - 使用相对路径（自动检测）
+VITE_API_URL=/api
+VITE_WS_URL=/ws
+```
+
+### 8.2.1 配置文件（.env.bohr）
+
+```bash
+# ==========================================
+# Service Listening Configuration
+# ==========================================
+# 推荐部署方案：使用 Nginx 反向代理 + 自动域名检测
+
+# 后端监听所有接口
+RESEARCHMIND_HTTP_HOST=0.0.0.0
+RESEARCHMIND_HTTP_PORT=50002
+RESEARCHMIND_WS_HOST=0.0.0.0
+RESEARCHMIND_WS_PORT=50003
+
+# ==========================================
+# Client Connection Configuration (Auto-detect domain)
+# ==========================================
+# 前端连接配置 - 自动检测域名（通过 Nginx 反向代理）
+
+# API连接地址 - 使用相对路径 /api（自动检测域名）
+VITE_API_URL=/api
+
+# WebSocket连接地址 - 使用相对路径 /ws（自动检测域名）
+VITE_WS_URL=/ws
+```
+
+### 8.3 工作原理
+
+#### 前端自动检测流程
+
+```
+1. 用户访问 http://example.com
+   ↓
+2. 前端检测当前域名：example.com
+   ↓
+3. 前端检测当前协议：http 或 https
+   ↓
+4. 前端构建完整 URL：http://example.com:50002/api
+   ↓
+5. 前端调用后端 API
+```
+
+#### 代码实现
+
+```typescript
+// ui/src/constants/index.ts
+const resolveRuntimeLocation = () => {
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+  const hostname = window.location.hostname || '127.0.0.1'
+  return {
+    protocol,
+    hostname,
+    isHttps: protocol === 'https:',
+  }
+}
+
+// 如果 VITE_API_URL 是相对路径，自动转换为完整 URL
+const resolveApiUrl = (envUrl?: string): string => {
+  if (!envUrl) {
+    return buildDefaultApiUrl()
+  }
+
+  // 如果是相对路径（以 / 开头），转换为完整 URL
+  if (envUrl.startsWith('/')) {
+    const { protocol, hostname } = resolveRuntimeLocation()
+    const port = import.meta.env.VITE_API_PORT || '50002'
+    return `${protocol}//${hostname}:${port}${envUrl}`
+  }
+
+  // 如果是完整 URL，直接返回
+  return envUrl
+}
+```
+
+### 8.4 部署场景
+
+#### 场景1：本地开发
+
+```bash
+# 访问：http://localhost:50001
+# 前端自动检测：localhost
+# 构建 API URL：http://localhost:50002/api
+```
+
+#### 场景2：远程服务器（无反向代理）
+
+```bash
+# 访问：http://your-domain.com:50001
+# 前端自动检测：your-domain.com
+# 构建 API URL：http://your-domain.com:50002/api
+```
+
+#### 场景3：反向代理部署（推荐）
+
+```bash
+# Nginx 配置
+server {
+    listen 80;
+    server_name _;  # 接受任意域名
+
+    location / {
+        proxy_pass http://localhost:50001;
+        proxy_set_header Host $host;
+    }
+
+    location /api/ {
+        proxy_pass http://localhost:50002/api/;
+        proxy_set_header Host $host;
+    }
+
+    location /ws {
+        proxy_pass http://localhost:50003/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+# 访问：http://example.com
+# 前端自动检测：example.com
+# 构建 API URL：http://example.com/api
+```
+
+### 8.5 优点
+
+1. **无需配置域名** - 自动检测当前访问的域名
+2. **支持任意域名** - 无需修改配置即可部署到不同域名
+3. **支持 HTTPS** - 自动检测协议（HTTP/HTTPS）
+4. **简化部署** - 一套配置适用所有场景
+5. **灵活迁移** - 轻松迁移到新域名无需修改代码
+
+### 8.6 一键部署
+
+```bash
+# 克隆项目
+git clone <repository-url>
+cd ResearchMind
+
+# 赋予执行权限
+chmod +x start.sh
+
+# 一键启动（自动配置所有环境）
+./start.sh
+
+# 访问应用
+# 本地：http://localhost:50001
+# 远程：http://your-domain.com（需要配置 Nginx 反向代理）
+```
+

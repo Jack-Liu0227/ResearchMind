@@ -275,7 +275,7 @@ fi
 # 构建前端生产版本
 log_info "构建前端生产版本..."
 cd ui
-npm run build 2>&1 | tee ../logs/frontend_build.log
+npm run dev 2>&1 | tee ../logs/frontend_build.log
 cd ..
 log_success "✓ 前端构建完成"
 

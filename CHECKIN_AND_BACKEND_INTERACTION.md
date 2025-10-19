@@ -423,3 +423,184 @@ tail -f logs/simulation.log
 - 活跃连接数监控
 - 消息处理速率监控
 
+---
+
+## 11. 自动域名检测和反向代理支持
+
+### 11.1 前端自动域名检测
+
+前端会自动检测当前访问的域名，无需在环境变量中指定具体的域名。
+
+#### 工作原理
+
+```typescript
+// ui/src/constants/index.ts
+const resolveRuntimeLocation = () => {
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+  const hostname = window.location.hostname || '127.0.0.1'
+  return {
+    protocol,
+    hostname,
+    isHttps: protocol === 'https:',
+  }
+}
+
+// 如果 VITE_API_URL 是相对路径，自动转换为完整 URL
+const resolveApiUrl = (envUrl?: string): string => {
+  if (!envUrl) {
+    return buildDefaultApiUrl()
+  }
+
+  // 如果是相对路径（以 / 开头），转换为完整 URL
+  if (envUrl.startsWith('/')) {
+    const { protocol, hostname } = resolveRuntimeLocation()
+    const port = import.meta.env.VITE_API_PORT || '50002'
+    return `${protocol}//${hostname}:${port}${envUrl}`
+  }
+
+  // 如果是完整 URL，直接返回
+  return envUrl
+}
+```
+
+#### 环境变量配置
+
+```bash
+# 后端监听配置 - 监听所有接口
+RESEARCHMIND_HTTP_HOST=0.0.0.0
+RESEARCHMIND_HTTP_PORT=50002
+RESEARCHMIND_WS_HOST=0.0.0.0
+RESEARCHMIND_WS_PORT=50003
+
+# 前端连接配置 - 使用相对路径（自动检测）
+VITE_API_URL=/api
+VITE_WS_URL=ws://localhost:50003/ws
+```
+
+### 11.2 后端 URL 生成
+
+后端在生成文件下载 URL 时，也支持相对路径和自动检测：
+
+```python
+# mcp_servers/paper_search/server.py
+def get_api_base_url() -> str:
+    """
+    获取 API 基础 URL，支持多种配置方式
+
+    优先级：
+    1. VITE_API_URL（前端调用的API地址）
+    2. RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
+    """
+    api_url = os.getenv("VITE_API_URL")
+
+    if api_url:
+        # 如果是相对路径，需要转换为完整 URL
+        if api_url.startswith('/'):
+            # 相对路径：直接返回，前端会处理
+            return api_url
+        else:
+            # 完整 URL：直接返回
+            return api_url
+
+    # 备选方案：使用 RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
+    http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
+    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+
+    # 如果监听地址是 0.0.0.0，使用 localhost 以支持反向代理
+    if http_host == "0.0.0.0":
+        http_host = "localhost"
+
+    return f"http://{http_host}:{http_port}"
+```
+
+### 11.3 Nginx 反向代理配置
+
+```nginx
+server {
+    listen 80;
+    server_name _;  # 接受任意域名
+
+    # 前端 UI
+    location / {
+        proxy_pass http://localhost:50001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 后端 API - 使用相对路径
+    location /api/ {
+        proxy_pass http://localhost:50002/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket - 自动检测域名
+    location /ws {
+        proxy_pass http://localhost:50003/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+}
+```
+
+### 11.4 部署流程
+
+#### 步骤1：配置环境变量
+
+```bash
+# .env 文件
+RESEARCHMIND_HTTP_HOST=0.0.0.0
+RESEARCHMIND_HTTP_PORT=50002
+RESEARCHMIND_WS_HOST=0.0.0.0
+RESEARCHMIND_WS_PORT=50003
+VITE_API_URL=/api
+VITE_WS_URL=ws://localhost:50003/ws
+```
+
+#### 步骤2：启动应用
+
+```bash
+# 一键启动
+chmod +x start.sh
+./start.sh
+```
+
+#### 步骤3：配置 Nginx
+
+```bash
+# 复制 Nginx 配置
+sudo cp nginx.conf /etc/nginx/sites-available/researchmind
+sudo ln -s /etc/nginx/sites-available/researchmind /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+#### 步骤4：访问应用
+
+```bash
+# 本地访问
+http://localhost:50001
+
+# 远程访问（通过 Nginx）
+http://your-domain.com
+```
+
+### 11.5 优点总结
+
+1. **无需配置域名** - 自动检测当前访问的域名
+2. **支持任意域名** - 无需修改配置即可部署到不同域名
+3. **支持 HTTPS** - 自动检测协议（HTTP/HTTPS）
+4. **简化部署** - 一套配置适用所有场景
+5. **灵活迁移** - 轻松迁移到新域名无需修改代码
+6. **安全性** - 后端服务不直接暴露，通过反向代理访问
+

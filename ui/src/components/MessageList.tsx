@@ -653,7 +653,23 @@ interface LoadingMessageProps {
   message?: string
 }
 
-const LoadingMessage: React.FC<LoadingMessageProps> = ({ message = '智能体正在思考...' }) => {
+const LoadingMessage: React.FC<LoadingMessageProps> = ({ message = '⏳ 智能体正在思考...' }) => {
+  // 根据消息内容生成更友好的辅助提示
+  const getHelpText = () => {
+    const lowerMsg = message.toLowerCase()
+    if (lowerMsg.includes('搜索')) return '🔍 正在搜索相关文献...'
+    if (lowerMsg.includes('分析')) return '📊 正在分析数据...'
+    if (lowerMsg.includes('生成')) return '✨ 正在生成结果...'
+    if (lowerMsg.includes('计算')) return '🧮 正在进行计算...'
+    if (lowerMsg.includes('弛豫')) return '🔄 正在进行结构弛豫...'
+    if (lowerMsg.includes('声子')) return '🎵 正在计算声子谱...'
+    if (lowerMsg.includes('报告')) return '📝 正在生成研究报告...'
+    if (lowerMsg.includes('工具')) return '🛠️ 正在调用工具...'
+    if (lowerMsg.includes('连接')) return '🔌 正在建立连接...'
+    if (lowerMsg.includes('上传')) return '📤 正在上传文件...'
+    return '⏳ 后端正在处理，请稍候...'
+  }
+
   return (
     <div className="flex justify-start mb-6">
       <div className="flex max-w-[80%]">
@@ -683,13 +699,18 @@ const LoadingMessage: React.FC<LoadingMessageProps> = ({ message = '智能体正
                 <div className="h-full bg-primary-500 rounded-full animate-pulse" style={{ width: '60%' }}></div>
               </div>
 
-              {/* 辅助提示 */}
+              {/* 辅助提示 - 根据消息内容动态显示 */}
               <div className="text-xs text-primary-600 flex items-center space-x-1">
                 <svg className="w-3 h-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                <span>后端正在处理，请稍候...</span>
+                <span>{getHelpText()}</span>
+              </div>
+
+              {/* 提示信息 */}
+              <div className="text-xs text-primary-500 mt-1">
+                💡 提示：如果长时间没有响应，请检查网络连接或后端服务状态
               </div>
             </div>
           </div>

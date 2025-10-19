@@ -59,11 +59,25 @@ const ChatPage: React.FC = () => {
       console.log('📥 [WebSocket接收] 完整消息:', message)
 
       if (message.type === 'message' && message.data) {
-        // 收到agent消息时，立即显示"智能体正在思考"提示
-        if (message.data.agentName && !message.data.content) {
-          // 如果只有agentName没有content，说明agent刚开始处理
+        // 收到任何来自后端的消息时，立即显示加载提示
+        if (message.data.agentName) {
+          // 如果有agentName，说明是来自agent的消息
           setIsLoading(true)
-          setLoadingMessage(`${message.data.agentName} 正在思考...`)
+
+          // 根据消息内容生成更详细的提示
+          if (message.data.content) {
+            // 如果已经有内容，显示"正在处理"
+            setLoadingMessage(`⏳ ${message.data.agentName} 正在处理...`)
+          } else {
+            // 如果没有内容，显示"正在思考"
+            setLoadingMessage(`⏳ ${message.data.agentName} 正在思考...`)
+          }
+
+          // 显示toast提示（不自动消失，等待complete状态）
+          toast.loading(`${message.data.agentName} 正在处理您的请求...`, {
+            id: 'agent-processing-toast',
+            duration: Infinity, // 不自动消失
+          })
         }
 
         // 如果消息有内容，添加到消息列表
@@ -127,12 +141,17 @@ const ChatPage: React.FC = () => {
         setIsLoading(false)
         setLoadingMessage('')
 
-        const errorMessage = message.data.message || '发生错误'
+        const errorMessage = message.data.message || '发生未知错误'
+        const errorDetails = message.data.details || ''
 
         // 添加错误消息到聊天记录
+        const errorContent = errorDetails
+          ? `❌ **错误**: ${errorMessage}\n\n**详情**: ${errorDetails}`
+          : `❌ **错误**: ${errorMessage}`
+
         const errorMsg = {
           id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          content: `❌ ${errorMessage}`,
+          content: errorContent,
           role: 'assistant' as const,
           timestamp: new Date(),
           agentId: currentAgent?.id,
@@ -142,8 +161,8 @@ const ChatPage: React.FC = () => {
         addMessage(errorMsg)
 
         // 显示toast提示
-        toast.error(errorMessage, {
-          duration: 5000,
+        toast.error(`❌ ${errorMessage}`, {
+          duration: 6000,
           icon: '❌',
         })
       } else if (message.type === 'status' && message.data) {
@@ -151,17 +170,63 @@ const ChatPage: React.FC = () => {
         if (message.data.status === 'complete') {
           setIsLoading(false)
           setLoadingMessage('')
+          toast.success('✅ 处理完成', {
+            id: 'agent-processing-toast',
+            duration: 3000, // 显示3秒后消失
+            icon: '✅',
+          })
         } else if (message.data.status === 'processing') {
           setIsLoading(true)
-          setLoadingMessage(message.data.message || '正在处理您的请求...')
+          const processingMsg = message.data.message || '正在处理您的请求...'
+          // 添加更详细的处理信息
+          const detailedMsg = message.data.details
+            ? `⏳ ${processingMsg} (${message.data.details})`
+            : `⏳ ${processingMsg}`
+
+          setLoadingMessage(detailedMsg)
+
+          // 显示toast提示（不自动消失，等待complete状态）
+          toast.loading(detailedMsg, {
+            id: 'agent-processing-toast',
+            duration: Infinity, // 不自动消失
+          })
+        } else if (message.data.status === 'waiting') {
+          // 处理等待状态
+          setIsLoading(true)
+          const waitingMsg = message.data.message || '等待处理...'
+          setLoadingMessage(`⏳ ${waitingMsg}`)
+
+          toast.loading(`⏳ ${waitingMsg}`, {
+            id: 'agent-processing-toast',
+            duration: Infinity, // 不自动消失
+          })
+        } else if (message.data.status === 'error') {
+          // 处理错误状态
+          setIsLoading(false)
+          setLoadingMessage('')
+
+          const errorMsg = message.data.message || '发生错误'
+          toast.error(`❌ ${errorMsg}`, {
+            id: 'agent-processing-toast',
+            duration: 6000, // 显示6秒后消失
+          })
+          setLoadingMessage(detailedMsg)
         } else if (message.data.status === 'thinking') {
           setIsLoading(true)
-          setLoadingMessage(message.data.message || '智能体正在思考...')
+          const thinkingMsg = message.data.message || '智能体正在思考...'
+          // 添加更详细的思考信息
+          const detailedMsg = message.data.details
+            ? `${thinkingMsg} (${message.data.details})`
+            : thinkingMsg
+          setLoadingMessage(detailedMsg)
         } else if (message.data.status === 'working') {
           setIsLoading(true)
           // 显示工具调用状态，提取工具名称
           const toolMessage = message.data.message || '智能体正在工作...'
-          setLoadingMessage(toolMessage)
+          const detailedMsg = message.data.details
+            ? `${toolMessage} (${message.data.details})`
+            : toolMessage
+          setLoadingMessage(detailedMsg)
         }
       } else if ((message.type as any) === 'agent_thinking' && message.data) {
         // 处理agent_thinking消息（工具调用详情）
@@ -171,6 +236,12 @@ const ChatPage: React.FC = () => {
         if (thinking.includes('Using tool:')) {
           const toolName = thinking.replace('Using tool:', '').trim()
           setLoadingMessage(`🔧 正在使用工具: ${toolName}`)
+        } else if (thinking.includes('search')) {
+          setLoadingMessage(`🔍 ${thinking}`)
+        } else if (thinking.includes('generate')) {
+          setLoadingMessage(`✨ ${thinking}`)
+        } else if (thinking.includes('analyze')) {
+          setLoadingMessage(`📊 ${thinking}`)
         } else {
           setLoadingMessage(thinking)
         }

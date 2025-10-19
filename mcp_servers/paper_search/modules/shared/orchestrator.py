@@ -55,18 +55,18 @@ class DeepResearchOrchestrator:
         self,
         user_query: str,
         workflow_type: str = WorkflowType.STANDARD,
-        max_results_per_source: int = 5,
+        max_results_per_source: int = 3,
         sources: Optional[List[str]] = None,
         use_cache: bool = True,
         output_dir: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         执行完整的研究工作流
-        
+
         Args:
             user_query: 用户查询
             workflow_type: 工作流类型（quick/standard/deep/full）
-            max_results_per_source: 每个源的最大结果数
+            max_results_per_source: 每个源的最大结果数（默认: 3，以节省资源）
             sources: 要使用的搜索源列表（默认：['arxiv', 'tavily']）
             use_cache: 是否使用缓存
             output_dir: 输出目录
@@ -157,16 +157,16 @@ class DeepResearchOrchestrator:
         self,
         user_query: str,
         workflow_type: str = WorkflowType.STANDARD,
-        max_results_per_source: int = 5,
+        max_results_per_source: int = 3,
         sources: Optional[List[str]] = None
     ) -> AsyncGenerator[str, None]:
         """
         流式执行研究工作流，实时返回进度
-        
+
         Args:
             user_query: 用户查询
             workflow_type: 工作流类型
-            max_results_per_source: 每个源的最大结果数
+            max_results_per_source: 每个源的最大结果数（默认: 3，以节省资源）
             sources: 要使用的搜索源列表
         
         Yields:

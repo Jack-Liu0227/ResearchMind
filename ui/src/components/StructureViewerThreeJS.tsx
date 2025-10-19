@@ -96,23 +96,41 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
   // 晶胞类型切换
   useEffect(() => {
+    console.log('🔄 晶胞类型切换 - cellType:', cellType, 'hasCellTypes:', !!structure.cellTypes);
+
     if (!structure.cellTypes) {
       // 如果没有cellTypes数据,使用旧的转换逻辑
+      console.log('⚠️ 没有cellTypes数据，使用旧的转换逻辑');
       if (cellType === 'primitive') {
         setDisplayStructure(structure);
       } else {
         // 优先使用 API 返回的惯胞数据
         if (structure.metadata?.conventionalStructure) {
+          console.log('✅ 使用metadata中的惯胞数据');
           setDisplayStructure(structure.metadata.conventionalStructure);
         } else {
           // 回退到本地转换
+          console.log('🔧 使用本地转换生成惯胞');
           const converted = localConvertToConventionalCell(structure);
           setDisplayStructure(converted);
         }
       }
     } else {
       // 使用新的cellTypes数据
+      console.log('✅ 使用cellTypes数据，可用类型:', Object.keys(structure.cellTypes));
+
       const cellData = structure.cellTypes[cellType];
+      if (!cellData) {
+        console.error(`❌ cellTypes中没有${cellType}数据，可用类型:`, Object.keys(structure.cellTypes));
+        // 回退到primitive
+        const fallbackData = structure.cellTypes['primitive'];
+        if (fallbackData) {
+          console.log('🔄 回退到primitive');
+          setCellType('primitive');
+          return;
+        }
+      }
+
       const { a, b, c, alpha, beta, gamma } = cellData.latticeParameters;
 
       // 将分数坐标转换为笛卡尔坐标
@@ -135,6 +153,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
         },
         currentCellType: cellType
       };
+      console.log(`✅ 已切换到${cellType}，原子数:`, cartesianAtoms.length);
       setDisplayStructure(newStructure);
     }
   }, [structure, cellType]);

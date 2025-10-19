@@ -47,13 +47,28 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
       setLoading(true)
       setError(null)
 
-      const response = await fetch(url)
+      console.log('Loading CSV from URL:', url)
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'text/csv, text/plain, */*'
+        }
+      })
+
       if (!response.ok) {
-        throw new Error(`Failed to load CSV: ${response.statusText}`)
+        console.error(`CSV load failed: ${response.status} ${response.statusText}`)
+        throw new Error(`Failed to load CSV: ${response.status} ${response.statusText}`)
       }
 
       const text = await response.text()
+      console.log(`CSV loaded successfully, size: ${text.length} bytes`)
+
+      if (!text.trim()) {
+        throw new Error('CSV file is empty')
+      }
+
       const parsed = parseCsv(text)
+      console.log(`CSV parsed: ${parsed.headers.length} columns, ${parsed.rows.length} rows`)
       setCsvData(parsed)
     } catch (err) {
       console.error('Failed to load CSV:', err)

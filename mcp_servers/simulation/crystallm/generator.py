@@ -31,7 +31,7 @@ def _setup_crystallm_path():
 def _get_model_path():
     """Get the path to the CrystaLLM pre-trained model."""
     # Use local pre-trained model
-    model_path = _MODULE_DIR / "pre-trained-model" / "crystallm_v1_large"
+    model_path = _MODULE_DIR / "pre-trained-model" / "crystallm_v1_small"
     if model_path.exists():
         logger.info("Found CrystaLLM model", path=str(model_path))
         return str(model_path)

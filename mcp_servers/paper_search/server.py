@@ -9,6 +9,40 @@ import json
 import os
 import logging
 from datetime import datetime
+
+
+def get_api_base_url() -> str:
+    """
+    获取 API 基础 URL，支持多种配置方式
+
+    优先级：
+    1. VITE_API_URL（前端调用的API地址）
+    2. RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
+
+    支持相对路径（如 /api）和完整 URL
+    """
+    api_url = os.getenv("VITE_API_URL")
+
+    if api_url:
+        # 如果是相对路径，需要转换为完整 URL
+        # 但在后端无法自动检测前端的域名，所以相对路径需要前端处理
+        # 后端只返回相对路径，前端会自动转换
+        if api_url.startswith('/'):
+            # 相对路径：直接返回，前端会处理
+            return api_url
+        else:
+            # 完整 URL：直接返回
+            return api_url
+
+    # 备选方案：使用 RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
+    http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
+    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+
+    # 如果监听地址是 0.0.0.0，使用 localhost 以支持反向代理
+    if http_host == "0.0.0.0":
+        http_host = "localhost"
+
+    return f"http://{http_host}:{http_port}"
 from typing import List, Dict, Any, Optional
 
 from fastmcp import FastMCP
@@ -267,7 +301,7 @@ async def generate_research_plan(user_intent: str, max_steps: int = 3) -> Dict[s
 async def search_papers(
     query: str,
     sources: List[str] = None,
-    max_results: int = 5,
+    max_results: int = 3,
     session_id: str = None,
     expand_query: bool = False,
     num_expanded_queries: int = 3
@@ -283,7 +317,7 @@ async def search_papers(
         query: 搜索查询（建议使用英文关键词）
         sources: 搜索源列表 ['arxiv', 'tavily_academic', 'tavily']
                 如果为None，则搜索所有可用源
-        max_results: 每个源的最大结果数（默认: 5）
+        max_results: 每个源的最大结果数（默认: 3，以节省资源）
         session_id: 会话ID（用于保存搜索结果到文件，可选）
         expand_query: 是否自动生成多个检索词（默认: False）
         num_expanded_queries: 生成的检索词数量（默认: 3）
@@ -388,15 +422,7 @@ async def search_papers(
         elif file_path.startswith('paper_search/'):
             file_path = file_path[len('paper_search/'):]
         # 获取 API 基础 URL（支持动态配置）
-        # 优先使用 VITE_API_URL（前端调用的API地址）
-        api_base_url = os.getenv("VITE_API_URL")
-        if not api_base_url:
-            http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-            http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
-            if http_host == "0.0.0.0":
-                http_host = "127.0.0.1"
-            api_base_url = f"http://{http_host}:{http_port}"
-
+        api_base_url = get_api_base_url()
         download_url = f"{api_base_url}/api/download/{file_path}"
         final_result['csv_download_url'] = download_url
         final_result['csv_file_path'] = csv_result['file_path']  # 保留原始路径用于调试
@@ -412,7 +438,7 @@ async def search_papers(
 @mcp.tool()
 async def search_papers_all_sources(
     topic: str,
-    max_results_per_source: int = 5
+    max_results_per_source: int = 3
 ) -> Dict[str, Any]:
     """
     使用所有可用搜索源检索论文 (ArXiv + Tavily Academic)
@@ -421,7 +447,7 @@ async def search_papers_all_sources(
 
     Args:
         topic: 搜索主题 (建议使用英文关键词)
-        max_results_per_source: 每个搜索源的最大结果数 (默认: 5)
+        max_results_per_source: 每个搜索源的最大结果数 (默认: 3，以节省资源)
 
     Returns:
         Dict containing:
@@ -444,7 +470,7 @@ async def search_papers_all_sources(
 # --- ArXiv 搜索 (3个) ---
 
 @mcp.tool()
-async def search_arxiv_papers(topic: str, max_results: int = 5) -> List[Dict[str, Any]]:
+async def search_arxiv_papers(topic: str, max_results: int = 3) -> List[Dict[str, Any]]:
     """
     Search for papers on arXiv based on a topic and return detailed information.
 
@@ -452,7 +478,7 @@ async def search_arxiv_papers(topic: str, max_results: int = 5) -> List[Dict[str
 
     Args:
         topic: The topic to search for (建议使用英文关键词)
-        max_results: Maximum number of results to retrieve (default: 5)
+        max_results: Maximum number of results to retrieve (default: 3，以节省资源)
 
     Returns:
         List of dictionaries containing paper information:
@@ -499,13 +525,13 @@ async def get_paper_info(paper_id: str, source: str = 'arxiv') -> Dict[str, Any]
 # --- Tavily 搜索 (3个) ---
 
 @mcp.tool()
-async def tavily_search(query: str, max_results: int = 5, search_depth: str = "advanced") -> List[Dict[str, Any]]:
+async def tavily_search(query: str, max_results: int = 3, search_depth: str = "advanced") -> List[Dict[str, Any]]:
     """
     Perform web search using Tavily (for general web content).
 
     Args:
         query: Search query
-        max_results: Maximum number of results to return
+        max_results: Maximum number of results to return (default: 3，以节省资源)
         search_depth: Search depth ("basic" or "advanced")
 
     Returns:
@@ -903,9 +929,10 @@ async def batch_paper_analysis(
             api_base_url = os.getenv("VITE_API_URL")
             if not api_base_url:
                 http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
+                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                # 如果监听地址是 0.0.0.0，使用 localhost 以支持反向代理
                 if http_host == "0.0.0.0":
-                    http_host = "127.0.0.1"
+                    http_host = "localhost"
                 api_base_url = f"http://{http_host}:{http_port}"
             result['csv_download_url'] = f"{api_base_url}/api/download/{file_path}"
 
@@ -1154,9 +1181,10 @@ async def generate_research_report(
                 api_base_url = os.getenv("VITE_API_URL")
                 if not api_base_url:
                     http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
+                    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                    # 如果监听地址是 0.0.0.0，使用 localhost 以支持反向代理
                     if http_host == "0.0.0.0":
-                        http_host = "127.0.0.1"
+                        http_host = "localhost"
                     api_base_url = f"http://{http_host}:{http_port}"
                 result['md_download_url'] = f"{api_base_url}/api/download/{file_path}"
 
@@ -1187,9 +1215,10 @@ async def generate_research_report(
                     api_base_url = os_module.getenv("VITE_API_URL")
                     if not api_base_url:
                         http_host = os_module.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                        http_port = os_module.getenv("RESEARCHMIND_HTTP_PORT", "50006")
+                        http_port = os_module.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+                        # 如果监听地址是 0.0.0.0，使用 localhost 以支持反向代理
                         if http_host == "0.0.0.0":
-                            http_host = "127.0.0.1"
+                            http_host = "localhost"
                         api_base_url = f"http://{http_host}:{http_port}"
                     result['csv_download_url'] = f"{api_base_url}/api/download/{file_path}"
                     logger.info(f"✅ CSV file saved and download URL generated: {result['csv_download_url']}")

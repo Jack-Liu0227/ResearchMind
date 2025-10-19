@@ -144,7 +144,15 @@ class StructureConverter:
                     # Use primitive structure for display by default
                     display_struct = primitive_structure
                     lattice_params = primitive_data["latticeParameters"]
-                    atoms = primitive_data["atoms"]
+
+                    # 为主显示使用笛卡尔坐标（重要：前端期望笛卡尔坐标）
+                    atoms = []
+                    for site in primitive_structure:
+                        atoms.append({
+                            "element": site.species_string,
+                            "position": [round(x, 6) for x in site.coords.tolist()],  # 使用笛卡尔坐标
+                            "occupancy": 1.0
+                        })
 
                 except Exception as sga_error:
                     logger.warning(f"⚠️ SpacegroupAnalyzer failed: {sga_error}, using original structure")
@@ -162,11 +170,11 @@ class StructureConverter:
                         "gamma": round(lattice.gamma, 6)
                     }
 
-                    # Extract atoms from display structure
+                    # Extract atoms from display structure (use Cartesian coordinates)
                     for site in display_struct:
                         atoms.append({
                             "element": site.species_string,
-                            "position": [round(x, 6) for x in site.frac_coords.tolist()],
+                            "position": [round(x, 6) for x in site.coords.tolist()],  # 使用笛卡尔坐标
                             "occupancy": 1.0
                         })
 

@@ -88,10 +88,10 @@ class CrystalStructureGenerator:
             primitive_structure = analyzer.get_primitive_standard_structure()
             spacegroup = analyzer.get_space_group_symbol()
             space_group_no = analyzer.get_space_group_number()
-            
+
             # 获取晶格参数
             lattice = primitive_structure.lattice
-            
+
             # 转换原子信息
             atoms = []
             for site in primitive_structure.sites:
@@ -99,7 +99,7 @@ class CrystalStructureGenerator:
                     "element": str(site.specie),
                     "position": [float(site.coords[0]), float(site.coords[1]), float(site.coords[2])]
                 })
-            
+
             # 生成CIF内容
             cif_content = ""
             try:
@@ -107,7 +107,49 @@ class CrystalStructureGenerator:
                 cif_content = str(cif_writer)
             except Exception as e:
                 print(f"Warning: Could not generate CIF for {structure_id}: {e}")
-            
+
+            # 获取惯胞数据用于切换
+            conventional_structure = analyzer.get_conventional_standard_structure()
+            conv_lattice = conventional_structure.lattice
+            conventional_data = {
+                "latticeParameters": {
+                    "a": float(conv_lattice.a),
+                    "b": float(conv_lattice.b),
+                    "c": float(conv_lattice.c),
+                    "alpha": float(conv_lattice.alpha),
+                    "beta": float(conv_lattice.beta),
+                    "gamma": float(conv_lattice.gamma)
+                },
+                "atoms": [],
+                "volume": float(conv_lattice.volume),
+                "numAtoms": len(conventional_structure)
+            }
+            for site in conventional_structure.sites:
+                conventional_data["atoms"].append({
+                    "element": str(site.specie),
+                    "position": [float(x) for x in site.frac_coords.tolist()]
+                })
+
+            # 获取原胞数据用于切换
+            primitive_data = {
+                "latticeParameters": {
+                    "a": float(lattice.a),
+                    "b": float(lattice.b),
+                    "c": float(lattice.c),
+                    "alpha": float(lattice.alpha),
+                    "beta": float(lattice.beta),
+                    "gamma": float(lattice.gamma)
+                },
+                "atoms": [],
+                "volume": float(lattice.volume),
+                "numAtoms": len(atoms)
+            }
+            for site in primitive_structure.sites:
+                primitive_data["atoms"].append({
+                    "element": str(site.specie),
+                    "position": [float(x) for x in site.frac_coords.tolist()]
+                })
+
             # 构建前端格式的结构数据
             frontend_structure = {
                 "id": structure_id,
@@ -141,9 +183,14 @@ class CrystalStructureGenerator:
                     "generationParams": self.params.copy(),
                     **(metadata or {})
                 },
-                "cifContent": cif_content  # Unified field name
+                "cifContent": cif_content,  # Unified field name
+                "cellTypes": {
+                    "primitive": primitive_data,
+                    "conventional": conventional_data
+                },
+                "currentCellType": "primitive"  # Default to primitive
             }
-            
+
             return frontend_structure
             
         except Exception as e:
@@ -445,12 +492,12 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                 "gamma": round(lattice.gamma, 6)
             }
             
-            # 提取原子位置
+            # 提取原子位置（使用笛卡尔坐标）
             atoms = []
             for site in struct:
                 atoms.append({
                     "element": site.species_string,
-                    "position": [round(x, 6) for x in site.frac_coords.tolist()],
+                    "position": [round(x, 6) for x in site.coords.tolist()],  # 使用笛卡尔坐标
                     "occupancy": 1.0
                 })
             

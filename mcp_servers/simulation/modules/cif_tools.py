@@ -680,6 +680,7 @@ def convert_cif_to_frontend_structure(
                 "numAtoms": len(primitive_structure)
             }
             for site in primitive_structure:
+                # 保存分数坐标用于cellTypes切换
                 primitive_data["atoms"].append({
                     "element": site.species_string,
                     "position": [round(x, 6) for x in site.frac_coords.tolist()],
@@ -711,7 +712,15 @@ def convert_cif_to_frontend_structure(
             # Use primitive structure for display by default
             display_struct = primitive_structure
             lattice_params = primitive_data["latticeParameters"]
-            atoms = primitive_data["atoms"]
+
+            # 为主显示使用笛卡尔坐标（重要：前端期望笛卡尔坐标）
+            atoms = []
+            for site in primitive_structure:
+                atoms.append({
+                    "element": site.species_string,
+                    "position": [round(x, 6) for x in site.coords.tolist()],  # 使用笛卡尔坐标
+                    "occupancy": 1.0
+                })
 
         except Exception as sga_error:
             logger.warning(f"⚠️ SpacegroupAnalyzer failed: {sga_error}, using original structure")
@@ -732,12 +741,12 @@ def convert_cif_to_frontend_structure(
                 "gamma": round(lattice.gamma, 6)
             }
 
-            # Extract atoms from display structure (use fractional coordinates)
+            # Extract atoms from display structure (use Cartesian coordinates for display)
             atoms = []
             for site in display_struct:
                 atoms.append({
                     "element": site.species_string,
-                    "position": [round(x, 6) for x in site.frac_coords.tolist()],
+                    "position": [round(x, 6) for x in site.coords.tolist()],  # 使用笛卡尔坐标
                     "occupancy": 1.0
                 })
 
@@ -779,7 +788,7 @@ def convert_cif_to_frontend_structure(
                 "primitive": primitive_data,
                 "conventional": conventional_data
             }
-            result["currentCellType"] = "primitive"  # Default to primitive
+            result["currentCellType"] = "primitive"  # Default to primitive, can switch to conventional
             logger.info(f"✅ Added cell type data: primitive ({primitive_data['numAtoms']} atoms) and conventional ({conventional_data['numAtoms']} atoms)")
 
         return result

@@ -43,16 +43,12 @@ const ChatInterface: React.FC = () => {
   const handleSendMessage = async () => {
     if (!inputValue.trim() || !currentAgent || !connected) {
       if (!connected) {
-        toast.error('未连接到服务器')
+        toast.error('❌ 未连接到服务器，请检查后端服务是否正在运行')
       } else if (!currentAgent) {
-        toast.error('请先选择智能体')
+        toast.error('⚠️ 请先选择一个智能体')
       }
       return
     }
-
-    // 立即显示loading状态，提供即时反馈
-    setIsLoading(true)
-    setLoadingMessage(`${currentAgent.name} 正在处理数据...`)
 
     const messageContent = inputValue.trim()
     setInputValue('')
@@ -77,6 +73,15 @@ const ChatInterface: React.FC = () => {
     }
     addMessage(userMessage)
 
+    // 立即显示加载提示，提供即时反馈
+    setIsLoading(true)
+    setLoadingMessage(`⏳ ${currentAgent?.name || '智能体'} 正在处理您的请求...`)
+
+    // 显示toast提示
+    toast.loading(`正在发送消息到 ${currentAgent?.name}...`, {
+      id: 'send-message-toast',
+    })
+
     try {
       // 通过WebSocket发送消息
       wsService.sendMessage(
@@ -84,10 +89,18 @@ const ChatInterface: React.FC = () => {
         currentAgent.id,
         sessionToUse?.id
       )
+
+      // 消息发送成功后，更新toast
+      toast.success('✅ 消息已发送，等待响应...', {
+        id: 'send-message-toast',
+      })
     } catch (error) {
       console.error('Failed to send message:', error)
-      toast.error('发送消息失败')
+      toast.error('❌ 发送消息失败，请重试', {
+        id: 'send-message-toast',
+      })
       setIsLoading(false)
+      setLoadingMessage('')
     }
   }
 

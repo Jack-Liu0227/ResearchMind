@@ -46,7 +46,7 @@ DEEP_RESEARCH_INSTRUCTION = """您是学术文献研究助手。使用中文回�
    - 注意：如果返回多个查询,只使用第一个查询
 
 2. **Level 1 - 快速检索**：
-   - 工具：`search_papers(query, sources=None, max_results=5, expand_query=True, num_expanded_queries=3)`
+   - 工具：`search_papers(query, sources=None, max_results=2, expand_query=True, num_expanded_queries=3)`
    - 参数：
      - `query`: 使用research_plan返回的第一个查询（重要！）
      - `expand_query`: 必须设置为True（重要！工具会自动生成多个相关检索词）

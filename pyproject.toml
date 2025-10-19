@@ -34,8 +34,8 @@ dependencies = [
     "mcp>=1.0.0",
     "fastmcp>=0.1.0",
     # HTTP requests and APIs
-    "httpx>=0.25.0",
-    "requests>=2.31.0",
+    "httpx[socks]>=0.25.0",
+    "requests>=2.32.4",
     # Data processing and analysis
     "pandas>=2.1.0",
     "numpy>=1.25.0",
