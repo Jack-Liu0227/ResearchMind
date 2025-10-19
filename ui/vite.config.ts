@@ -2,6 +2,17 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+// 获取允许的主机列表
+function getAllowedHosts(): string[] {
+  // 如果设置了 VITE_ALLOWED_HOSTS，使用逗号分隔的列表
+  if (process.env.VITE_ALLOWED_HOSTS) {
+    return process.env.VITE_ALLOWED_HOSTS.split(',').map(h => h.trim())
+  }
+
+  // 默认允许所有主机
+  return ['all']
+}
+
 export default defineConfig({
   plugins: [react()],
   envDir: '../', // 指向根目录读取.env文件
@@ -17,7 +28,7 @@ export default defineConfig({
     strictPort: true,
     open: false, // 改为false，避免自动打开浏览器
     cors: true,
-    allowedHosts: ['all'],
+    allowedHosts: getAllowedHosts(),
     hmr: {
       overlay: true,
       timeout: 30000,
