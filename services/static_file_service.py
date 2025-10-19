@@ -26,7 +26,7 @@ def get_api_base_url() -> str:
 
     # Fallback: construct from host and port
     http_host = os.getenv("RESEARCHMIND_HTTP_HOST") or server_config.HTTP_HOST
-    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
+    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
 
     # If host is 0.0.0.0, use 127.0.0.1 for local connections
     if http_host == "0.0.0.0":

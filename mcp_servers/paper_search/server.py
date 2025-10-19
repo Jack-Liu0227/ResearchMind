@@ -38,9 +38,9 @@ def get_api_base_url() -> str:
     http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
     http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
 
-    # 如果监听地址是 0.0.0.0，使用 localhost 以支持反向代理
+    # 如果监听地址是 0.0.0.0，使用 127.0.0.1 以支持本地访问
     if http_host == "0.0.0.0":
-        http_host = "localhost"
+        http_host = "127.0.0.1"
 
     return f"http://{http_host}:{http_port}"
 
@@ -51,7 +51,7 @@ def get_download_url(file_path: str) -> str:
 
     处理相对路径和完整 URL 的情况：
     - 如果 VITE_API_URL 是相对路径（如 /api），则生成 /api/download/{file_path}
-    - 如果 VITE_API_URL 是完整 URL，则生成 {VITE_API_URL}/download/{file_path}
+    - 如果 VITE_API_URL 是完整 URL（如 http://127.0.0.1:50002），则生成 {VITE_API_URL}/api/download/{file_path}
     - 否则使用 RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
     """
     api_base_url = get_api_base_url()
@@ -68,8 +68,8 @@ def get_download_url(file_path: str) -> str:
     if api_base_url.startswith('/'):
         return f"{api_base_url}/download/{file_path}"
     else:
-        # 完整 URL，直接拼接
-        return f"{api_base_url}/download/{file_path}"
+        # 完整 URL，需要添加 /api/download
+        return f"{api_base_url}/api/download/{file_path}"
 from typing import List, Dict, Any, Optional
 
 from fastmcp import FastMCP

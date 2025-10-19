@@ -62,7 +62,15 @@ const resolveApiUrl = (envUrl?: string): string => {
   // 如果是相对路径（以 / 开头），转换为完整 URL
   if (envUrl.startsWith('/')) {
     const { protocol, hostname } = resolveRuntimeLocation()
-    // 对于相对路径，使用当前访问的端口（通过 Nginx 反向代理）
+
+    // 对于本地开发（file:// 协议），需要指定完整的主机和端口
+    if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+      // 本地开发：使用 localhost:50002
+      const port = trimEnv(import.meta.env.VITE_API_PORT) || '50002'
+      return `${protocol}//localhost:${port}${envUrl}`
+    }
+
+    // 对于正常部署，使用当前访问的端口（通过 Nginx 反向代理）
     // 不指定端口，让浏览器使用当前访问的端口
     // 这样可以支持任意端口的 Nginx 反向代理配置
     return `${protocol}//${hostname}${envUrl}`
@@ -82,7 +90,15 @@ const resolveWsUrl = (envUrl?: string): string => {
   if (envUrl.startsWith('/')) {
     const { hostname, isHttps } = resolveRuntimeLocation()
     const protocol = isHttps ? 'wss:' : 'ws:'
-    // 对于相对路径，使用当前访问的端口（通过 Nginx 反向代理）
+
+    // 对于本地开发（file:// 协议），需要指定完整的主机和端口
+    if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+      // 本地开发：使用 localhost:50003
+      const port = trimEnv(import.meta.env.VITE_WS_PORT) || '50003'
+      return `${protocol}//localhost:${port}${envUrl}`
+    }
+
+    // 对于正常部署，使用当前访问的端口（通过 Nginx 反向代理）
     // 不指定端口，让浏览器使用当前访问的端口
     // 这样可以支持任意端口的 Nginx 反向代理配置
     return `${protocol}//${hostname}${envUrl}`
@@ -103,6 +119,10 @@ export const API_CONFIG = {
 console.log('🔧 Environment Variables:', {
   VITE_API_URL: import.meta.env.VITE_API_URL,
   VITE_WS_URL: import.meta.env.VITE_WS_URL,
+  VITE_API_PORT: import.meta.env.VITE_API_PORT,
+  VITE_WS_PORT: import.meta.env.VITE_WS_PORT,
+  window_location_protocol: typeof window !== 'undefined' ? window.location.protocol : 'N/A',
+  window_location_hostname: typeof window !== 'undefined' ? window.location.hostname : 'N/A',
   API_CONFIG_BASE_URL: API_CONFIG.BASE_URL,
   API_CONFIG_WS_URL: API_CONFIG.WS_URL
 })

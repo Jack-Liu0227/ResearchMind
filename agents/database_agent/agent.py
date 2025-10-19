@@ -18,7 +18,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 # Create MCP toolset for materials database using SSE transport
 toolset = MCPToolset(
     connection_params=SseServerParams(
-        url=os.getenv('DATABASE_MCP_URL', 'http://localhost:5002/sse'),
+        url=os.getenv('DATABASE_MCP_URL', 'http://127.0.0.1:50006/sse'),
         timeout=600.0,  # Increased timeout for AFLOW queries (10 minutes)
     ),
 )

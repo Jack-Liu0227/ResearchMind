@@ -24,7 +24,7 @@ from .prompts import get_deep_research_instruction
 # 创建 MCPToolset（使用 SSE 连接到 paper_search server）
 toolset = MCPToolset(
     connection_params=SseServerParams(
-        url=os.getenv('PAPER_SEARCH_MCP_URL', 'http://localhost:50001/sse'),
+        url=os.getenv('PAPER_SEARCH_MCP_URL', 'http://127.0.0.1:50004/sse'),
         timeout=180.0,  # Increased timeout for paper search and download (3 minutes)
     ),
 )
