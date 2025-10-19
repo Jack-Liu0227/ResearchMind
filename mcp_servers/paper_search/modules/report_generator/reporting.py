@@ -73,7 +73,7 @@ class ResearchReportGenerator:
 
             # 内存优化：限制并发任务数量
             MAX_CONCURRENT_TASKS = 8  # 限制为8个并发任务，高并发处理
-            BATCH_SIZE = 8  # 每批处理8篇论文
+            BATCH_SIZE = MAX_CONCURRENT_TASKS  # 根据并发数划分批量大小，提高效率
 
             async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> Dict[str, Any]:
                 """异步获取单篇论文的全文"""
