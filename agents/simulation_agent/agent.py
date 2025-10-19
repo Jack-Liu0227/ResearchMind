@@ -19,7 +19,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 toolset = MCPToolset(
     connection_params=SseServerParams(
         url=os.getenv('SIMULATION_MCP_URL', 'http://localhost:5003/sse'),
-        timeout=180.0,  # Increased timeout for simulation tasks (3 minutes)
+        timeout=600.0,  # Increased timeout for simulation tasks (10 minutes)
     ),
 )
 
