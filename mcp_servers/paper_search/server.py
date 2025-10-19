@@ -630,9 +630,9 @@ async def fetch_papers_content(
     prefer_fulltext: bool = True
 ) -> Dict[str, Any]:
     """
-    批量获取论文内容（显示进度）
+    批量获取论文内容（异步并行执行）
 
-    为每篇论文获取全文或摘要，显示获取进度和状态。
+    为每篇论文获取全文或摘要，使用异步并行执行以提高效率。
     失败时自动回退到摘要。
 
     Args:
@@ -645,16 +645,14 @@ async def fetch_papers_content(
         - papers_with_content: 包含内容的论文列表
         - summary: 获取摘要（成功/失败数量）
     """
+    import asyncio
     from modules.paper_manager.content_fetcher import get_paper_content_by_source
 
-    logger.info(f"Fetching content for {len(papers)} papers...")
+    logger.info(f"Fetching content for {len(papers)} papers (async, max 5 concurrent)...")
 
-    papers_with_content = []
-    success_count = 0
-    fallback_count = 0
-    error_count = 0
-
-    for i, paper in enumerate(papers, 1):
+    # 异步获取单篇论文内容
+    async def fetch_single_paper(i: int, paper: Dict[str, Any]) -> tuple:
+        """异步获取单篇论文内容"""
         try:
             logger.info(f"Fetching content {i}/{len(papers)}: {paper.get('title', 'Unknown')[:50]}...")
 
@@ -663,26 +661,29 @@ async def fetch_papers_content(
                 enriched_paper = paper.copy()
                 enriched_paper['full_text'] = paper.get('abstract', '')
                 enriched_paper['content_metadata'] = {'source_type': 'abstract', 'fallback': False}
-                papers_with_content.append(enriched_paper)
-                success_count += 1
-                continue
+                return (enriched_paper, 'success', False)
 
-            # 获取全文
-            content_result = get_paper_content_by_source(paper, paper.get('source'))
+            # 获取全文（使用 executor 包装同步操作）
+            loop = asyncio.get_event_loop()
+            content_result = await loop.run_in_executor(
+                None,
+                lambda: get_paper_content_by_source(paper, paper.get('source'))
+            )
 
             enriched_paper = paper.copy()
             enriched_paper['full_text'] = content_result.get('content', '')
             enriched_paper['content_metadata'] = content_result.get('metadata', {})
 
-            papers_with_content.append(enriched_paper)
+            # 判断是否使用了回退
+            is_fallback = content_result.get('metadata', {}).get('fallback', False)
+            status = 'fallback' if is_fallback else 'success'
 
-            # 统计
-            if content_result.get('metadata', {}).get('fallback'):
-                fallback_count += 1
+            if is_fallback:
                 logger.warning(f"Fallback to abstract for: {paper.get('title', 'Unknown')[:50]}")
             else:
-                success_count += 1
                 logger.info(f"Successfully fetched content for: {paper.get('title', 'Unknown')[:50]}")
+
+            return (enriched_paper, status, is_fallback)
 
         except Exception as e:
             logger.error(f"Failed to fetch content for paper {i}: {e}")
@@ -690,7 +691,34 @@ async def fetch_papers_content(
             enriched_paper = paper.copy()
             enriched_paper['full_text'] = paper.get('abstract', '')
             enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': str(e)}
-            papers_with_content.append(enriched_paper)
+            return (enriched_paper, 'error', True)
+
+    # 使用信号量限制并发任务数量
+    MAX_CONCURRENT = 5
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+
+    async def bounded_fetch(i: int, paper: Dict[str, Any]) -> tuple:
+        """限制并发的获取函数"""
+        async with semaphore:
+            return await fetch_single_paper(i, paper)
+
+    # 并行执行所有任务
+    tasks = [bounded_fetch(i, paper) for i, paper in enumerate(papers, 1)]
+    results = await asyncio.gather(*tasks)
+
+    # 处理结果
+    papers_with_content = []
+    success_count = 0
+    fallback_count = 0
+    error_count = 0
+
+    for enriched_paper, status, is_fallback in results:
+        papers_with_content.append(enriched_paper)
+        if status == 'success':
+            success_count += 1
+        elif status == 'fallback':
+            fallback_count += 1
+        else:
             error_count += 1
 
     result = {
