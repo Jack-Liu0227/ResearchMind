@@ -255,21 +255,37 @@ class DeepResearchOrchestrator:
         max_results_per_source: int,
         sources: List[str]
     ) -> List[PaperResult]:
-        """执行搜索"""
-        all_papers = []
+        """异步并行执行搜索"""
+        import asyncio
+
         primary_query = plan.get('primary_query', '')
-        
-        for source_name in sources:
+
+        async def search_single_source(source_name: str) -> List[PaperResult]:
+            """异步搜索单个源"""
             try:
                 source = SearchSourceFactory.create(source_name)
                 if source and source.is_available():
                     logger.info(f"Searching {source_name} for: {primary_query}")
                     papers = await source.search(primary_query, max_results_per_source)
-                    all_papers.extend(papers)
                     logger.info(f"Found {len(papers)} papers from {source_name}")
+                    return papers
+                else:
+                    logger.warning(f"Source {source_name} is not available")
+                    return []
             except Exception as e:
                 logger.error(f"Search failed for {source_name}: {e}")
-        
+                return []
+
+        # 并行执行所有源的搜索
+        logger.info(f"Executing parallel search across {len(sources)} sources...")
+        search_tasks = [search_single_source(source_name) for source_name in sources]
+        search_results = await asyncio.gather(*search_tasks)
+
+        # 合并结果
+        all_papers = []
+        for papers in search_results:
+            all_papers.extend(papers)
+
         # 去重
         unique_papers = self._deduplicate_papers(all_papers)
         return unique_papers

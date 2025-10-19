@@ -363,13 +363,37 @@ async def search_papers(
         queries_to_search = expanded_queries
         logger.info(f"Generated {len(queries_to_search)} queries: {queries_to_search}")
 
-    # 对每个检索词进行搜索
-    all_papers = []
-    for q in queries_to_search:
-        logger.info(f"Searching with query: {q}")
-        result = await search_papers_unified(query=q, sources=sources, max_results=max_results, session_id=session_id)
-        if result.get('status') == 'success':
-            all_papers.extend(result.get('papers', []))
+    # 异步并行搜索多个检索词
+    import asyncio
+
+    async def search_single_query(q: str) -> List[Dict[str, Any]]:
+        """异步搜索单个检索词"""
+        try:
+            logger.info(f"Searching with query: {q}")
+            result = await search_papers_unified(query=q, sources=sources, max_results=max_results, session_id=session_id)
+            if result.get('status') == 'success':
+                papers = result.get('papers', [])
+                logger.info(f"Found {len(papers)} papers for query: {q}")
+                return papers
+            else:
+                logger.warning(f"Search failed for query: {q}")
+                return []
+        except Exception as e:
+            logger.error(f"Error searching query '{q}': {e}")
+            return []
+
+    # 并行执行所有搜索任务
+    if len(queries_to_search) > 1:
+        # 多个检索词时使用并行执行
+        logger.info(f"Executing {len(queries_to_search)} searches in parallel...")
+        search_tasks = [search_single_query(q) for q in queries_to_search]
+        search_results = await asyncio.gather(*search_tasks)
+        all_papers = []
+        for papers in search_results:
+            all_papers.extend(papers)
+    else:
+        # 单个检索词时直接执行
+        all_papers = await search_single_query(queries_to_search[0])
 
     # 去重（基于 paper_id）
     unique_papers = {}
@@ -694,7 +718,7 @@ async def fetch_papers_content(
             return (enriched_paper, 'error', True)
 
     # 使用信号量限制并发任务数量
-    MAX_CONCURRENT = 5
+    MAX_CONCURRENT = 8
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 
     async def bounded_fetch(i: int, paper: Dict[str, Any]) -> tuple:

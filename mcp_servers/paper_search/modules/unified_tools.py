@@ -24,7 +24,7 @@ async def search_papers(
     session_id: str = None
 ) -> Dict[str, Any]:
     """
-    统一的文献搜索接口
+    统一的文献搜索接口（异步并行执行）
 
     Args:
         query: 搜索查询
@@ -39,61 +39,80 @@ async def search_papers(
         - sources_used: 使用的搜索源
         - total_results: 总结果数
     """
+    import asyncio
     from .search.arxiv import search_arxiv_papers
     from .search.tavily import search_web, search_academic_web
     from .shared.field_mapping import batch_normalize_papers, merge_paper_data
-    
+
     # 默认搜索所有源
     if sources is None:
         sources = ['arxiv', 'tavily_academic']
 
-    all_papers = []  # 存储每个源的论文列表
-    sources_used = []
-
     try:
-        # ArXiv搜索
-        if 'arxiv' in sources:
+        # 异步搜索单个源
+        async def search_source(source_name: str) -> tuple:
+            """异步搜索单个源"""
             try:
-                arxiv_results = search_arxiv_papers(query, max_results=max_results, session_id=session_id)
-                # 检查返回值类型
-                if isinstance(arxiv_results, dict) and arxiv_results.get('status') == 'success':
-                    papers = arxiv_results.get('papers', [])
-                    all_papers.append(papers)  # 添加整个列表
-                    sources_used.append('arxiv')
-                    logger.info(f"ArXiv search: {len(papers)} papers")
-                elif isinstance(arxiv_results, list):
-                    # 如果直接返回列表
-                    all_papers.append(arxiv_results)  # 添加整个列表
-                    sources_used.append('arxiv')
-                    logger.info(f"ArXiv search: {len(arxiv_results)} papers")
-            except Exception as e:
-                logger.error(f"ArXiv search failed: {e}")
+                if source_name == 'arxiv':
+                    # ArXiv搜索（同步，使用 executor 包装）
+                    loop = asyncio.get_event_loop()
+                    arxiv_results = await loop.run_in_executor(
+                        None,
+                        lambda: search_arxiv_papers(query, max_results=max_results, session_id=session_id)
+                    )
+                    # 检查返回值类型
+                    if isinstance(arxiv_results, dict) and arxiv_results.get('status') == 'success':
+                        papers = arxiv_results.get('papers', [])
+                        logger.info(f"ArXiv search: {len(papers)} papers")
+                        return (source_name, papers)
+                    elif isinstance(arxiv_results, list):
+                        logger.info(f"ArXiv search: {len(arxiv_results)} papers")
+                        return (source_name, arxiv_results)
+                    else:
+                        return (source_name, [])
 
-        # Tavily Academic搜索
-        if 'tavily_academic' in sources:
-            try:
-                tavily_results = await search_academic_web(query, max_results=max_results, session_id=session_id)
-                if isinstance(tavily_results, list):
-                    all_papers.append(tavily_results)  # 添加整个列表
-                    sources_used.append('tavily_academic')
-                    logger.info(f"Tavily Academic search: {len(tavily_results)} papers")
-            except Exception as e:
-                logger.error(f"Tavily Academic search failed: {e}")
+                elif source_name == 'tavily_academic':
+                    # Tavily Academic搜索
+                    tavily_results = await search_academic_web(query, max_results=max_results, session_id=session_id)
+                    if isinstance(tavily_results, list):
+                        logger.info(f"Tavily Academic search: {len(tavily_results)} papers")
+                        return (source_name, tavily_results)
+                    else:
+                        return (source_name, [])
 
-        # Tavily Web搜索
-        if 'tavily' in sources:
-            try:
-                tavily_results = await search_web(query, max_results=max_results, session_id=session_id)
-                if isinstance(tavily_results, list):
-                    all_papers.append(tavily_results)  # 添加整个列表
-                    sources_used.append('tavily')
-                    logger.info(f"Tavily Web search: {len(tavily_results)} papers")
+                elif source_name == 'tavily':
+                    # Tavily Web搜索
+                    tavily_results = await search_web(query, max_results=max_results, session_id=session_id)
+                    if isinstance(tavily_results, list):
+                        logger.info(f"Tavily Web search: {len(tavily_results)} papers")
+                        return (source_name, tavily_results)
+                    else:
+                        return (source_name, [])
+
+                else:
+                    logger.warning(f"Unknown source: {source_name}")
+                    return (source_name, [])
+
             except Exception as e:
-                logger.error(f"Tavily Web search failed: {e}")
+                logger.error(f"Search failed for {source_name}: {e}")
+                return (source_name, [])
+
+        # 并行执行所有源的搜索
+        logger.info(f"Executing parallel search across {len(sources)} sources...")
+        search_tasks = [search_source(source_name) for source_name in sources]
+        search_results = await asyncio.gather(*search_tasks)
+
+        # 处理结果
+        all_papers = []
+        sources_used = []
+        for source_name, papers in search_results:
+            if papers:
+                all_papers.append(papers)
+                sources_used.append(source_name)
 
         # 合并并去重
         merged_papers = merge_paper_data(all_papers)
-        
+
         return {
             'status': 'success',
             'papers': merged_papers,
