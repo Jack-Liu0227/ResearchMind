@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { X, Download, ZoomIn, ZoomOut, RotateCcw, Info, Maximize, Minimize, ExternalLink, Layout } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { API_CONFIG } from '../constants'
+import { resolveFileUrl } from '../utils/apiClient'
 
 interface PhononImage {
   name: string
@@ -124,10 +125,12 @@ const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' 
 
   // 获取图片URL
   const getImageUrl = (image: PhononImage): string => {
-    if (image.url) return image.url
     if (image.base64) return `data:image/png;base64,${image.base64}`
-    if (image.filename) return `${API_CONFIG.BASE_URL}/api/images/phonon_results/${image.filename}`
-    if (image.path) return `/api/images/${image.path}`
+
+    // 统一使用 resolveFileUrl 处理相对路径
+    if (image.url) return resolveFileUrl(image.url)
+    if (image.filename) return resolveFileUrl(`/api/images/phonon_results/${image.filename}`)
+    if (image.path) return resolveFileUrl(`/api/images/${image.path}`)
     return ''
   }
 

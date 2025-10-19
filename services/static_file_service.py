@@ -42,7 +42,7 @@ class StaticFileService:
     def setup_static_files(app: FastAPI):
         """
         Setup static file routes on FastAPI app
-        
+
         Args:
             app: FastAPI application instance
         """
@@ -54,12 +54,27 @@ class StaticFileService:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-        
+
         # IMPORTANT: Mount more specific paths BEFORE less specific ones
         # FastAPI matches routes in the order they are mounted
         # More specific paths must be mounted first to avoid being shadowed
 
-        # Phonon results directory - mount first (most specific)
+        # Papers download directory - mount first (most specific)
+        # 这是论文搜索结果的 CSV 和 MD 文件存储位置
+        # 注意：挂载点是 /api/download，目录是 mcp_servers/paper_search
+        # 这样 /api/download/papers/topic/file.csv 会映射到 mcp_servers/paper_search/papers/topic/file.csv
+        paper_search_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "paper_search")
+        if os.path.exists(paper_search_dir):
+            app.mount(
+                "/api/download",
+                StaticFiles(directory=paper_search_dir),
+                name="papers_download"
+            )
+            logger.info(f"✅ Static files: /api/download -> {paper_search_dir}")
+        else:
+            logger.warning(f"⚠️ Paper search directory not found: {paper_search_dir}")
+
+        # Phonon results directory - mount second (specific)
         phonon_dir = server_config.PHONON_RESULTS_DIR
         if os.path.exists(phonon_dir):
             app.mount(
@@ -71,7 +86,7 @@ class StaticFileService:
         else:
             logger.warning(f"⚠️ Phonon results directory not found: {phonon_dir}")
 
-        # Generated structures directory - mount second (specific)
+        # Generated structures directory - mount third (specific)
         structures_dir = server_config.GENERATED_STRUCTURES_DIR
         if os.path.exists(structures_dir):
             app.mount(
@@ -113,11 +128,11 @@ class StaticFileService:
             file_type: Type of file (phonon_results, generated_structures, etc.)
 
         Returns:
-            Full URL to access the file
+            Full URL to access the file (relative path)
         """
-        # 关键修复：使用get_api_base_url()确保使用50001端口
-        api_base_url = get_api_base_url().rstrip('/')
-        return f"{api_base_url}/api/images/{file_type}/{filename}"
+        # 统一使用 /api/images/... 格式
+        # 后端始终返回相对路径，前端会自动转换为完整 URL
+        return f"/api/images/{file_type}/{filename}"
     
     @staticmethod
     def verify_file_exists(filepath: str) -> bool:
@@ -159,7 +174,7 @@ class StaticFileService:
 
                     files.append({
                         'name': filename,
-                        'url': f"{get_api_base_url()}/api/images/phonon_results/{url_path}",
+                        'url': f"/api/images/phonon_results/{url_path}",
                         'path': url_path,
                         'type': file_type,
                         'description': f"声子谱图像: {filename}"

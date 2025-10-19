@@ -70,8 +70,14 @@ const resolveApiUrl = (envUrl?: string): string => {
       return `${protocol}//localhost:${port}${envUrl}`
     }
 
-    // 对于正常部署，使用当前访问的端口（通过 Nginx 反向代理）
-    // 不指定端口，让浏览器使用当前访问的端口
+    // 对于正常部署，检查是否有指定的 API 端口
+    const apiPort = trimEnv(import.meta.env.VITE_API_PORT)
+    if (apiPort) {
+      // 如果指定了端口，使用指定的端口
+      return `${protocol}//${hostname}:${apiPort}${envUrl}`
+    }
+
+    // 如果没有指定端口，使用当前访问的端口（通过 Nginx 反向代理）
     // 这样可以支持任意端口的 Nginx 反向代理配置
     return `${protocol}//${hostname}${envUrl}`
   }
@@ -98,8 +104,14 @@ const resolveWsUrl = (envUrl?: string): string => {
       return `${protocol}//localhost:${port}${envUrl}`
     }
 
-    // 对于正常部署，使用当前访问的端口（通过 Nginx 反向代理）
-    // 不指定端口，让浏览器使用当前访问的端口
+    // 对于正常部署，检查是否有指定的 WebSocket 端口
+    const wsPort = trimEnv(import.meta.env.VITE_WS_PORT)
+    if (wsPort) {
+      // 如果指定了端口，使用指定的端口
+      return `${protocol}//${hostname}:${wsPort}${envUrl}`
+    }
+
+    // 如果没有指定端口，使用当前访问的端口（通过 Nginx 反向代理）
     // 这样可以支持任意端口的 Nginx 反向代理配置
     return `${protocol}//${hostname}${envUrl}`
   }

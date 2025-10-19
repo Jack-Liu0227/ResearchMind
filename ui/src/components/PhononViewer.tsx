@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getPhononResults } from '../utils/apiClient';
+import { getPhononResults, resolveFileUrl } from '../utils/apiClient';
 import { API_CONFIG } from '../constants';
 
 interface PhononViewerProps {
@@ -47,8 +47,8 @@ export const PhononViewer: React.FC<PhononViewerProps> = ({ composition, classNa
   };
 
   const getImageUrl = (filename: string): string => {
-    // 直接返回URL而不是Promise
-    return `${API_CONFIG.BASE_URL}/api/images/phonon_results/${filename}`;
+    // 统一使用 resolveFileUrl 处理相对路径
+    return resolveFileUrl(`/api/images/phonon_results/${filename}`);
   };
 
   const handleImageLoad = () => {

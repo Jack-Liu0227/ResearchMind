@@ -49,13 +49,11 @@ def get_download_url(file_path: str) -> str:
     """
     生成文件下载 URL
 
-    处理相对路径和完整 URL 的情况：
-    - 如果 VITE_API_URL 是相对路径（如 /api），则生成 /api/download/{file_path}
-    - 如果 VITE_API_URL 是完整 URL（如 http://127.0.0.1:50002），则生成 {VITE_API_URL}/api/download/{file_path}
-    - 否则使用 RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
-    """
-    api_base_url = get_api_base_url()
+    始终返回相对路径，前端会自动转换为完整 URL
+    这样可以支持任何部署方式（直接访问、反向代理等）
 
+    参考 ImageHandler 的实现逻辑
+    """
     # 规范化文件路径：移除 ./ 前缀，转换反斜杠为正斜杠
     file_path = file_path.replace('\\', '/').lstrip('./')
     # 移除前缀 "mcp_servers/paper_search/" 如果存在
@@ -64,12 +62,9 @@ def get_download_url(file_path: str) -> str:
     elif file_path.startswith('paper_search/'):
         file_path = file_path[len('paper_search/'):]
 
-    # 如果 api_base_url 是相对路径（以 / 开头），则直接拼接 /download
-    if api_base_url.startswith('/'):
-        return f"{api_base_url}/download/{file_path}"
-    else:
-        # 完整 URL，需要添加 /api/download
-        return f"{api_base_url}/api/download/{file_path}"
+    # 始终返回相对路径：/api/download/...
+    # 前端的 resolveFileUrl() 函数会处理转换为完整 URL
+    return f"/api/download/{file_path}"
 from typing import List, Dict, Any, Optional
 
 from fastmcp import FastMCP

@@ -9,6 +9,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Download, AlertCircle, Loader2, Maximize2, Minimize2, Move, X, ChevronDown, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { resolveFileUrl } from '../../utils/apiClient'
 
 interface CsvViewerProps {
   url: string
@@ -47,8 +48,10 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
       setLoading(true)
       setError(null)
 
-      console.log('Loading CSV from URL:', url)
-      const response = await fetch(url, {
+      // 处理相对路径 URL
+      const resolvedUrl = resolveFileUrl(url)
+      console.log('Loading CSV from URL:', resolvedUrl)
+      const response = await fetch(resolvedUrl, {
         method: 'GET',
         headers: {
           'Accept': 'text/csv, text/plain, */*'
@@ -120,7 +123,9 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
 
   const handleDownload = async () => {
     try {
-      const response = await fetch(url)
+      // 处理相对路径 URL
+      const resolvedUrl = resolveFileUrl(url)
+      const response = await fetch(resolvedUrl)
       const blob = await response.blob()
       const downloadUrl = URL.createObjectURL(blob)
 

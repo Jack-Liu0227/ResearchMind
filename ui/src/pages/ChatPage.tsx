@@ -356,12 +356,19 @@ const ChatPage: React.FC = () => {
       } else if ((message.type as any) === 'file_metadata' && message.data?.metadata) {
         // 处理文件元数据（CSV和MD文件链接）
         console.log('📄 收到文件元数据:', message.data.metadata)
+        console.log('📄 当前消息数:', messages.length)
 
         // 找到最后一条assistant消息，而不是最后一条消息
         // 因为最后一条消息可能是status消息或其他消息
-        const currentMessage = messages.filter(m => m.role === 'assistant').pop()
+        const assistantMessages = messages.filter(m => m.role === 'assistant')
+        console.log('📄 Assistant消息数:', assistantMessages.length)
+
+        const currentMessage = assistantMessages.pop()
         if (currentMessage) {
           console.log('📄 更新消息metadata:', currentMessage.id)
+          console.log('📄 原metadata:', currentMessage.metadata)
+          console.log('📄 新metadata:', message.data.metadata)
+
           updateMessage(currentMessage.id, {
             metadata: {
               ...currentMessage.metadata,
@@ -369,13 +376,19 @@ const ChatPage: React.FC = () => {
             }
           })
 
-          // 提示用户（不显示toast，避免干扰）
-          // const fileTypes = []
-          // if (message.data.metadata.csv_download_url) fileTypes.push('CSV')
-          // if (message.data.metadata.md_download_url) fileTypes.push('Markdown')
-          // if (fileTypes.length > 0) {
-          //   toast.success(`已生成${fileTypes.join('和')}文件，可在消息中查看和下载`)
-          // }
+          // 提示用户
+          const fileTypes = []
+          if (message.data.metadata.csv_download_url) fileTypes.push('CSV')
+          if (message.data.metadata.md_download_url) fileTypes.push('Markdown')
+          if (fileTypes.length > 0) {
+            console.log('📄 显示toast提示:', fileTypes)
+            toast.success(`已生成${fileTypes.join('和')}文件，可在消息中查看和下载`, {
+              duration: 4000,
+              icon: '📄'
+            })
+          }
+        } else {
+          console.warn('⚠️ 未找到assistant消息')
         }
       } else if (message.type === 'phonon_data' && message.data?.phonon_data) {
         // 直接处理声子谱数据

@@ -22,11 +22,11 @@ export default defineConfig({
     },
   },
   server: {
-    // Listen on all network interfaces to allow external access
+    // Listen on configured host and port
     // When behind Nginx reverse proxy, this allows the proxy to connect
-    port: 50001,
-    host: '0.0.0.0',
-    strictPort: true,
+    port: parseInt(process.env.VITE_FRONTEND_PORT || '50010'),
+    host: process.env.VITE_FRONTEND_HOST || '127.0.0.1',
+    strictPort: true, // 使用指定的端口，如果被占用则失败
     open: false, // 改为false，避免自动打开浏览器
     cors: true,
     // Allow all hosts - set to true to disable Host header validation
@@ -36,8 +36,9 @@ export default defineConfig({
       overlay: true,
       timeout: 30000,
       // HMR configuration for frontend UI
-      host: process.env.VITE_HMR_HOST || 'localhost',
-      port: parseInt(process.env.VITE_HMR_PORT || '50001'),
+      // 在远程部署时，使用客户端访问的域名
+      host: process.env.VITE_HMR_HOST || undefined,
+      port: parseInt(process.env.VITE_HMR_PORT || process.env.VITE_API_PORT || '50001'),
       protocol: process.env.VITE_HMR_PROTOCOL || 'ws',
     },
     watch: {

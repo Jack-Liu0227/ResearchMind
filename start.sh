@@ -272,17 +272,10 @@ if [ ! -d "ui/node_modules" ]; then
     cd ..
 fi
 
-# 构建前端生产版本
-log_info "构建前端生产版本..."
+# 启动前端开发服务器 (支持远程访问)
+log_info "启动前端开发服务器 (${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT})..."
 cd ui
-npm run dev 2>&1 | tee ../logs/frontend_build.log
-cd ..
-log_success "✓ 前端构建完成"
-
-# 启动前端预览服务器 (生产模式，端口 50001)
-log_info "启动前端预览服务器 (0.0.0.0:50001)..."
-cd ui
-npm run preview 2>&1 | tee ../logs/frontend.log &
+npm run dev -- --host ${VITE_FRONTEND_HOST} --port ${VITE_FRONTEND_PORT} 2>&1 | tee ../logs/frontend.log &
 FRONTEND_PID=$!
 echo $FRONTEND_PID >> ../.service_pids
 cd ..

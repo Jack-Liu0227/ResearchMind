@@ -14,6 +14,7 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import toast from 'react-hot-toast'
+import { resolveFileUrl } from '../../utils/apiClient'
 
 interface MarkdownViewerProps {
   url: string
@@ -62,7 +63,9 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
       setLoading(true)
       setError(null)
 
-      const response = await fetch(url)
+      // 处理相对路径 URL
+      const resolvedUrl = resolveFileUrl(url)
+      const response = await fetch(resolvedUrl)
       if (!response.ok) {
         throw new Error(`Failed to load Markdown: ${response.statusText}`)
       }
@@ -102,7 +105,9 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
 
   const handleDownload = async () => {
     try {
-      const response = await fetch(url)
+      // 处理相对路径 URL
+      const resolvedUrl = resolveFileUrl(url)
+      const response = await fetch(resolvedUrl)
       const blob = await response.blob()
       const downloadUrl = URL.createObjectURL(blob)
 

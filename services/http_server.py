@@ -310,91 +310,10 @@ class HTTPServer:
             """
             return await convert_to_conventional(request)
 
-        @self.app.get("/api/download/{file_path:path}")
-        async def download_file(file_path: str):
-            """
-            Download file from MCP Server papers directory
-
-            Args:
-                file_path: Relative path to the file (e.g., "papers/topic_xxx/file.csv")
-
-            Returns:
-                FileResponse with the file content
-            """
-            try:
-                # 关键修复：记录下载请求信息
-                logger.info(f"📥 Download request received")
-                logger.info(f"   Original file_path: {file_path}")
-
-                # Normalize path: remove ./ prefix, convert backslashes to forward slashes
-                file_path = file_path.replace('\\', '/').lstrip('./')
-                logger.info(f"   Normalized file_path: {file_path}")
-
-                # Remove paper_search/ prefix if present
-                if file_path.startswith('paper_search/'):
-                    file_path = file_path[len('paper_search/'):]
-                    logger.info(f"   Removed paper_search/ prefix: {file_path}")
-
-                # Security: Only allow files from papers directory
-                if not file_path.startswith("mcp_servers/paper_search/papers/"):
-                    # Try to prepend the base path
-                    if file_path.startswith("papers/"):
-                        file_path = f"mcp_servers/paper_search/{file_path}"
-                        logger.info(f"   Prepended base path: {file_path}")
-                    else:
-                        logger.error(f"❌ Access denied: {file_path}")
-                        raise HTTPException(
-                            status_code=403,
-                            detail="Access denied: Only files from papers directory are allowed"
-                        )
-
-                # Check if file exists
-                logger.info(f"   Checking if file exists: {file_path}")
-                if not os.path.exists(file_path):
-                    logger.error(f"❌ File not found: {file_path}")
-                    logger.info(f"   Current working directory: {os.getcwd()}")
-                    logger.info(f"   Absolute path: {os.path.abspath(file_path)}")
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"File not found: {file_path}"
-                    )
-
-                # Check if it's a file (not a directory)
-                if not os.path.isfile(file_path):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Path is not a file"
-                    )
-
-                # Determine media type based on file extension
-                filename = os.path.basename(file_path)
-                media_type = "application/octet-stream"
-                if filename.endswith('.csv'):
-                    media_type = "text/csv"
-                elif filename.endswith('.md'):
-                    media_type = "text/markdown"
-                elif filename.endswith('.json'):
-                    media_type = "application/json"
-
-                logger.info(f"✅ Downloading file: {file_path}")
-                logger.info(f"   Media type: {media_type}")
-                logger.info(f"   Filename: {filename}")
-                logger.info(f"   File size: {os.path.getsize(file_path)} bytes")
-
-                return FileResponse(
-                    path=file_path,
-                    media_type=media_type,
-                    filename=filename
-                )
-
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"❌ File download failed: {e}", exc_info=True)
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"File download failed: {str(e)}"
-                )
+        # NOTE: /api/download/{file_path:path} 路由已移至静态文件挂载
+        # 在 StaticFileService.setup_static_files() 中通过以下方式处理：
+        # app.mount("/api/download", StaticFiles(directory=papers_dir), name="papers_download")
+        # 这样可以直接提供 CSV 和 MD 文件，无需额外的路由处理
 
     def get_app(self) -> FastAPI:
         """Get FastAPI application instance"""

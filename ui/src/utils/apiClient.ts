@@ -8,6 +8,51 @@ import { API_CONFIG } from '../constants';
 
 const API_BASE_URL = API_CONFIG.BASE_URL;
 
+/**
+ * 处理 URL 转换：如果是相对路径，转换为完整 URL
+ * 用于处理后端返回的相对路径 URL（如 /api/download/...）
+ *
+ * 支持两种部署方式：
+ * 1. 直接访问：http://localhost:50002/api/download/...
+ * 2. 反向代理：http://dyum1393797.bohrium.tech:50001/api/download/...
+ */
+export function resolveFileUrl(url: string): string {
+  console.log('🔗 resolveFileUrl - input:', url)
+  console.log('🔗 resolveFileUrl - API_BASE_URL:', API_BASE_URL)
+
+  // 如果已经是完整 URL，直接返回
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    console.log('🔗 resolveFileUrl - already full URL, returning:', url)
+    return url;
+  }
+
+  // 如果是相对路径，使用 API_BASE_URL 作为基础
+  if (url.startsWith('/')) {
+    // 如果 API_BASE_URL 是完整 URL，直接拼接
+    if (API_BASE_URL.startsWith('http://') || API_BASE_URL.startsWith('https://')) {
+      const result = `${API_BASE_URL}${url}`;
+      console.log('🔗 resolveFileUrl - using API_BASE_URL:', result)
+      return result;
+    }
+
+    // 如果 API_BASE_URL 是相对路径（如 /api），则需要使用当前域名
+    // 这种情况通常发生在通过反向代理访问时
+    const { protocol, hostname, port } = window.location;
+
+    // 构建基础 URL
+    // 注意：不使用 import.meta.env.VITE_API_PORT，因为在反向代理环境中应该使用当前访问的端口
+    const baseUrl = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
+    const result = `${baseUrl}${url}`;
+    console.log('🔗 resolveFileUrl - using window.location:', result)
+    console.log('🔗 resolveFileUrl - window.location:', { protocol, hostname, port })
+    return result;
+  }
+
+  // 其他情况，直接返回
+  console.log('🔗 resolveFileUrl - other case, returning:', url)
+  return url;
+}
+
 export interface APIStructureResponse {
   formula: string;
   spaceGroup: string;
@@ -148,7 +193,8 @@ export async function getPhononImage(
   filename: string
 ): Promise<string> {
   try {
-    const url = `${API_BASE_URL}/api/images/${imageType}/${filename}`;
+    // 统一使用 resolveFileUrl 处理相对路径
+    const url = resolveFileUrl(`/api/images/${imageType}/${filename}`);
     const response = await fetch(url);
 
     if (!response.ok) {

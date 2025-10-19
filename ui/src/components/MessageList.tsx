@@ -14,6 +14,7 @@ import { hasStructureData, smartParseStructure } from '../utils/structureParser'
 import { CrystalStructure } from '../types'
 import { CsvViewer, MarkdownViewer } from './FileViewer'
 import { API_CONFIG } from '../constants'
+import { resolveFileUrl } from '../utils/apiClient'
 
 /**
  * 从文本中提取多个 CIF 块
@@ -64,7 +65,10 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
 
   // 从metadata中提取
   if (metadata) {
+    console.log('📄 extractFileLinks - metadata:', metadata)
+
     if (metadata.csv_download_url) {
+      console.log('📄 Found CSV URL:', metadata.csv_download_url)
       links.push({
         type: 'csv',
         url: metadata.csv_download_url,
@@ -72,6 +76,7 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
       })
     }
     if (metadata.md_download_url) {
+      console.log('📄 Found MD URL:', metadata.md_download_url)
       links.push({
         type: 'md',
         url: metadata.md_download_url,
@@ -80,6 +85,8 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
           : undefined
       })
     }
+  } else {
+    console.log('📄 extractFileLinks - no metadata provided')
   }
 
   // 从文本中提取URL（备用方案）
@@ -531,9 +538,13 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
                           </div>
                           <img
                             src={
-                              (image as any).url           // 优先使用完整URL
-                                || `data:image/png;base64,${image.base64}`  // base64格式
-                                || `/api/images/${image.path}`   // 路径格式
+                              (image as any).url           // 优先使用完整URL（已通过 resolveFileUrl 处理）
+                                ? resolveFileUrl((image as any).url)
+                                : image.base64              // base64格式
+                                ? `data:image/png;base64,${image.base64}`
+                                : image.path                // 路径格式
+                                ? resolveFileUrl(`/api/images/${image.path}`)
+                                : ''
                             }
                             alt={displayName}
                             className="w-full h-auto rounded border"
@@ -575,9 +586,16 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
 
             {/* CSV和Markdown文件展示 */}
             {(() => {
+              console.log('📄 MessageItem - message.metadata:', message.metadata)
               const fileLinks = extractFileLinks(message.content, message.metadata)
-              if (fileLinks.length === 0) return null
+              console.log('📄 MessageItem - fileLinks:', fileLinks)
 
+              if (fileLinks.length === 0) {
+                console.log('📄 MessageItem - no file links found')
+                return null
+              }
+
+              console.log('📄 MessageItem - rendering', fileLinks.length, 'file links')
               return (
                 <div className="mt-3 space-y-3">
                   {fileLinks.map((file, index) => (

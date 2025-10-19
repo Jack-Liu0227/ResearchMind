@@ -134,8 +134,9 @@ class ImageHandler:
             # Extract filename from path
             filename = Path(path).name
 
-            # Generate URL
-            url = f"{ImageHandler.BASE_URL}/api/images/phonon_results/{filename}"
+            # Generate URL - 统一使用 /api/images/... 格式
+            # 后端始终返回相对路径，前端会自动转换为完整 URL
+            url = f"/api/images/phonon_results/{filename}"
 
             # Check if file exists
             available = os.path.exists(path)
@@ -160,17 +161,19 @@ class ImageHandler:
         """Create generic image data with proper URL"""
         try:
             filename = Path(path).name
-            
+
             # Determine URL prefix based on path
             if "phonon" in path.lower():
-                url_prefix = "/api/images/phonon_results"
+                url_prefix = "/images/phonon_results"
             elif "structure" in path.lower() or "generated" in path.lower():
-                url_prefix = "/api/images/generated_structures"
+                url_prefix = "/images/generated_structures"
             else:
-                url_prefix = "/api/images"
-            
-            url = f"{ImageHandler.BASE_URL}{url_prefix}/{filename}"
-            
+                url_prefix = "/images"
+
+            # 统一使用 /api/images/... 格式
+            # 后端始终返回相对路径，前端会自动转换为完整 URL
+            url = f"/api{url_prefix}/{filename}"
+
             return {
                 "name": name,
                 "type": image_type,
@@ -199,15 +202,17 @@ class ImageHandler:
     def get_image_url(filename: str, image_type: str = "phonon_results") -> str:
         """
         Generate image URL for a given filename
-        
+
         Args:
             filename: Image filename
             image_type: Type of image (phonon_results, generated_structures, etc.)
-            
+
         Returns:
-            Full URL to access the image
+            Full URL to access the image (relative path)
         """
-        return f"{ImageHandler.BASE_URL}/api/images/{image_type}/{filename}"
+        # 统一使用 /api/images/... 格式
+        # 后端始终返回相对路径，前端会自动转换为完整 URL
+        return f"/api/images/{image_type}/{filename}"
     
     @staticmethod
     def standardize_image_data(image: Dict[str, Any]) -> Dict[str, Any]:
