@@ -66,17 +66,56 @@ class ResearchReportGenerator:
                    num_papers=len(papers_info))
 
         try:
-            # 第一步：为每篇论文生成详细分析（限制并发数量以节省内存）
+            # 第一步：异步并行获取所有论文的全文
             import asyncio
             import gc
+            from ..paper_manager.content_fetcher import get_paper_content_by_source
 
             # 内存优化：限制并发任务数量
             MAX_CONCURRENT_TASKS = 8  # 限制为8个并发任务，高并发处理
             BATCH_SIZE = 8  # 每批处理8篇论文
 
+            async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> Dict[str, Any]:
+                """异步获取单篇论文的全文"""
+                try:
+                    logger.info(f"Fetching content {i+1}/{len(papers_info)}: {paper.get('title', 'Unknown')[:50]}...")
+
+                    # 使用 executor 包装同步操作
+                    loop = asyncio.get_event_loop()
+                    content_result = await loop.run_in_executor(
+                        None,
+                        lambda: get_paper_content_by_source(paper, paper.get('source'))
+                    )
+
+                    # 将全文添加到论文信息中
+                    enriched_paper = paper.copy()
+                    enriched_paper['full_text'] = content_result.get('content', '')
+                    enriched_paper['content_metadata'] = content_result.get('metadata', {})
+
+                    logger.info(f"Successfully got content for paper {i+1}")
+                    return enriched_paper
+
+                except Exception as e:
+                    logger.warning(f"Failed to get content for paper {paper.get('paper_id', 'unknown')}: {e}")
+                    # 失败时只使用摘要
+                    enriched_paper = paper.copy()
+                    enriched_paper['full_text'] = paper.get('abstract', '')
+                    enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': str(e)}
+                    return enriched_paper
+
+            # 并行获取所有论文的全文
+            logger.info(f"Fetching content for {len(papers_info)} papers in parallel...")
+            fetch_tasks = [fetch_paper_content(i, paper) for i, paper in enumerate(papers_info)]
+            enriched_papers = await asyncio.gather(*fetch_tasks)
+
+            # 及时释放内存
+            gc.collect()
+            logger.info("Content fetching completed, memory freed")
+
+            # 第二步：为每篇论文生成详细分析（限制并发数量以节省内存）
             async def analyze_single_paper(i, paper):
                 """分析单篇论文"""
-                logger.info(f"Analyzing paper {i+1}/{len(papers_info)}: {paper.get('title', 'Unknown')[:50]}...")
+                logger.info(f"Analyzing paper {i+1}/{len(enriched_papers)}: {paper.get('title', 'Unknown')[:50]}...")
 
                 # 获取全文或摘要
                 full_text = paper.get('full_text', '')
@@ -154,12 +193,12 @@ URL: {paper.get('url', 'N/A')}
                     }
 
             # 分批处理论文以节省内存
-            logger.info(f"Starting batch analysis of {len(papers_info)} papers (batch size: {BATCH_SIZE})...")
+            logger.info(f"Starting batch analysis of {len(enriched_papers)} papers (batch size: {BATCH_SIZE})...")
             detailed_analyses = []
 
-            for batch_start in range(0, len(papers_info), BATCH_SIZE):
-                batch_end = min(batch_start + BATCH_SIZE, len(papers_info))
-                batch_papers = papers_info[batch_start:batch_end]
+            for batch_start in range(0, len(enriched_papers), BATCH_SIZE):
+                batch_end = min(batch_start + BATCH_SIZE, len(enriched_papers))
+                batch_papers = enriched_papers[batch_start:batch_end]
 
                 logger.info(f"Processing batch {batch_start//BATCH_SIZE + 1}: papers {batch_start+1}-{batch_end}")
 
@@ -179,7 +218,7 @@ URL: {paper.get('url', 'N/A')}
                 gc.collect()
                 logger.info(f"Completed batch {batch_start//BATCH_SIZE + 1}, memory freed")
 
-            logger.info(f"Completed analysis of {len(papers_info)} papers")
+            logger.info(f"Completed analysis of {len(enriched_papers)} papers")
 
             # 第二步：准备所有分析的摘要（内存优化版本）
             analyses_summary = []
@@ -590,23 +629,29 @@ async def generate_research_report_with_data_collection(
     try:
         logger.info(f'Generating research report for topic: {topic} with {len(papers_info)} papers')
 
-        # 获取所有论文的全文
+        # 异步并行获取所有论文的全文
+        import asyncio
         from ..paper_manager.content_fetcher import get_paper_content_by_source
 
-        enriched_papers = []
-        for paper in papers_info:
+        async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> Dict[str, Any]:
+            """异步获取单篇论文的全文"""
             try:
-                # 获取全文
-                content_result = get_paper_content_by_source(paper, paper.get('source'))
+                logger.info(f"Fetching content {i+1}/{len(papers_info)}: {paper.get('title', 'Unknown')[:50]}...")
+
+                # 使用 executor 包装同步操作
+                loop = asyncio.get_event_loop()
+                content_result = await loop.run_in_executor(
+                    None,
+                    lambda: get_paper_content_by_source(paper, paper.get('source'))
+                )
 
                 # 将全文添加到论文信息中
                 enriched_paper = paper.copy()
                 enriched_paper['full_text'] = content_result.get('content', '')
                 enriched_paper['content_metadata'] = content_result.get('metadata', {})
 
-                enriched_papers.append(enriched_paper)
-
-                logger.info(f"Got content for paper: {paper.get('title', 'Unknown')[:50]}...")
+                logger.info(f"Successfully got content for paper {i+1}")
+                return enriched_paper
 
             except Exception as e:
                 logger.warning(f"Failed to get content for paper {paper.get('paper_id', 'unknown')}: {e}")
@@ -614,7 +659,12 @@ async def generate_research_report_with_data_collection(
                 enriched_paper = paper.copy()
                 enriched_paper['full_text'] = paper.get('abstract', '')
                 enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': str(e)}
-                enriched_papers.append(enriched_paper)
+                return enriched_paper
+
+        # 并行获取所有论文的全文
+        logger.info(f"Fetching content for {len(papers_info)} papers in parallel...")
+        fetch_tasks = [fetch_paper_content(i, paper) for i, paper in enumerate(papers_info)]
+        enriched_papers = await asyncio.gather(*fetch_tasks)
 
         # 使用增强后的论文信息生成报告
         return await generate_research_report(
