@@ -22,13 +22,16 @@ export default defineConfig({
     },
   },
   server: {
-    // Internal port (behind Nginx reverse proxy)
-    port: 8001,
-    host: '127.0.0.1',
+    // Listen on all network interfaces to allow external access
+    // When behind Nginx reverse proxy, this allows the proxy to connect
+    port: 50001,
+    host: '0.0.0.0',
     strictPort: true,
     open: false, // 改为false，避免自动打开浏览器
     cors: true,
-    allowedHosts: getAllowedHosts(),
+    // Disable allowedHosts check to allow all domains
+    // This is safe when behind a reverse proxy that validates the Host header
+    allowedHosts: [],
     hmr: {
       overlay: true,
       timeout: 30000,

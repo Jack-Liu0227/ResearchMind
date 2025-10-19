@@ -5,9 +5,9 @@
   "description": "ResearchMind AI Research Assistant Frontend",
   "type": "module",
   "scripts": {
-    "start": "vite --host 0.0.0.0 --port 50001",
-    "dev": "vite --host 0.0.0.0 --port 50001",
-    "dev:debug": "vite --host 0.0.0.0 --port 50001 --debug",
+    "start": "vite --port 50001",
+    "dev": "vite --port 50001",
+    "dev:debug": "vite --port 50001 --debug",
     "build": "tsc && vite build",
     "build:prod": "tsc && vite build --mode production",
     "build:docker": "tsc --noEmit || true && vite build",
