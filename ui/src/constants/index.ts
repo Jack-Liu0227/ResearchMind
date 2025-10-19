@@ -62,8 +62,10 @@ const resolveApiUrl = (envUrl?: string): string => {
   // 如果是相对路径（以 / 开头），转换为完整 URL
   if (envUrl.startsWith('/')) {
     const { protocol, hostname } = resolveRuntimeLocation()
-    const port = trimEnv(import.meta.env.VITE_API_PORT) || '50002'
-    return `${protocol}//${hostname}:${port}${envUrl}`
+    // 对于相对路径，使用当前访问的端口（通过 Nginx 反向代理）
+    // 不指定端口，让浏览器使用当前访问的端口
+    // 这样可以支持任意端口的 Nginx 反向代理配置
+    return `${protocol}//${hostname}${envUrl}`
   }
 
   // 如果是完整 URL，直接返回
@@ -80,8 +82,10 @@ const resolveWsUrl = (envUrl?: string): string => {
   if (envUrl.startsWith('/')) {
     const { hostname, isHttps } = resolveRuntimeLocation()
     const protocol = isHttps ? 'wss:' : 'ws:'
-    const port = trimEnv(import.meta.env.VITE_WS_PORT) || '50003'
-    return `${protocol}//${hostname}:${port}${envUrl}`
+    // 对于相对路径，使用当前访问的端口（通过 Nginx 反向代理）
+    // 不指定端口，让浏览器使用当前访问的端口
+    // 这样可以支持任意端口的 Nginx 反向代理配置
+    return `${protocol}//${hostname}${envUrl}`
   }
 
   // 如果是完整 URL，直接返回
