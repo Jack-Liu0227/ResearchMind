@@ -71,7 +71,7 @@ class ResearchReportGenerator:
             import gc
 
             # 内存优化：限制并发任务数量
-            MAX_CONCURRENT_TASKS = 3  # 限制为3个并发任务，适应4G内存环境
+            MAX_CONCURRENT_TASKS = 8  # 限制为8个并发任务，高并发处理
             BATCH_SIZE = 8  # 每批处理8篇论文
 
             async def analyze_single_paper(i, paper):
