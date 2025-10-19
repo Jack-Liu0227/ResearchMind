@@ -370,19 +370,19 @@ def _find_mattersim_model() -> Path:
     # Also try from current working directory
     cwd = Path.cwd()
 
-    # Possible model paths (prefer 5M over 1M)
+    # Possible model paths (prefer 1M over 5M for better performance on limited resources)
     possible_paths = [
         # Relative to this file's location
-        models_dir / "mattersim-v1.0.0-5M" / "mattersim-v1.0.0-5M.pth",
         models_dir / "mattersim-v1.0.0-1M" / "mattersim-v1.0.0-1M.pth",
+        models_dir / "mattersim-v1.0.0-5M" / "mattersim-v1.0.0-5M.pth",
         # Relative to current working directory
-        cwd / "mcp_servers" / "simulation" / "models" / "mattersim-v1.0.0-5M" / "mattersim-v1.0.0-5M.pth",
         cwd / "mcp_servers" / "simulation" / "models" / "mattersim-v1.0.0-1M" / "mattersim-v1.0.0-1M.pth",
+        cwd / "mcp_servers" / "simulation" / "models" / "mattersim-v1.0.0-5M" / "mattersim-v1.0.0-5M.pth",
         # Simple relative paths
-        Path("mcp_servers/simulation/models/mattersim-v1.0.0-5M/mattersim-v1.0.0-5M.pth"),
         Path("mcp_servers/simulation/models/mattersim-v1.0.0-1M/mattersim-v1.0.0-1M.pth"),
-        Path("models/mattersim-v1.0.0-5M/mattersim-v1.0.0-5M.pth"),
+        Path("mcp_servers/simulation/models/mattersim-v1.0.0-5M/mattersim-v1.0.0-5M.pth"),
         Path("models/mattersim-v1.0.0-1M/mattersim-v1.0.0-1M.pth"),
+        Path("models/mattersim-v1.0.0-5M/mattersim-v1.0.0-5M.pth"),
     ]
 
     logger.info("Searching for MatterSim model",
