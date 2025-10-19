@@ -30,7 +30,7 @@ else:
 API_BASE_URL = os.getenv("VITE_API_URL")
 if not API_BASE_URL:
     http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
+    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")  # Changed from 50006 to 50002
     # Use 127.0.0.1 if host is 0.0.0.0 (for local connections)
     if http_host == "0.0.0.0":
         http_host = "127.0.0.1"

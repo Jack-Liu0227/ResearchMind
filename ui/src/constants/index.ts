@@ -24,8 +24,8 @@ const resolveRuntimeLocation = () => {
 
 const buildDefaultApiUrl = () => {
   const { protocol, hostname } = resolveRuntimeLocation()
-  // 关键修复：使用50006作为默认API端口（后端HTTP API）
-  const port = trimEnv(import.meta.env.VITE_API_PORT) || '50006'
+  // 关键修复：使用50002作为默认API端口（后端HTTP API）
+  const port = trimEnv(import.meta.env.VITE_API_PORT) || '50002'
   return `${protocol}//${hostname}:${port}`
 }
 

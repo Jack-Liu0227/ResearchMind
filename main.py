@@ -94,7 +94,7 @@ async def main():
     # 使用 RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
     import os
     api_host = os.getenv("RESEARCHMIND_HTTP_HOST", server_config.HTTP_HOST)
-    api_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
+    api_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")  # Changed from 50006 to 50002
     ImageHandler.set_base_url(api_host, int(api_port))
     logger.info(f"✅ Image handler configured: {ImageHandler.BASE_URL}")
     

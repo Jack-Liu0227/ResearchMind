@@ -74,6 +74,7 @@ irm https://astral.sh/uv/install.ps1 | iex
 - **前端界面**: `http://localhost:50001`
 - **外部访问**: `http://your-ip:50001`
 - **API文档**: `http://your-ip:50002/docs`
+- **后端API**: `http://localhost:50002` (本地) 或 `http://your-ip:50002` (外部)
 
 ## 🔧 配置
 
@@ -97,16 +98,25 @@ MP_API_KEY=your_materials_project_api_key
 ```env
 # 前端配置 - UI必须使用 0.0.0.0 才能外部访问
 VITE_FRONTEND_HOST=0.0.0.0
+VITE_FRONTEND_PORT=50001
 VITE_API_URL=http://your-ip:50002
 VITE_WS_URL=ws://your-ip:50003/ws
 
-# 后端服务 - 需要外部访问
-RESEARCHMIND_HOST=0.0.0.0
+# 后端HTTP API - 仅本地监听
+RESEARCHMIND_HTTP_HOST=127.0.0.1
+RESEARCHMIND_HTTP_PORT=50002
 
-# MCP 服务器配置 - 内部服务使用 localhost
-PAPER_SEARCH_HOST=localhost
-DATABASE_HOST=localhost  
-SIMULATION_HOST=localhost
+# WebSocket - 仅本地监听
+RESEARCHMIND_WS_HOST=127.0.0.1
+RESEARCHMIND_WS_PORT=50003
+
+# MCP 服务器配置 - 监听地址
+PAPER_SEARCH_MCP_HOST=127.0.0.1
+PAPER_SEARCH_MCP_PORT=50004
+DATABASE_MCP_HOST=127.0.0.1
+DATABASE_MCP_PORT=50006
+SIMULATION_MCP_HOST=127.0.0.1
+SIMULATION_MCP_PORT=50005
 ```
 
 ## 🛑 停止服务

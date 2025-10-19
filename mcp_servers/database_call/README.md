@@ -16,12 +16,12 @@ Database MCP Server 是一个基于 FastMCP 构建的材料数据库查询服务
 
 ### 启动 Server
 ```bash
-uv run python mcp_servers/database_call/server.py --port 50002
+uv run python mcp_servers/database_call/server.py --port 50006
 ```
 
 Server 将在以下端点启动：
-- **SSE Endpoint**: `http://localhost:50002/sse`
-- **Health Check**: `http://localhost:50002/health`
+- **SSE Endpoint**: `http://localhost:50006/sse`
+- **Health Check**: `http://localhost:50006/health`
 
 ## 📖 相关文档
 

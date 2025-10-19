@@ -1238,7 +1238,7 @@ if __name__ == "__main__":
     import uvicorn
     # Get configuration from environment
     host = os.getenv("DATABASE_MCP_HOST", "127.0.0.1")  # Bind to localhost by default
-    port = int(os.getenv("DATABASE_MCP_PORT", "50002"))
+    port = int(os.getenv("DATABASE_MCP_PORT", "50006"))
     external_url = os.getenv("DATABASE_MCP_URL", f"http://127.0.0.1:{port}/sse")
 
     logger.info(f"[START] Starting Database MCP Server in SSE mode on http://{host}:{port}")

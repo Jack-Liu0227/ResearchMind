@@ -18,7 +18,7 @@ class ServerConfig:
 
     # HTTP API Server
     HTTP_HOST = os.getenv("RESEARCHMIND_HTTP_HOST", os.getenv("RESEARCHMIND_HOST", "0.0.0.0"))
-    HTTP_PORT = int(os.getenv("RESEARCHMIND_HTTP_PORT", "50002"))
+    HTTP_PORT = int(os.getenv("RESEARCHMIND_HTTP_PORT", "50002"))  # Changed from 50006 to 50002
 
     # Debug: Print configuration on load
     @classmethod
@@ -108,18 +108,15 @@ class MCPConfig:
     # Use environment variables for MCP server URLs (for Docker support)
     # 注意：
     # - 服务器监听使用 *_MCP_HOST 和 *_MCP_PORT
-    # - 客户端连接使用 *_HOST 和 *_MCP_URL（支持分布式部署）
+    # - 客户端连接使用 *_MCP_URL（支持分布式部署）
 
     # Paper Search MCP
-    PAPER_SEARCH_HOST = os.getenv("PAPER_SEARCH_HOST", "127.0.0.1")
     PAPER_SEARCH_URL = os.getenv("PAPER_SEARCH_MCP_URL", "http://127.0.0.1:50004/sse")
 
     # Database MCP
-    DATABASE_HOST = os.getenv("DATABASE_HOST", "127.0.0.1")
-    DATABASE_URL = os.getenv("DATABASE_MCP_URL", "http://127.0.0.1:50006/sse")
+    DATABASE_URL = os.getenv("DATABASE_MCP_URL", "http://127.0.0.1:50006/sse")  # Changed from 50002 to 50006
 
     # Simulation MCP
-    SIMULATION_HOST = os.getenv("SIMULATION_HOST", "127.0.0.1")
     SIMULATION_URL = os.getenv("SIMULATION_MCP_URL", "http://127.0.0.1:50005/sse")
 
     SERVERS = {
@@ -131,7 +128,7 @@ class MCPConfig:
         "database": {
             "name": "Database MCP",
             "url": DATABASE_URL,
-            "port": 50006,
+            "port": 50006,  # Changed from 50002 to 50006
         },
         "simulation": {
             "name": "Simulation MCP",
