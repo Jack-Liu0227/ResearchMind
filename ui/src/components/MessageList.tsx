@@ -543,7 +543,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
                                 : image.base64              // base64格式
                                 ? `data:image/png;base64,${image.base64}`
                                 : image.path                // 路径格式
-                                ? resolveFileUrl(`/api/images/${image.path}`)
+                                ? resolveFileUrl(`/images/${image.path}`)
                                 : ''
                             }
                             alt={displayName}
@@ -741,6 +741,21 @@ const LoadingMessage: React.FC<LoadingMessageProps> = ({ message = '⏳ 智能�
 const MessageList: React.FC<MessageListProps> = ({ messages, onRegenerate }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { isLoading, loadingMessage } = useAppStore()
+
+  // 调试：监听消息变化
+  useEffect(() => {
+    console.log('📋 MessageList - messages updated:', messages.length, 'messages')
+    messages.forEach(msg => {
+      if (msg.metadata?.csv_download_url || msg.metadata?.md_download_url) {
+        console.log('📋 Message with file metadata:', {
+          id: msg.id,
+          role: msg.role,
+          csv: msg.metadata?.csv_download_url,
+          md: msg.metadata?.md_download_url
+        })
+      }
+    })
+  }, [messages])
 
   // 自动滚动到底部
   useEffect(() => {

@@ -50,7 +50,9 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
 
       // 处理相对路径 URL
       const resolvedUrl = resolveFileUrl(url)
-      console.log('Loading CSV from URL:', resolvedUrl)
+      console.log('📊 CsvViewer - Loading CSV from URL:', resolvedUrl)
+      console.log('📊 CsvViewer - Original URL:', url)
+
       const response = await fetch(resolvedUrl, {
         method: 'GET',
         headers: {
@@ -58,23 +60,32 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
         }
       })
 
+      console.log('📊 CsvViewer - Response status:', response.status, response.statusText)
+      console.log('📊 CsvViewer - Response headers:', {
+        'content-type': response.headers.get('content-type'),
+        'content-length': response.headers.get('content-length')
+      })
+
       if (!response.ok) {
-        console.error(`CSV load failed: ${response.status} ${response.statusText}`)
+        console.error(`❌ CSV load failed: ${response.status} ${response.statusText}`)
         throw new Error(`Failed to load CSV: ${response.status} ${response.statusText}`)
       }
 
       const text = await response.text()
-      console.log(`CSV loaded successfully, size: ${text.length} bytes`)
+      console.log(`📊 CsvViewer - CSV loaded successfully, size: ${text.length} bytes`)
+      console.log(`📊 CsvViewer - CSV content preview (first 200 chars):`, text.substring(0, 200))
 
       if (!text.trim()) {
+        console.warn('⚠️ CSV file is empty')
         throw new Error('CSV file is empty')
       }
 
       const parsed = parseCsv(text)
-      console.log(`CSV parsed: ${parsed.headers.length} columns, ${parsed.rows.length} rows`)
+      console.log(`📊 CsvViewer - CSV parsed: ${parsed.headers.length} columns, ${parsed.rows.length} rows`)
+      console.log(`📊 CsvViewer - Headers:`, parsed.headers)
       setCsvData(parsed)
     } catch (err) {
-      console.error('Failed to load CSV:', err)
+      console.error('❌ Failed to load CSV:', err)
       setError(err instanceof Error ? err.message : 'Failed to load CSV')
     } finally {
       setLoading(false)

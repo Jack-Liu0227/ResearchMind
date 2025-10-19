@@ -130,9 +130,9 @@ class StaticFileService:
         Returns:
             Full URL to access the file (relative path)
         """
-        # 统一使用 /api/images/... 格式
-        # 后端始终返回相对路径，前端会自动转换为完整 URL
-        return f"/api/images/{file_type}/{filename}"
+        # 统一使用 /images/... 格式（不包含 /api 前缀）
+        # Nginx 代理会添加 /api 前缀，前端会自动转换为完整 URL
+        return f"/images/{file_type}/{filename}"
     
     @staticmethod
     def verify_file_exists(filepath: str) -> bool:

@@ -357,13 +357,16 @@ const ChatPage: React.FC = () => {
         // 处理文件元数据（CSV和MD文件链接）
         console.log('📄 收到文件元数据:', message.data.metadata)
         console.log('📄 当前消息数:', messages.length)
+        console.log('📄 所有消息:', messages.map(m => ({ id: m.id, role: m.role, metadata: m.metadata })))
 
         // 找到最后一条assistant消息，而不是最后一条消息
         // 因为最后一条消息可能是status消息或其他消息
         const assistantMessages = messages.filter(m => m.role === 'assistant')
         console.log('📄 Assistant消息数:', assistantMessages.length)
+        console.log('📄 Assistant消息列表:', assistantMessages.map(m => ({ id: m.id, metadata: m.metadata })))
 
-        const currentMessage = assistantMessages.pop()
+        // 使用 [...] 创建新数组副本，避免修改原数组
+        const currentMessage = [...assistantMessages].pop()
         if (currentMessage) {
           console.log('📄 更新消息metadata:', currentMessage.id)
           console.log('📄 原metadata:', currentMessage.metadata)
@@ -375,6 +378,13 @@ const ChatPage: React.FC = () => {
               ...message.data.metadata
             }
           })
+
+          // 验证更新是否成功
+          setTimeout(() => {
+            const state = useAppStore.getState()
+            const updatedMsg = state.messages.find(m => m.id === currentMessage.id)
+            console.log('📄 更新后的消息metadata:', updatedMsg?.metadata)
+          }, 100)
 
           // 提示用户
           const fileTypes = []

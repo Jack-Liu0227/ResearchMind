@@ -47,8 +47,8 @@ export const PhononViewer: React.FC<PhononViewerProps> = ({ composition, classNa
   };
 
   const getImageUrl = (filename: string): string => {
-    // 统一使用 resolveFileUrl 处理相对路径
-    return resolveFileUrl(`/api/images/phonon_results/${filename}`);
+    // 统一使用 resolveFileUrl 处理相对路径（不包含 /api 前缀）
+    return resolveFileUrl(`/images/phonon_results/${filename}`);
   };
 
   const handleImageLoad = () => {

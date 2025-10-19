@@ -69,7 +69,7 @@ server {
     # 重要：使用 proxy_pass http://backend_api/api/ 而不是 http://backend_api/
     # 这样 /api/download/... 会正确转发到 http://backend_api/api/download/...
     location /api/ {
-        proxy_pass http://backend_api/api/;
+        proxy_pass http://backend_api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

@@ -134,9 +134,9 @@ class ImageHandler:
             # Extract filename from path
             filename = Path(path).name
 
-            # Generate URL - 统一使用 /api/images/... 格式
-            # 后端始终返回相对路径，前端会自动转换为完整 URL
-            url = f"/api/images/phonon_results/{filename}"
+            # Generate URL - 统一使用 /images/... 格式（不包含 /api 前缀）
+            # Nginx 代理会添加 /api 前缀，前端会自动转换为完整 URL
+            url = f"/images/phonon_results/{filename}"
 
             # Check if file exists
             available = os.path.exists(path)
@@ -162,7 +162,7 @@ class ImageHandler:
         try:
             filename = Path(path).name
 
-            # Determine URL prefix based on path
+            # Determine URL prefix based on path（不包含 /api 前缀）
             if "phonon" in path.lower():
                 url_prefix = "/images/phonon_results"
             elif "structure" in path.lower() or "generated" in path.lower():
@@ -170,9 +170,9 @@ class ImageHandler:
             else:
                 url_prefix = "/images"
 
-            # 统一使用 /api/images/... 格式
-            # 后端始终返回相对路径，前端会自动转换为完整 URL
-            url = f"/api{url_prefix}/{filename}"
+            # 统一使用 /images/... 格式（不包含 /api 前缀）
+            # Nginx 代理会添加 /api 前缀，前端会自动转换为完整 URL
+            url = f"{url_prefix}/{filename}"
 
             return {
                 "name": name,
@@ -210,9 +210,9 @@ class ImageHandler:
         Returns:
             Full URL to access the image (relative path)
         """
-        # 统一使用 /api/images/... 格式
-        # 后端始终返回相对路径，前端会自动转换为完整 URL
-        return f"/api/images/{image_type}/{filename}"
+        # 统一使用 /images/... 格式（不包含 /api 前缀）
+        # Nginx 代理会添加 /api 前缀，前端会自动转换为完整 URL
+        return f"/images/{image_type}/{filename}"
     
     @staticmethod
     def standardize_image_data(image: Dict[str, Any]) -> Dict[str, Any]:

@@ -28,9 +28,21 @@ export function resolveFileUrl(url: string): string {
 
   // 如果是相对路径，使用 API_BASE_URL 作为基础
   if (url.startsWith('/')) {
-    // 如果 API_BASE_URL 是完整 URL，直接拼接
+    // 关键修复：检查 API_BASE_URL 是否已经包含 /api
+    let finalUrl = url;
+
+    // 如果 API_BASE_URL 已经以 /api 结尾，就不要再添加 /api 前缀
+    if (API_BASE_URL.endsWith('/api') || API_BASE_URL === '/api') {
+      // API_BASE_URL 已经是 /api 或以 /api 结尾，直接使用 url
+      finalUrl = url;
+    } else if (!url.startsWith('/api/')) {
+      // API_BASE_URL 不包含 /api，需要添加
+      finalUrl = `/api${url}`;
+    }
+
+    // 如果 API_BASE_URL 是完整 URL
     if (API_BASE_URL.startsWith('http://') || API_BASE_URL.startsWith('https://')) {
-      const result = `${API_BASE_URL}${url}`;
+      const result = `${API_BASE_URL}${finalUrl}`;
       console.log('🔗 resolveFileUrl - using API_BASE_URL:', result)
       return result;
     }
@@ -42,7 +54,8 @@ export function resolveFileUrl(url: string): string {
     // 构建基础 URL
     // 注意：不使用 import.meta.env.VITE_API_PORT，因为在反向代理环境中应该使用当前访问的端口
     const baseUrl = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
-    const result = `${baseUrl}${url}`;
+
+    const result = `${baseUrl}${finalUrl}`;
     console.log('🔗 resolveFileUrl - using window.location:', result)
     console.log('🔗 resolveFileUrl - window.location:', { protocol, hostname, port })
     return result;
@@ -193,8 +206,8 @@ export async function getPhononImage(
   filename: string
 ): Promise<string> {
   try {
-    // 统一使用 resolveFileUrl 处理相对路径
-    const url = resolveFileUrl(`/api/images/${imageType}/${filename}`);
+    // 统一使用 resolveFileUrl 处理相对路径（不包含 /api 前缀）
+    const url = resolveFileUrl(`/images/${imageType}/${filename}`);
     const response = await fetch(url);
 
     if (!response.ok) {

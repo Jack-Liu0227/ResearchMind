@@ -49,7 +49,7 @@ def get_download_url(file_path: str) -> str:
     """
     生成文件下载 URL
 
-    始终返回相对路径，前端会自动转换为完整 URL
+    始终返回相对路径（不包含 /api 前缀），Nginx 代理会添加
     这样可以支持任何部署方式（直接访问、反向代理等）
 
     参考 ImageHandler 的实现逻辑
@@ -62,9 +62,9 @@ def get_download_url(file_path: str) -> str:
     elif file_path.startswith('paper_search/'):
         file_path = file_path[len('paper_search/'):]
 
-    # 始终返回相对路径：/api/download/...
-    # 前端的 resolveFileUrl() 函数会处理转换为完整 URL
-    return f"/api/download/{file_path}"
+    # 始终返回相对路径：/download/...（不包含 /api 前缀）
+    # Nginx 代理会添加 /api 前缀，前端的 resolveFileUrl() 函数会处理转换为完整 URL
+    return f"api/api/download/{file_path}"
 from typing import List, Dict, Any, Optional
 
 from fastmcp import FastMCP

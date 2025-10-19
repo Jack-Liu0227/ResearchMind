@@ -127,10 +127,10 @@ const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' 
   const getImageUrl = (image: PhononImage): string => {
     if (image.base64) return `data:image/png;base64,${image.base64}`
 
-    // 统一使用 resolveFileUrl 处理相对路径
+    // 统一使用 resolveFileUrl 处理相对路径（不包含 /api 前缀）
     if (image.url) return resolveFileUrl(image.url)
-    if (image.filename) return resolveFileUrl(`/api/images/phonon_results/${image.filename}`)
-    if (image.path) return resolveFileUrl(`/api/images/${image.path}`)
+    if (image.filename) return resolveFileUrl(`/images/phonon_results/${image.filename}`)
+    if (image.path) return resolveFileUrl(`/images/${image.path}`)
     return ''
   }
 
