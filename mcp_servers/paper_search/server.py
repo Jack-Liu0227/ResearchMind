@@ -43,6 +43,33 @@ def get_api_base_url() -> str:
         http_host = "localhost"
 
     return f"http://{http_host}:{http_port}"
+
+
+def get_download_url(file_path: str) -> str:
+    """
+    生成文件下载 URL
+
+    处理相对路径和完整 URL 的情况：
+    - 如果 VITE_API_URL 是相对路径（如 /api），则生成 /api/download/{file_path}
+    - 如果 VITE_API_URL 是完整 URL，则生成 {VITE_API_URL}/download/{file_path}
+    - 否则使用 RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
+    """
+    api_base_url = get_api_base_url()
+
+    # 规范化文件路径：移除 ./ 前缀，转换反斜杠为正斜杠
+    file_path = file_path.replace('\\', '/').lstrip('./')
+    # 移除前缀 "mcp_servers/paper_search/" 如果存在
+    if file_path.startswith('mcp_servers/paper_search/'):
+        file_path = file_path[len('mcp_servers/paper_search/'):]
+    elif file_path.startswith('paper_search/'):
+        file_path = file_path[len('paper_search/'):]
+
+    # 如果 api_base_url 是相对路径（以 / 开头），则直接拼接 /download
+    if api_base_url.startswith('/'):
+        return f"{api_base_url}/download/{file_path}"
+    else:
+        # 完整 URL，直接拼接
+        return f"{api_base_url}/download/{file_path}"
 from typing import List, Dict, Any, Optional
 
 from fastmcp import FastMCP
@@ -436,18 +463,8 @@ async def search_papers(
 
     # 添加 CSV 文件下载URL
     if csv_result.get('file_path'):
-        # 转换文件路径为下载URL
-        file_path = csv_result['file_path']
-        # 规范化路径：移除 ./ 前缀，转换反斜杠为正斜杠
-        file_path = file_path.replace('\\', '/').lstrip('./')
-        # 移除前缀 "mcp_servers/paper_search/" 如果存在
-        if file_path.startswith('mcp_servers/paper_search/'):
-            file_path = file_path[len('mcp_servers/paper_search/'):]
-        elif file_path.startswith('paper_search/'):
-            file_path = file_path[len('paper_search/'):]
-        # 获取 API 基础 URL（支持动态配置）
-        api_base_url = get_api_base_url()
-        download_url = f"{api_base_url}/api/download/{file_path}"
+        # 使用新的 get_download_url 函数生成下载URL
+        download_url = get_download_url(csv_result['file_path'])
         final_result['csv_download_url'] = download_url
         final_result['csv_file_path'] = csv_result['file_path']  # 保留原始路径用于调试
 
@@ -941,23 +958,8 @@ async def batch_paper_analysis(
         if summary_result.get('file_path'):
             file_path = summary_result['file_path']
             result['summary_file_path'] = file_path
-            # 添加下载URL
-            # 规范化路径：移除 ./ 前缀，转换反斜杠为正斜杠
-            file_path = file_path.replace('\\', '/').lstrip('./')
-            if file_path.startswith('mcp_servers/paper_search/'):
-                file_path = file_path[len('mcp_servers/paper_search/'):]
-            elif file_path.startswith('paper_search/'):
-                file_path = file_path[len('paper_search/'):]
-            # 获取 API 基础 URL（支持动态配置）
-            # 优先使用 VITE_API_URL（前端调用的API地址）
-            api_base_url = os.getenv("VITE_API_URL")
-            if not api_base_url:
-                http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
-                if http_host == "0.0.0.0":
-                    http_host = "127.0.0.1"
-                api_base_url = f"http://{http_host}:{http_port}"
-            result['md_download_url'] = f"{api_base_url}/api/download/{file_path}"
+            # 使用新的 get_download_url 函数生成下载URL
+            result['md_download_url'] = get_download_url(file_path)
 
         # 保存分析结果到 CSV 文件（包含中文摘要和关键信息）
         csv_result = save_analysis_results_to_csv(
@@ -969,24 +971,8 @@ async def batch_paper_analysis(
         if csv_result.get('file_path'):
             file_path = csv_result['file_path']
             result['csv_file_path'] = file_path
-            # 添加下载URL
-            # 规范化路径：移除 ./ 前缀，转换反斜杠为正斜杠
-            file_path = file_path.replace('\\', '/').lstrip('./')
-            if file_path.startswith('mcp_servers/paper_search/'):
-                file_path = file_path[len('mcp_servers/paper_search/'):]
-            elif file_path.startswith('paper_search/'):
-                file_path = file_path[len('paper_search/'):]
-            # 获取 API 基础 URL（支持动态配置）
-            # 优先使用 VITE_API_URL（前端调用的API地址）
-            api_base_url = os.getenv("VITE_API_URL")
-            if not api_base_url:
-                http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
-                # 如果监听地址是 0.0.0.0，使用 localhost 以支持反向代理
-                if http_host == "0.0.0.0":
-                    http_host = "localhost"
-                api_base_url = f"http://{http_host}:{http_port}"
-            result['csv_download_url'] = f"{api_base_url}/api/download/{file_path}"
+            # 使用新的 get_download_url 函数生成下载URL
+            result['csv_download_url'] = get_download_url(file_path)
 
         # 简化results字段,只保留重要信息
         if 'results' in result:
@@ -1228,17 +1214,8 @@ async def generate_research_report(
                     file_path = file_path[len('mcp_servers/paper_search/'):]
                 elif file_path.startswith('paper_search/'):
                     file_path = file_path[len('paper_search/'):]
-                # 获取 API 基础 URL（支持动态配置）
-                # 优先使用 VITE_API_URL（前端调用的API地址）
-                api_base_url = os.getenv("VITE_API_URL")
-                if not api_base_url:
-                    http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
-                    # 如果监听地址是 0.0.0.0，使用 localhost 以支持反向代理
-                    if http_host == "0.0.0.0":
-                        http_host = "localhost"
-                    api_base_url = f"http://{http_host}:{http_port}"
-                result['md_download_url'] = f"{api_base_url}/api/download/{file_path}"
+                # 使用新的 get_download_url 函数生成下载URL
+                result['md_download_url'] = get_download_url(file_path)
 
             # 保存论文信息到 CSV 文件（使用专门的报告论文保存函数）
             try:
@@ -1252,27 +1229,8 @@ async def generate_research_report(
                 if csv_result.get('status') == 'success' and csv_result.get('file_path'):
                     file_path = csv_result['file_path']
                     result['csv_file_path'] = file_path
-                    # 添加下载URL
-                    # 规范化路径：移除 ./ 前缀，转换反斜杠为正斜杠
-                    file_path = file_path.replace('\\', '/').lstrip('./')
-                    if file_path.startswith('mcp_servers/paper_search/'):
-                        file_path = file_path[len('mcp_servers/paper_search/'):]
-                    elif file_path.startswith('paper_search/'):
-                        file_path = file_path[len('paper_search/'):]
-                    
-                    # 使用全局导入的os模块
-                    import os as os_module
-                    # 获取 API 基础 URL（支持动态配置）
-                    # 优先使用 VITE_API_URL（前端调用的API地址）
-                    api_base_url = os_module.getenv("VITE_API_URL")
-                    if not api_base_url:
-                        http_host = os_module.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-                        http_port = os_module.getenv("RESEARCHMIND_HTTP_PORT", "50002")
-                        # 如果监听地址是 0.0.0.0，使用 localhost 以支持反向代理
-                        if http_host == "0.0.0.0":
-                            http_host = "localhost"
-                        api_base_url = f"http://{http_host}:{http_port}"
-                    result['csv_download_url'] = f"{api_base_url}/api/download/{file_path}"
+                    # 使用新的 get_download_url 函数生成下载URL
+                    result['csv_download_url'] = get_download_url(file_path)
                     logger.info(f"✅ CSV file saved and download URL generated: {result['csv_download_url']}")
                 else:
                     logger.warning(f"⚠️ CSV save failed or no file path: {csv_result}")
