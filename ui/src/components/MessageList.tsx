@@ -77,12 +77,11 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
     }
     if (metadata.md_download_url) {
       console.log('📄 Found MD URL:', metadata.md_download_url)
+      const mdFilePath = metadata.summary_file_path || metadata.report_file_path
       links.push({
         type: 'md',
         url: metadata.md_download_url,
-        filename: metadata.summary_file_path || metadata.report_file_path
-          ? (metadata.summary_file_path || metadata.report_file_path).split('/').pop()
-          : undefined
+        filename: mdFilePath ? mdFilePath.split('/').pop() : undefined
       })
     }
   } else {

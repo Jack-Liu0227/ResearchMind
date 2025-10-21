@@ -49,10 +49,22 @@ def get_download_url(file_path: str) -> str:
     """
     生成文件下载 URL
 
-    始终返回相对路径（不包含 /api 前缀），Nginx 代理会添加
+    返回相对路径（不包含 /api 前缀），浏览器会相对于当前域名解析
     这样可以支持任何部署方式（直接访问、反向代理等）
 
     参考 ImageHandler 的实现逻辑
+
+    Nginx 配置示例：
+    location /api/ {
+        proxy_pass http://backend_api/;
+    }
+
+    流程：
+    1. 后端返回: api/api/download/{file_path}
+    2. 前端 resolveFileUrl 转换为: /api/api/download/{file_path}
+    3. 前端请求: http://localhost:50001/api/api/download/{file_path}
+    4. Nginx 转发到: http://127.0.0.1:50002/api/download/{file_path}
+    5. 后端 /api/download 挂载点处理
     """
     # 规范化文件路径：移除 ./ 前缀，转换反斜杠为正斜杠
     file_path = file_path.replace('\\', '/').lstrip('./')
@@ -62,8 +74,9 @@ def get_download_url(file_path: str) -> str:
     elif file_path.startswith('paper_search/'):
         file_path = file_path[len('paper_search/'):]
 
-    # 始终返回相对路径：/download/...（不包含 /api 前缀）
-    # Nginx 代理会添加 /api 前缀，前端的 resolveFileUrl() 函数会处理转换为完整 URL
+    # 返回相对路径：api/api/download/...
+    # 前端会转换为 /api/api/download/...
+    # Nginx 会转发到后端的 /api/download/...
     return f"api/api/download/{file_path}"
 from typing import List, Dict, Any, Optional
 
@@ -682,9 +695,9 @@ async def fetch_papers_content(
         - summary: 获取摘要（成功/失败数量）
     """
     import asyncio
-    from modules.paper_manager.content_fetcher import get_paper_content_by_source
+    from modules.paper_manager.content_fetcher import get_paper_content_by_source_async
 
-    logger.info(f"Fetching content for {len(papers)} papers (async, max 5 concurrent)...")
+    logger.info(f"Fetching content for {len(papers)} papers (async, max 8 concurrent)...")
 
     # 异步获取单篇论文内容
     async def fetch_single_paper(i: int, paper: Dict[str, Any]) -> tuple:
@@ -699,12 +712,18 @@ async def fetch_papers_content(
                 enriched_paper['content_metadata'] = {'source_type': 'abstract', 'fallback': False}
                 return (enriched_paper, 'success', False)
 
-            # 获取全文（使用 executor 包装同步操作）
-            loop = asyncio.get_event_loop()
-            content_result = await loop.run_in_executor(
-                None,
-                lambda: get_paper_content_by_source(paper, paper.get('source'))
-            )
+            # 获取全文（使用新的异步函数，带超时控制）
+            try:
+                content_result = await asyncio.wait_for(
+                    get_paper_content_by_source_async(paper, paper.get('source'), timeout=30),
+                    timeout=35  # 额外的5秒缓冲
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout fetching content for paper {i}, using abstract")
+                content_result = {
+                    'content': paper.get('abstract', ''),
+                    'metadata': {'fallback': True, 'fallback_reason': 'Timeout'}
+                }
 
             enriched_paper = paper.copy()
             enriched_paper['full_text'] = content_result.get('content', '')
@@ -1220,7 +1239,7 @@ async def generate_research_report(
                     topic=topic,
                     file_prefix='report_papers'
                 )
-                
+
                 if csv_result.get('status') == 'success' and csv_result.get('file_path'):
                     file_path = csv_result['file_path']
                     result['csv_file_path'] = file_path

@@ -61,9 +61,26 @@ export function resolveFileUrl(url: string): string {
     return result;
   }
 
-  // 其他情况，直接返回
-  console.log('🔗 resolveFileUrl - other case, returning:', url)
-  return url;
+  // 其他情况：相对路径（不以 / 开头）
+  // 例如：api/api/download/papers/...
+  console.log('🔗 resolveFileUrl - relative path case:', url)
+
+  // 转换为以 / 开头的路径
+  const pathWithSlash = `/${url}`;
+
+  // 如果 API_BASE_URL 是完整 URL
+  if (API_BASE_URL.startsWith('http://') || API_BASE_URL.startsWith('https://')) {
+    const result = `${API_BASE_URL}${pathWithSlash}`;
+    console.log('🔗 resolveFileUrl - relative path with API_BASE_URL:', result)
+    return result;
+  }
+
+  // 如果 API_BASE_URL 是相对路径，使用当前域名
+  const { protocol, hostname, port } = window.location;
+  const baseUrl = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
+  const result = `${baseUrl}${pathWithSlash}`;
+  console.log('🔗 resolveFileUrl - relative path with window.location:', result)
+  return result;
 }
 
 export interface APIStructureResponse {

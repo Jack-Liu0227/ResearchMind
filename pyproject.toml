@@ -36,6 +36,7 @@ dependencies = [
     # HTTP requests and APIs
     "httpx[socks]>=0.25.0",
     "requests>=2.32.4",
+    "aiohttp>=3.9.0",
     # Data processing and analysis
     "pandas>=2.1.0",
     "numpy>=1.25.0",

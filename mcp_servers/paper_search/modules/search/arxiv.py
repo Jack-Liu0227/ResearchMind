@@ -4,11 +4,13 @@ ArXiv Module (ArXiv 检索模块)
 功能：
 1. ArXiv 论文搜索
 2. ArXiv 论文信息获取
-3. ArXiv 论文内容提取
+3. ArXiv 论文内容提取（支持异步）
 4. ArXiv 作者搜索
 """
 import arxiv
 import requests
+import aiohttp
+import asyncio
 import json
 import os
 from typing import List, Dict, Any, Optional
@@ -17,11 +19,17 @@ from io import BytesIO
 from PyPDF2 import PdfReader
 import structlog
 import warnings
+import time
 
 # Suppress PyPDF2 warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="PyPDF2")
 
 logger = structlog.get_logger(__name__)
+
+# 超时配置
+DEFAULT_TIMEOUT = 30
+MAX_RETRIES = 2
+RETRY_DELAY = 1
 
 PAPER_DIR = "./paper_search/papers"
 
@@ -30,7 +38,7 @@ def sanitize_filename(filename: str) -> str:
     """
     清理文件名，移除非法字符
 
-    Windows非法字符: < > : " / \ | ? *
+    Windows非法字符: < > : " / \\ | ? *
 
     Args:
         filename: 原始文件名
@@ -74,6 +82,10 @@ def search_arxiv_papers(topic: str, max_results: int = 5, session_id: str = None
         List of dictionaries containing paper information (paper_id, title, authors, summary, etc.)
     """
     try:
+        # 确保 max_results 是有效的正整数
+        max_results = max(1, int(max_results))
+        logger.info(f"Starting ArXiv search with max_results={max_results}", topic=topic)
+
         # Use arxiv to find the papers
         client = arxiv.Client()
 
@@ -84,7 +96,12 @@ def search_arxiv_papers(topic: str, max_results: int = 5, session_id: str = None
             sort_by=arxiv.SortCriterion.Relevance
         )
 
-        papers = client.results(search)
+        # 获取结果并限制数量
+        papers = []
+        for i, paper in enumerate(client.results(search)):
+            if i >= max_results:
+                break
+            papers.append(paper)
 
         # 使用会话文件夹管理器获取文件夹路径
         from ..shared.session_folder_manager import get_session_folder
@@ -138,7 +155,13 @@ def search_arxiv_papers(topic: str, max_results: int = 5, session_id: str = None
         with open(file_path, "w", encoding='utf-8') as json_file:
             json.dump(papers_info, json_file, indent=2, ensure_ascii=False)
 
-        logger.info(f"ArXiv search completed", topic=topic, results=len(paper_results), file_path=file_path)
+        logger.info(
+            "ArXiv search completed",
+            topic=topic,
+            requested_max_results=max_results,
+            actual_results=len(paper_results),
+            file_path=file_path
+        )
         return paper_results
 
     except Exception as e:
@@ -302,6 +325,10 @@ def search_papers_by_author(author_name: str, max_results: int = 10) -> List[Dic
         List of paper information dictionaries
     """
     try:
+        # 确保 max_results 是有效的正整数
+        max_results = max(1, int(max_results))
+        logger.info(f"Starting author search with max_results={max_results}", author=author_name)
+
         client = arxiv.Client()
 
         # Search for papers by author
@@ -311,10 +338,11 @@ def search_papers_by_author(author_name: str, max_results: int = 10) -> List[Dic
             sort_by=arxiv.SortCriterion.SubmittedDate
         )
 
-        papers = client.results(search)
-
+        # 获取结果并限制数量
         paper_list = []
-        for paper in papers:
+        for i, paper in enumerate(client.results(search)):
+            if i >= max_results:
+                break
             paper_info = {
                 'id': paper.get_short_id(),
                 'title': paper.title,
@@ -326,7 +354,12 @@ def search_papers_by_author(author_name: str, max_results: int = 10) -> List[Dic
             }
             paper_list.append(paper_info)
 
-        logger.info("Author search completed", author=author_name, results=len(paper_list))
+        logger.info(
+            "Author search completed",
+            author=author_name,
+            requested_max_results=max_results,
+            actual_results=len(paper_list)
+        )
         return paper_list
 
     except Exception as e:
@@ -334,53 +367,143 @@ def search_papers_by_author(author_name: str, max_results: int = 10) -> List[Dic
         return [{"error": f"Search failed: {str(e)}"}]
 
 
-def get_arxiv_paper_content(arxiv_id: str) -> Dict[str, Any]:
+async def get_arxiv_paper_content_async(arxiv_id: str, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
     """
-    Fetch full text content from an ArXiv paper PDF.
+    异步获取ArXiv论文PDF的全文内容（带重试机制）。
 
     Args:
-        arxiv_id: The ArXiv paper ID (e.g., "2301.07041")
+        arxiv_id: ArXiv论文ID（例如 "2301.07041"）
+        timeout: 超时时间（秒）
 
     Returns:
-        Dict containing paper ID, extracted text, and metadata
+        包含论文ID、提取的文本和元数据的字典
     """
-    try:
-        logger.debug(f'Fetching ArXiv paper content for {arxiv_id}')
-        pdf_url = f'http://arxiv.org/pdf/{arxiv_id}.pdf'
+    pdf_url = f'http://arxiv.org/pdf/{arxiv_id}.pdf'
 
-        resp = requests.get(pdf_url, timeout=60)
-        resp.raise_for_status()
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            logger.debug(f'Fetching ArXiv paper content for {arxiv_id} (attempt {attempt+1}/{MAX_RETRIES+1})')
 
-        reader = PdfReader(BytesIO(resp.content))
-        text = '\n'.join(page.extract_text() or '' for page in reader.pages)
+            # 使用 aiohttp 异步下载PDF
+            async with aiohttp.ClientSession() as session:
+                async with session.get(pdf_url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                    if resp.status == 403:
+                        logger.warning(f"Access forbidden (403) for ArXiv paper: {arxiv_id}")
+                        break  # 不重试 403 错误
 
-        metadata = {
-            'arxiv_id': arxiv_id,
-            'source': 'arxiv',
-            'pdf_url': pdf_url,
-            'abs_url': f'http://arxiv.org/abs/{arxiv_id}',
-            'document_type': 'research_paper',
-            'text_length': len(text),
-            'page_count': len(reader.pages),
-            'extraction_timestamp': datetime.now().isoformat()
-        }
+                    resp.raise_for_status()
 
-        logger.info(f'Extracted {len(text)} characters from ArXiv paper {arxiv_id}')
+                    content = await resp.read()
+                    reader = PdfReader(BytesIO(content))
+                    text = '\n'.join(page.extract_text() or '' for page in reader.pages)
 
-        return {
-            'id': arxiv_id,
-            'content': text,
-            'metadata': metadata,
-            'status': 'success'
-        }
+                    metadata = {
+                        'arxiv_id': arxiv_id,
+                        'source': 'arxiv',
+                        'pdf_url': pdf_url,
+                        'abs_url': f'http://arxiv.org/abs/{arxiv_id}',
+                        'document_type': 'research_paper',
+                        'text_length': len(text),
+                        'page_count': len(reader.pages),
+                        'extraction_timestamp': datetime.now().isoformat()
+                    }
 
-    except Exception as e:
-        logger.error(f'Error fetching ArXiv paper {arxiv_id}: {str(e)}')
-        return {
-            'id': arxiv_id,
-            'content': '',
-            'metadata': {},
-            'status': 'error',
-            'error': str(e)
-        }
+                    logger.info(f'Extracted {len(text)} characters from ArXiv paper {arxiv_id}')
+
+                    return {
+                        'id': arxiv_id,
+                        'content': text,
+                        'metadata': metadata,
+                        'status': 'success'
+                    }
+
+        except asyncio.TimeoutError:
+            logger.warning(f'Timeout fetching ArXiv paper {arxiv_id} (attempt {attempt+1}/{MAX_RETRIES+1})')
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(RETRY_DELAY)
+                continue
+        except Exception as e:
+            logger.warning(f'Error fetching ArXiv paper {arxiv_id} (attempt {attempt+1}/{MAX_RETRIES+1}): {str(e)}')
+            if attempt < MAX_RETRIES and "403" not in str(e):
+                await asyncio.sleep(RETRY_DELAY)
+                continue
+            break
+
+    logger.error(f'Failed to fetch ArXiv paper {arxiv_id} after {MAX_RETRIES+1} attempts')
+    return {
+        'id': arxiv_id,
+        'content': '',
+        'metadata': {},
+        'status': 'error',
+        'error': 'Failed to fetch paper after retries'
+    }
+
+
+def get_arxiv_paper_content(arxiv_id: str) -> Dict[str, Any]:
+    """
+    获取ArXiv论文PDF的全文内容（同步版本，保持向后兼容）。
+
+    Args:
+        arxiv_id: ArXiv论文ID（例如 "2301.07041"）
+
+    Returns:
+        包含论文ID、提取的文本和元数据的字典
+    """
+    pdf_url = f'http://arxiv.org/pdf/{arxiv_id}.pdf'
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            logger.debug(f'Fetching ArXiv paper content for {arxiv_id} (attempt {attempt+1}/{MAX_RETRIES+1})')
+
+            resp = requests.get(pdf_url, timeout=DEFAULT_TIMEOUT)
+
+            if resp.status_code == 403:
+                logger.warning(f"Access forbidden (403) for ArXiv paper: {arxiv_id}")
+                break  # 不重试 403 错误
+
+            resp.raise_for_status()
+
+            reader = PdfReader(BytesIO(resp.content))
+            text = '\n'.join(page.extract_text() or '' for page in reader.pages)
+
+            metadata = {
+                'arxiv_id': arxiv_id,
+                'source': 'arxiv',
+                'pdf_url': pdf_url,
+                'abs_url': f'http://arxiv.org/abs/{arxiv_id}',
+                'document_type': 'research_paper',
+                'text_length': len(text),
+                'page_count': len(reader.pages),
+                'extraction_timestamp': datetime.now().isoformat()
+            }
+
+            logger.info(f'Extracted {len(text)} characters from ArXiv paper {arxiv_id}')
+
+            return {
+                'id': arxiv_id,
+                'content': text,
+                'metadata': metadata,
+                'status': 'success'
+            }
+
+        except requests.Timeout:
+            logger.warning(f'Timeout fetching ArXiv paper {arxiv_id} (attempt {attempt+1}/{MAX_RETRIES+1})')
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY)
+                continue
+        except Exception as e:
+            logger.warning(f'Error fetching ArXiv paper {arxiv_id} (attempt {attempt+1}/{MAX_RETRIES+1}): {str(e)}')
+            if attempt < MAX_RETRIES and "403" not in str(e):
+                time.sleep(RETRY_DELAY)
+                continue
+            break
+
+    logger.error(f'Failed to fetch ArXiv paper {arxiv_id} after {MAX_RETRIES+1} attempts')
+    return {
+        'id': arxiv_id,
+        'content': '',
+        'metadata': {},
+        'status': 'error',
+        'error': 'Failed to fetch paper after retries'
+    }
 

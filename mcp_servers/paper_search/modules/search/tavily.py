@@ -47,6 +47,10 @@ async def search_web(query: str, max_results: int = 5, search_depth: str = "basi
         }]
 
     try:
+        # 确保 max_results 是有效的正整数
+        max_results = max(1, int(max_results))
+        logger.info(f"Starting web search with max_results={max_results}", query=query, search_depth=search_depth)
+
         api_key = os.getenv('TAVILY_API_KEY')
         if not api_key:
             return [{
@@ -97,7 +101,13 @@ async def search_web(query: str, max_results: int = 5, search_depth: str = "basi
 
             results.append(result)
 
-        logger.info(f"Web search completed: {len(results)} results for '{query}'", session_id=session_id)
+        logger.info(
+            "Web search completed",
+            query=query,
+            requested_max_results=max_results,
+            actual_results=len(results),
+            session_id=session_id
+        )
 
         # 保存结果到 papers_info.json（与 ArXiv 结果合并）
         if results and session_id:
@@ -132,6 +142,10 @@ async def search_academic_web(query: str, max_results: int = 5, session_id: str 
         }]
 
     try:
+        # 确保 max_results 是有效的正整数
+        max_results = max(1, int(max_results))
+        logger.info(f"Starting academic web search with max_results={max_results}", query=query)
+
         api_key = os.getenv('TAVILY_API_KEY')
         if not api_key:
             return [{
@@ -185,7 +199,13 @@ async def search_academic_web(query: str, max_results: int = 5, session_id: str 
 
             results.append(result)
 
-        logger.info(f"Academic web search completed: {len(results)} results for '{query}'", session_id=session_id)
+        logger.info(
+            "Academic web search completed",
+            query=query,
+            requested_max_results=max_results,
+            actual_results=len(results),
+            session_id=session_id
+        )
 
         # 保存结果到 papers_info.json（与 ArXiv 结果合并）
         if results and session_id:
@@ -272,6 +292,10 @@ async def search_news(query: str, max_results: int = 5, days: int = 7) -> List[D
         }]
 
     try:
+        # 确保 max_results 是有效的正整数
+        max_results = max(1, int(max_results))
+        logger.info(f"Starting news search with max_results={max_results}", query=query, days=days)
+
         api_key = os.getenv('TAVILY_API_KEY')
         if not api_key:
             return [{
@@ -317,7 +341,13 @@ async def search_news(query: str, max_results: int = 5, days: int = 7) -> List[D
             }
             results.append(result)
 
-        logger.info(f"News search completed: {len(results)} results for '{query}'")
+        logger.info(
+            "News search completed",
+            query=query,
+            requested_max_results=max_results,
+            actual_results=len(results),
+            days=days
+        )
 
         # 直接返回结果列表
         return results

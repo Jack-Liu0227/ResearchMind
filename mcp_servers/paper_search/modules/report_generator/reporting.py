@@ -10,12 +10,17 @@ Reporting Module (报告模块)
 论文 IDs → 提取全文 → 分析论文 → 生成报告结构 → LLM 填充内容 → 保存报告
 """
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 import structlog
 from litellm import completion
+import asyncio
 
 logger = structlog.get_logger(__name__)
+
+# 全局超时配置
+FETCH_TIMEOUT = 30  # 获取全文超时时间（秒）
+ANALYSIS_TIMEOUT = 60  # 分析论文超时时间（秒）
 
 
 class ResearchReportGenerator:
@@ -29,7 +34,7 @@ class ResearchReportGenerator:
     4. 空白分析：识别研究空白和机会
     """
 
-    def __init__(self, model: str = None):
+    def __init__(self, model: str = ""):
         """
         初始化报告生成器
 
@@ -43,7 +48,7 @@ class ResearchReportGenerator:
         self,
         papers_info: List[Dict[str, Any]],
         topic: str,
-        papers_analysis: List[Dict[str, Any]] = None
+        papers_analysis: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """
         生成综合调研报告（按块生成每篇论文的详细分析，然后合并）
@@ -66,55 +71,98 @@ class ResearchReportGenerator:
                    num_papers=len(papers_info))
 
         try:
-            # 第一步：异步并行获取所有论文的全文
-            import asyncio
+            # 检查是否已经获取了全文，如果没有则获取
             import gc
-            from ..paper_manager.content_fetcher import get_paper_content_by_source
+            from ..paper_manager.content_fetcher import get_paper_content_by_source_async
 
-            # 内存优化：限制并发任务数量
-            MAX_CONCURRENT_TASKS = 8  # 限制为8个并发任务，高并发处理
-            BATCH_SIZE = MAX_CONCURRENT_TASKS  # 根据并发数划分批量大小，提高效率
+            # 确定哪些论文需要获取内容
+            papers_needing_content = []
+            enriched_papers = []
 
-            async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> Dict[str, Any]:
-                """异步获取单篇论文的全文"""
-                try:
-                    logger.info(f"Fetching content {i+1}/{len(papers_info)}: {paper.get('title', 'Unknown')[:50]}...")
+            for i, paper in enumerate(papers_info):
+                # 检查是否已经有全文内容
+                if 'full_text' in paper and paper['full_text']:
+                    enriched_papers.append(paper)
+                else:
+                    papers_needing_content.append((i, paper))
+                    # 添加一个占位符以保持索引一致
+                    enriched_papers.append(None)
 
-                    # 使用 executor 包装同步操作
-                    loop = asyncio.get_event_loop()
-                    content_result = await loop.run_in_executor(
-                        None,
-                        lambda: get_paper_content_by_source(paper, paper.get('source'))
-                    )
+            # 如果有需要获取内容的论文，则并行获取
+            if papers_needing_content:
+                # 内存优化：增加并发任务数量以提高效率
+                MAX_CONCURRENT_TASKS = 10  # 设置为10个并发任务以适应较小内存
 
-                    # 将全文添加到论文信息中
-                    enriched_paper = paper.copy()
-                    enriched_paper['full_text'] = content_result.get('content', '')
-                    enriched_paper['content_metadata'] = content_result.get('metadata', {})
+                async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> tuple:
+                    """异步获取单篇论文的全文（带超时控制）"""
+                    try:
+                        logger.info(f"Fetching content {i+1}/{len(papers_needing_content)}: {paper.get('title', 'Unknown')[:50]}...")
 
-                    logger.info(f"Successfully got content for paper {i+1}")
-                    return enriched_paper
+                        # 使用新的异步内容获取函数
+                        content_result = await asyncio.wait_for(
+                            get_paper_content_by_source_async(paper, paper.get('source', ''), timeout=FETCH_TIMEOUT),
+                            timeout=FETCH_TIMEOUT + 5  # 额外的5秒缓冲
+                        )
 
-                except Exception as e:
-                    logger.warning(f"Failed to get content for paper {paper.get('paper_id', 'unknown')}: {e}")
-                    # 失败时只使用摘要
-                    enriched_paper = paper.copy()
-                    enriched_paper['full_text'] = paper.get('abstract', '')
-                    enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': str(e)}
-                    return enriched_paper
+                        # 将全文添加到论文信息中
+                        enriched_paper = paper.copy()
+                        enriched_paper['full_text'] = content_result.get('content', '')
+                        enriched_paper['content_metadata'] = content_result.get('metadata', {})
 
-            # 并行获取所有论文的全文
-            logger.info(f"Fetching content for {len(papers_info)} papers in parallel...")
-            fetch_tasks = [fetch_paper_content(i, paper) for i, paper in enumerate(papers_info)]
-            enriched_papers = await asyncio.gather(*fetch_tasks)
+                        logger.info(f"Successfully got content for paper {i+1}")
+                        return (i, enriched_paper, 'success')
 
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Timeout fetching content for paper {paper.get('paper_id', 'unknown')} (>{FETCH_TIMEOUT}s)")
+                        # 超时时只使用摘要
+                        enriched_paper = paper.copy()
+                        enriched_paper['full_text'] = paper.get('abstract', '')
+                        enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': f'Timeout after {FETCH_TIMEOUT}s'}
+                        return (i, enriched_paper, 'timeout')
+                    except Exception as e:
+                        logger.warning(f"Failed to get content for paper {paper.get('paper_id', 'unknown')}: {e}")
+                        # 失败时只使用摘要
+                        enriched_paper = paper.copy()
+                        enriched_paper['full_text'] = paper.get('abstract', '')
+                        enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': str(e)}
+                        return (i, enriched_paper, 'error')
+
+                # 批量顺序处理论文：先执行前MAX_CONCURRENT_TASKS个，完成后再执行后面的
+                logger.info(f"Fetching content for {len(papers_needing_content)} papers with max {MAX_CONCURRENT_TASKS} concurrent tasks (timeout: {FETCH_TIMEOUT}s)...")
+
+                fetched_results = []
+                total_papers = len(papers_needing_content)
+
+                # 分批处理
+                for batch_start in range(0, total_papers, MAX_CONCURRENT_TASKS):
+                    batch_end = min(batch_start + MAX_CONCURRENT_TASKS, total_papers)
+                    batch_papers = papers_needing_content[batch_start:batch_end]
+
+                    logger.info(f"Processing batch: papers {batch_start+1}-{batch_end}/{total_papers}")
+
+                    # 创建当前批次的任务
+                    batch_tasks = [fetch_paper_content(i, paper) for i, paper in batch_papers]
+
+                    # 并行执行当前批次的任务
+                    batch_results = await asyncio.gather(*batch_tasks)
+                    fetched_results.extend(batch_results)
+
+                    # 及时释放内存
+                    gc.collect()
+                    logger.info(f"Batch {batch_start//MAX_CONCURRENT_TASKS + 1} completed, memory freed")
+
+                # 将获取到的内容放回正确的位置
+                for i, enriched_paper, status in fetched_results:
+                    original_index = papers_needing_content[i][0]
+                    enriched_papers[original_index] = enriched_paper
+            
             # 及时释放内存
             gc.collect()
             logger.info("Content fetching completed, memory freed")
 
             # 第二步：为每篇论文生成详细分析（限制并发数量以节省内存）
             async def analyze_single_paper(i, paper):
-                """分析单篇论文"""
+                """分析单篇论文（带超时控制）"""
                 logger.info(f"Analyzing paper {i+1}/{len(enriched_papers)}: {paper.get('title', 'Unknown')[:50]}...")
 
                 # 获取全文或摘要
@@ -165,58 +213,75 @@ URL: {paper.get('url', 'N/A')}
 """
 
                 try:
-                    # 使用 asyncio 包装同步的 completion 调用
+                    # 使用 asyncio 包装同步的 completion 调用，并添加超时控制
                     loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(
-                        None,
-                        lambda: completion(
-                            model=self.model,
-                            messages=[{"role": "user", "content": analysis_prompt}],
-                            temperature=0.3,
-                            max_tokens=1500  # 减少token数量以节省内存
-                        )
+                    response = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda: completion(
+                                model=self.model,
+                                messages=[{"role": "user", "content": analysis_prompt}],
+                                temperature=0.3,
+                                max_tokens=1500  # 减少token数量以节省内存
+                            )
+                        ),
+                        timeout=ANALYSIS_TIMEOUT
                     )
 
-                    analysis_text = response.choices[0].message.content.strip()
+                    # 安全地处理响应对象
+                    analysis_text = ""
+                    if response is not None:
+                        # 使用字典方式访问属性以避免类型检查错误
+                        response_dict = vars(response) if hasattr(response, '__dict__') else {}
+                        choices = response_dict.get('choices', [])
+                        if choices and len(choices) > 0:
+                            choice = choices[0]
+                            choice_dict = vars(choice) if hasattr(choice, '__dict__') else {}
+                            message = choice_dict.get('message')
+                            if message is not None:
+                                message_dict = vars(message) if hasattr(message, '__dict__') else {}
+                                content = message_dict.get('content', '')
+                                if content:
+                                    analysis_text = content.strip()
                     logger.info(f"Successfully analyzed paper {i+1}")
-                    return {
-                        'paper': paper,
-                        'analysis': analysis_text
-                    }
+                    return (i, {'paper': paper, 'analysis': analysis_text}, 'success')
 
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout analyzing paper {i+1} (>{ANALYSIS_TIMEOUT}s), using fallback")
+                    # 超时时使用简单分析作为后备
+                    return (i, {'paper': paper, 'analysis': f"**摘要**: {abstract[:300]}...\n\n*注：分析超时，仅显示摘要*"}, 'timeout')
                 except Exception as e:
                     logger.error(f"Failed to analyze paper {i+1}: {e}")
                     # 使用简单分析作为后备
-                    return {
-                        'paper': paper,
-                        'analysis': f"**摘要**: {abstract[:300]}..."
-                    }
+                    return (i, {'paper': paper, 'analysis': f"**摘要**: {abstract[:300]}..."}, 'error')
 
-            # 分批处理论文以节省内存
-            logger.info(f"Starting batch analysis of {len(enriched_papers)} papers (batch size: {BATCH_SIZE})...")
+            # 批量顺序处理论文：先执行前MAX_CONCURRENT_TASKS个，完成后再执行后面的
+            MAX_CONCURRENT_TASKS = 10  # 设置为10个并发任务以适应较小内存
+
+            logger.info(f"Starting batch analysis of {len(enriched_papers)} papers (max {MAX_CONCURRENT_TASKS} concurrent, timeout: {ANALYSIS_TIMEOUT}s)...")
             detailed_analyses = []
+            total_papers = len(enriched_papers)
 
-            for batch_start in range(0, len(enriched_papers), BATCH_SIZE):
-                batch_end = min(batch_start + BATCH_SIZE, len(enriched_papers))
+            # 分批处理
+            for batch_start in range(0, total_papers, MAX_CONCURRENT_TASKS):
+                batch_end = min(batch_start + MAX_CONCURRENT_TASKS, total_papers)
                 batch_papers = enriched_papers[batch_start:batch_end]
 
-                logger.info(f"Processing batch {batch_start//BATCH_SIZE + 1}: papers {batch_start+1}-{batch_end}")
+                logger.info(f"Processing analysis batch: papers {batch_start+1}-{batch_end}/{total_papers}")
 
-                # 使用信号量限制并发任务数量
-                semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+                # 创建当前批次的任务
+                batch_tasks = [analyze_single_paper(i, paper) for i, paper in enumerate(batch_papers)]
 
-                async def bounded_analyze(i, paper):
-                    async with semaphore:
-                        return await analyze_single_paper(batch_start + i, paper)
-
-                # 处理当前批次
-                batch_tasks = [bounded_analyze(i, paper) for i, paper in enumerate(batch_papers)]
+                # 并行执行当前批次的任务
                 batch_results = await asyncio.gather(*batch_tasks)
-                detailed_analyses.extend(batch_results)
+
+                # 提取结果
+                for i, result, status in batch_results:
+                    detailed_analyses.append(result)
 
                 # 及时释放内存
                 gc.collect()
-                logger.info(f"Completed batch {batch_start//BATCH_SIZE + 1}, memory freed")
+                logger.info(f"Completed analysis batch {batch_start//MAX_CONCURRENT_TASKS + 1}, memory freed")
 
             logger.info(f"Completed analysis of {len(enriched_papers)} papers")
 
@@ -290,7 +355,21 @@ URL: {paper.get('url', 'N/A')}
                 max_tokens=2000  # 减少从3000到2000
             )
 
-            report_content = response.choices[0].message.content.strip()
+            # 安全地处理响应对象
+            report_content = ""
+            if response is not None:
+                # 使用字典方式访问属性以避免类型检查错误
+                response_dict = vars(response) if hasattr(response, '__dict__') else {}
+                choices = response_dict.get('choices', [])
+                if choices and len(choices) > 0:
+                    choice = choices[0]
+                    choice_dict = vars(choice) if hasattr(choice, '__dict__') else {}
+                    message = choice_dict.get('message')
+                    if message is not None:
+                        message_dict = vars(message) if hasattr(message, '__dict__') else {}
+                        content = message_dict.get('content', '')
+                        if content:
+                            report_content = content.strip()
 
             # 及时释放内存
             gc.collect()
@@ -349,13 +428,13 @@ URL: {paper.get('url', 'N/A')}
         except Exception as e:
             logger.error(f"Failed to generate comprehensive report: {e}")
             # 降级到简单报告
-            return self._generate_simple_report(papers_info, topic, papers_analysis)
+            return self._generate_simple_report(papers_info, topic, papers_analysis or [])
 
     async def generate_lightweight_report(
         self,
         papers_info: List[Dict[str, Any]],
         topic: str,
-        papers_analysis: List[Dict[str, Any]] = None
+        papers_analysis: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """
         生成轻量级报告（内存受限环境专用）
@@ -451,7 +530,7 @@ URL: {paper.get('url', 'N/A')}
         self,
         papers_info: List[Dict[str, Any]],
         topic: str,
-        papers_analysis: List[Dict[str, Any]] = None
+        papers_analysis: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """
         生成简单报告（降级方案，不使用LLM）
@@ -526,7 +605,7 @@ URL: {paper.get('url', 'N/A')}
 async def generate_research_report(
     papers_info: List[Dict[str, Any]],
     topic: str,
-    papers_analysis: List[Dict[str, Any]] = None,
+    papers_analysis: Optional[List[Dict[str, Any]]] = None,
     use_lightweight_mode: bool = False
 ) -> Dict[str, Any]:
     """
@@ -546,7 +625,7 @@ async def generate_research_report(
 
     Returns:
         Dict containing:
-        - report_content: Markdown格式的报告内容
+        - report_content: Markdown format的报告内容
         - metadata: 报告元数据
     """
     try:
@@ -607,7 +686,7 @@ async def generate_research_report(
 async def generate_research_report_with_data_collection(
     papers_info: List[Dict[str, Any]],
     topic: str,
-    papers_analysis: List[Dict[str, Any]] = None
+    papers_analysis: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     生成研究报告（增强版，自动获取全文）
@@ -630,19 +709,20 @@ async def generate_research_report_with_data_collection(
         logger.info(f'Generating research report for topic: {topic} with {len(papers_info)} papers')
 
         # 异步并行获取所有论文的全文
-        import asyncio
-        from ..paper_manager.content_fetcher import get_paper_content_by_source
+        import gc
+        from ..paper_manager.content_fetcher import get_paper_content_by_source_async
 
-        async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> Dict[str, Any]:
-            """异步获取单篇论文的全文"""
+        MAX_CONCURRENT_TASKS = 10  # 最多10个并发任务
+
+        async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> tuple:
+            """异步获取单篇论文的全文（带超时控制）"""
             try:
                 logger.info(f"Fetching content {i+1}/{len(papers_info)}: {paper.get('title', 'Unknown')[:50]}...")
 
-                # 使用 executor 包装同步操作
-                loop = asyncio.get_event_loop()
-                content_result = await loop.run_in_executor(
-                    None,
-                    lambda: get_paper_content_by_source(paper, paper.get('source'))
+                # 使用新的异步内容获取函数
+                content_result = await asyncio.wait_for(
+                    get_paper_content_by_source_async(paper, paper.get('source', ''), timeout=FETCH_TIMEOUT),
+                    timeout=FETCH_TIMEOUT + 5  # 额外的5秒缓冲
                 )
 
                 # 将全文添加到论文信息中
@@ -651,20 +731,49 @@ async def generate_research_report_with_data_collection(
                 enriched_paper['content_metadata'] = content_result.get('metadata', {})
 
                 logger.info(f"Successfully got content for paper {i+1}")
-                return enriched_paper
+                return (i, enriched_paper, 'success')
 
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout fetching content for paper {paper.get('paper_id', 'unknown')} (>{FETCH_TIMEOUT}s)")
+                # 超时时只使用摘要
+                enriched_paper = paper.copy()
+                enriched_paper['full_text'] = paper.get('abstract', '')
+                enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': f'Timeout after {FETCH_TIMEOUT}s'}
+                return (i, enriched_paper, 'timeout')
             except Exception as e:
                 logger.warning(f"Failed to get content for paper {paper.get('paper_id', 'unknown')}: {e}")
                 # 失败时只使用摘要
                 enriched_paper = paper.copy()
                 enriched_paper['full_text'] = paper.get('abstract', '')
                 enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': str(e)}
-                return enriched_paper
+                return (i, enriched_paper, 'error')
 
-        # 并行获取所有论文的全文
-        logger.info(f"Fetching content for {len(papers_info)} papers in parallel...")
-        fetch_tasks = [fetch_paper_content(i, paper) for i, paper in enumerate(papers_info)]
-        enriched_papers = await asyncio.gather(*fetch_tasks)
+        # 批量顺序处理论文：先执行前MAX_CONCURRENT_TASKS个，完成后再执行后面的
+        logger.info(f"Fetching content for {len(papers_info)} papers (max {MAX_CONCURRENT_TASKS} concurrent, timeout: {FETCH_TIMEOUT}s)...")
+
+        enriched_papers = []
+        total_papers = len(papers_info)
+
+        # 分批处理
+        for batch_start in range(0, total_papers, MAX_CONCURRENT_TASKS):
+            batch_end = min(batch_start + MAX_CONCURRENT_TASKS, total_papers)
+            batch_papers = papers_info[batch_start:batch_end]
+
+            logger.info(f"Processing fetch batch: papers {batch_start+1}-{batch_end}/{total_papers}")
+
+            # 创建当前批次的任务
+            batch_tasks = [fetch_paper_content(i, paper) for i, paper in enumerate(batch_papers)]
+
+            # 并行执行当前批次的任务
+            batch_results = await asyncio.gather(*batch_tasks)
+
+            # 提取结果
+            for i, enriched_paper, status in batch_results:
+                enriched_papers.append(enriched_paper)
+
+            # 及时释放内存
+            gc.collect()
+            logger.info(f"Completed fetch batch {batch_start//MAX_CONCURRENT_TASKS + 1}, memory freed")
 
         # 使用增强后的论文信息生成报告
         return await generate_research_report(
