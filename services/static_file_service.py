@@ -7,6 +7,7 @@ Serves static files like phonon spectra images, generated structures, etc.
 import os
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,21 +19,30 @@ logger = logging.getLogger(__name__)
 
 
 def get_api_base_url() -> str:
-    """Get API base URL from environment variable or construct from config"""
-    # 优先使用 VITE_API_URL（前端调用的API地址）
+    """Get API base origin from environment variable or construct from config"""
     api_url = os.getenv('VITE_API_URL')
-    if api_url:
-        return api_url
 
-    # Fallback: construct from host and port
-    http_host = os.getenv("RESEARCHMIND_HTTP_HOST") or server_config.HTTP_HOST
-    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
+    default_origin_host = os.getenv('RESEARCHMIND_HTTP_HOST') or server_config.HTTP_HOST
+    default_origin_port = os.getenv('RESEARCHMIND_HTTP_PORT', '50002')
 
-    # If host is 0.0.0.0, use 127.0.0.1 for local connections
-    if http_host == "0.0.0.0":
-        http_host = "127.0.0.1"
+    if default_origin_host == '0.0.0.0':
+        default_origin_host = '127.0.0.1'
 
-    return f'http://{http_host}:{http_port}'
+    default_origin = f'http://{default_origin_host}:{default_origin_port}'
+
+    if not api_url:
+        return default_origin
+
+    api_url = api_url.strip()
+    if api_url.startswith('/'):
+        return default_origin
+
+    parsed = urlparse(api_url)
+    if parsed.scheme and parsed.netloc:
+        return f'{parsed.scheme}://{parsed.netloc}'
+
+    return default_origin
+
 
 
 class StaticFileService:

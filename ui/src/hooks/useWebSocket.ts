@@ -13,6 +13,24 @@ interface UseWebSocketOptions {
   reconnectInterval?: number
 }
 
+// 🚫 DISABLED: 这个 hook 与 wsService 冲突，导致重复连接
+// 统一使用 services/websocket.ts 中的 wsService
+export function useWebSocket(options: UseWebSocketOptions = {}) {
+  console.warn('⚠️ useWebSocket hook is disabled to prevent duplicate connections. Use wsService instead.')
+  
+  // 返回一个空的实现，避免破坏现有代码
+  return {
+    connect: () => Promise.resolve(),
+    disconnect: () => {},
+    sendMessage: () => {},
+    sendChatMessage: () => {},
+    isConnected: false,
+    clientId: '',
+  }
+}
+
+// ORIGINAL IMPLEMENTATION (DISABLED):
+/*
 export function useWebSocket(options: UseWebSocketOptions = {}) {
   const {
     url = API_CONFIG.WS_URL,
@@ -148,3 +166,4 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     clientId: clientIdRef.current,
   }
 }
+*/

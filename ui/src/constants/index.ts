@@ -1,7 +1,22 @@
-const trimEnv = (value: string | undefined | null) => {
+﻿const trimEnv = (value: string | undefined | null) => {
   if (typeof value !== 'string') return undefined
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+const DEFAULT_API_PATH = trimEnv(import.meta.env.VITE_API_PATH) || '/api'
+
+const isWindowsAbsolutePath = (value: string) =>
+  /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\')
+
+const sanitizeWindowsPath = (value: string | undefined, fallback?: string) => {
+  if (typeof value !== 'string') return value
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return undefined
+  if (isWindowsAbsolutePath(trimmed)) {
+    return fallback
+  }
+  return trimmed
 }
 
 const resolveRuntimeLocation = () => {
@@ -34,11 +49,30 @@ const resolveRuntimeLocation = () => {
   }
 }
 
-const buildDefaultApiUrl = () => {
+const buildOrigin = (protocol: string, hostname: string, port?: string) => {
+  const normalizedPort = trimEnv(port)
+
+  if (!normalizedPort) {
+    return `${protocol}//${hostname}`
+  }
+
+  const isDefaultHttp = protocol === 'http:' && normalizedPort === '80'
+  const isDefaultHttps = protocol === 'https:' && normalizedPort === '443'
+
+  if (isDefaultHttp || isDefaultHttps) {
+    return `${protocol}//${hostname}`
+  }
+
+  return `${protocol}//${hostname}:${normalizedPort}`
+}
+
+const buildDefaultApiOrigin = () => {
   const { protocol, hostname } = resolveRuntimeLocation()
-  // 关键修复：使用50002作为默认API端口（后端HTTP API）
-  const port = trimEnv(import.meta.env.VITE_API_PORT) || '50002'
-  return `${protocol}//${hostname}:${port}`
+  const fallbackPort =
+    trimEnv(import.meta.env.VITE_API_PORT) ||
+    (typeof window !== 'undefined' ? trimEnv(window.location.port) : undefined) ||
+    '50002'
+  return buildOrigin(protocol, hostname, fallbackPort)
 }
 
 const buildDefaultWsUrl = () => {
@@ -50,58 +84,100 @@ const buildDefaultWsUrl = () => {
   return `${protocol}//${hostname}:${port}${normalizedPath}`
 }
 
-const ENV_API_URL = trimEnv(import.meta.env.VITE_API_URL)
-const ENV_WS_URL = trimEnv(import.meta.env.VITE_WS_URL)
+const RAW_API_URL = sanitizeWindowsPath(import.meta.env.VITE_API_URL, DEFAULT_API_PATH)
+const RAW_WS_URL = sanitizeWindowsPath(import.meta.env.VITE_WS_URL, '/ws')
+
+const ENV_API_URL = trimEnv(RAW_API_URL)
+const ENV_WS_URL = trimEnv(RAW_WS_URL)
 
 // 处理相对路径 API URL
-const resolveApiUrl = (envUrl?: string): string => {
-  if (!envUrl) {
-    return buildDefaultApiUrl()
-  }
-
-  // 如果是相对路径（以 / 开头），转换为完整 URL
-  if (envUrl.startsWith('/')) {
-    const { protocol, hostname } = resolveRuntimeLocation()
-
-    // 对于本地开发（file:// 协议），需要指定完整的主机和端口
-    if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
-      // 本地开发：使用 localhost:50002
-      const port = trimEnv(import.meta.env.VITE_API_PORT) || '50002'
-      return `${protocol}//localhost:${port}${envUrl}`
-    }
-
-    // 对于正常部署，检查是否有指定的 API 端口
-    const apiPort = trimEnv(import.meta.env.VITE_API_PORT)
-    if (apiPort) {
-      // 如果指定了端口，使用指定的端口
-      return `${protocol}//${hostname}:${apiPort}${envUrl}`
-    }
-
-    // 如果没有指定端口，使用当前访问的端口（通过 Nginx 反向代理）
-    // 这样可以支持任意端口的 Nginx 反向代理配置
-    return `${protocol}//${hostname}${envUrl}`
-  }
-
-  // 如果是完整 URL，直接返回
-  return envUrl
+const normalizeApiPath = (path?: string): string => {
+  if (!path) return DEFAULT_API_PATH
+  const trimmed = path.trim()
+  if (trimmed.length === 0) return DEFAULT_API_PATH
+  const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  if (withLeadingSlash === '/') return DEFAULT_API_PATH
+  return withLeadingSlash.endsWith('/') ? withLeadingSlash.slice(0, -1) : withLeadingSlash
 }
 
-// 处理相对路径 WebSocket URL
-const resolveWsUrl = (envUrl?: string): string => {
+const resolveApiOrigin = (envUrl?: string): string => {
   if (!envUrl) {
-    return buildDefaultWsUrl()
+    return buildDefaultApiOrigin()
+  }
+
+  if (envUrl.startsWith('/')) {
+    const { protocol, hostname } = resolveRuntimeLocation()
+    const configuredPort = trimEnv(import.meta.env.VITE_API_PORT)
+
+    if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+      const port = configuredPort || '50002'
+      return buildOrigin(protocol, 'localhost', port)
+    }
+
+    const runtimePort =
+      configuredPort ||
+      (typeof window !== 'undefined' ? trimEnv(window.location.port) : undefined)
+
+    return buildOrigin(protocol, hostname, runtimePort)
+  }
+
+  try {
+    return new URL(envUrl).origin
+  } catch {
+    try {
+      const { protocol } = resolveRuntimeLocation()
+      return new URL(`${protocol}//${envUrl}`).origin
+    } catch (error) {
+      console.warn('⚠️ Failed to parse VITE_API_URL, falling back to default origin:', error)
+      return buildDefaultApiOrigin()
+    }
+  }
+}
+
+const resolveApiPath = (envUrl?: string): string => {
+  if (!envUrl) {
+    return DEFAULT_API_PATH
+  }
+
+  if (envUrl.startsWith('/')) {
+    return normalizeApiPath(envUrl)
+  }
+
+  try {
+    const parsed = new URL(envUrl)
+    return normalizeApiPath(parsed.pathname)
+  } catch {
+    return DEFAULT_API_PATH
+  }
+}
+
+const resolveWsUrl = (envUrl?: string): string => {
+  console.log('🔧 resolveWsUrl called with:', envUrl)
+  
+  if (!envUrl) {
+    const defaultUrl = buildDefaultWsUrl()
+    console.log('🔧 Using default WS URL:', defaultUrl)
+    return defaultUrl
   }
 
   // 如果是相对路径（以 / 开头），转换为完整 URL
   if (envUrl.startsWith('/')) {
     const { hostname, isHttps } = resolveRuntimeLocation()
     const protocol = isHttps ? 'wss:' : 'ws:'
+    console.log('🔧 Runtime location:', { hostname, isHttps, protocol })
 
     // 对于本地开发（file:// 协议），需要指定完整的主机和端口
     if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
-      // 本地开发：使用 localhost:50003
-      const port = trimEnv(import.meta.env.VITE_WS_PORT) || '50003'
-      return `${protocol}//localhost:${port}${envUrl}`
+      console.log('🔧 Detected file:// protocol, using local development settings')
+      // 本地开发：强制使用ws协议和nginx代理端口
+      const proxyPort = trimEnv(import.meta.env.VITE_PROXY_PORT) || '50001'
+      const directPort = trimEnv(import.meta.env.VITE_WS_PORT) || '50003'
+      
+      // 优先使用代理端口（nginx），如果没有则使用直连端口
+      const port = proxyPort !== '50001' ? proxyPort : (directPort !== '50003' ? directPort : '50001')
+      const result = `ws://localhost:${port}${envUrl}`
+      console.log('🔧 File protocol WS URL:', result)
+      return result
     }
 
     // 对于正常部署，检查是否有指定的 WebSocket 端口
@@ -121,11 +197,19 @@ const resolveWsUrl = (envUrl?: string): string => {
 }
 
 // API 配置
+const API_ORIGIN = resolveApiOrigin(ENV_API_URL)
+const API_PATH = resolveApiPath(ENV_API_URL)
+
 export const API_CONFIG = {
-  BASE_URL: resolveApiUrl(ENV_API_URL),
+  BASE_URL: API_ORIGIN,
+  API_PATH,
+  API_BASE_URL: `${API_ORIGIN}${API_PATH}`,
   WS_URL: resolveWsUrl(ENV_WS_URL),
   TIMEOUT: 30000,
 } as const
+
+// 调试输出最终的配置
+console.log('🔧 Final API_CONFIG:', API_CONFIG)
 
 // 调试输出环境变量
 console.log('🔧 Environment Variables:', {
@@ -136,6 +220,8 @@ console.log('🔧 Environment Variables:', {
   window_location_protocol: typeof window !== 'undefined' ? window.location.protocol : 'N/A',
   window_location_hostname: typeof window !== 'undefined' ? window.location.hostname : 'N/A',
   API_CONFIG_BASE_URL: API_CONFIG.BASE_URL,
+  API_CONFIG_API_PATH: API_CONFIG.API_PATH,
+  API_CONFIG_API_BASE_URL: API_CONFIG.API_BASE_URL,
   API_CONFIG_WS_URL: API_CONFIG.WS_URL
 })
 

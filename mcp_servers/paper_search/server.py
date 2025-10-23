@@ -21,18 +21,22 @@ def get_api_base_url() -> str:
 
     支持相对路径（如 /api）和完整 URL
     """
-    api_url = os.getenv("VITE_API_URL")
+    api_url = (os.getenv("VITE_API_URL") or "").strip()
 
     if api_url:
-        # 如果是相对路径，需要转换为完整 URL
-        # 但在后端无法自动检测前端的域名，所以相对路径需要前端处理
-        # 后端只返回相对路径，前端会自动转换
+        # 如果是相对路径，直接返回，由前端根据当前域名解析
         if api_url.startswith('/'):
-            # 相对路径：直接返回，前端会处理
             return api_url
-        else:
-            # 完整 URL：直接返回
-            return api_url
+
+        parsed = urlparse(api_url)
+        if parsed.scheme and parsed.netloc:
+            normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path or ''}"
+            return normalized.rstrip('/')
+
+        logging.warning(
+            "Invalid VITE_API_URL detected in paper_search server; falling back to host/port",
+            extra={"provided_value": api_url}
+        )
 
     # 备选方案：使用 RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
     http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
@@ -49,10 +53,10 @@ def get_download_url(file_path: str) -> str:
     """
     生成文件下载 URL
 
-    返回相对路径（不包含 /api 前缀），浏览器会相对于当前域名解析
-    这样可以支持任何部署方式（直接访问、反向代理等）
+    返回以 /api 开头的相对路径（浏览器会使用当前域名解析）
+    这样可以支持直接访问和通过反向代理两种部署方式。
 
-    参考 ImageHandler 的实现逻辑
+    参考 ImageHandler 的实现逻辑。
 
     Nginx 配置示例：
     location /api/ {
@@ -60,12 +64,13 @@ def get_download_url(file_path: str) -> str:
     }
 
     流程：
-    1. 后端返回: api/api/download/{file_path}
-    2. 前端 resolveFileUrl 转换为: /api/api/download/{file_path}
-    3. 前端请求: http://localhost:50001/api/api/download/{file_path}
-    4. Nginx 转发到: http://127.0.0.1:50002/api/download/{file_path}
-    5. 后端 /api/download 挂载点处理
+    1. 后端返回: /api/download/{file_path}
+    2. 前端 resolveFileUrl 转换为完整 URL
+    3. 前端请求: http://localhost:50001/api/download/{file_path}
+    4. Nginx 转发到 http://127.0.0.1:50002/api/download/{file_path}
+    5. FastAPI /api/download 挂载点处理
     """
+
     # 规范化文件路径：移除 ./ 前缀，转换反斜杠为正斜杠
     file_path = file_path.replace('\\', '/').lstrip('./')
     # 移除前缀 "mcp_servers/paper_search/" 如果存在
@@ -74,10 +79,9 @@ def get_download_url(file_path: str) -> str:
     elif file_path.startswith('paper_search/'):
         file_path = file_path[len('paper_search/'):]
 
-    # 返回相对路径：api/api/download/...
-    # 前端会转换为 /api/api/download/...
-    # Nginx 会转发到后端的 /api/download/...
-    return f"api/api/download/{file_path}"
+    # 返回相对路径：/api/download/...
+    # 前端会转换为完整 URL，Nginx 会转发到后端的 /api/download/...
+    return f"/api/download/{file_path}"
 from typing import List, Dict, Any, Optional
 
 from fastmcp import FastMCP

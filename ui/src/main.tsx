@@ -24,7 +24,8 @@ const queryClient = new QueryClient({
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+  // 暂时禁用 StrictMode 以解决 WebSocket 重复连接问题
+  // <React.StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <App />
@@ -54,5 +55,5 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         />
       </QueryClientProvider>
     </ErrorBoundary>
-  </React.StrictMode>,
+  // </React.StrictMode>,
 )

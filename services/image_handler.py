@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .config import server_config
 
@@ -19,32 +20,39 @@ logger = logging.getLogger(__name__)
 class ImageHandler:
     """Handle image data and URL generation"""
 
-    # Base URL for static files (will be set by server)
-    # 优先使用 VITE_API_URL（前端调用的API地址）
     _vite_api_url = os.getenv("VITE_API_URL")
+
+    @staticmethod
+    def _build_origin(default_host: Optional[str] = None, default_port: Optional[int] = None) -> str:
+        host = os.getenv("RESEARCHMIND_HTTP_HOST", default_host or server_config.HTTP_HOST)
+        port = os.getenv("RESEARCHMIND_HTTP_PORT", str(default_port) if default_port is not None else "50002")
+        if host == "0.0.0.0":
+            host = "127.0.0.1"
+        return f"http://{host}:{port}"
+
     if _vite_api_url:
-        BASE_URL = _vite_api_url
+        _candidate = _vite_api_url.strip()
+        parsed = urlparse(_candidate)
+        if not _candidate.startswith('/') and parsed.scheme and parsed.netloc:
+            BASE_URL = f"{parsed.scheme}://{parsed.netloc}"
+        else:
+            BASE_URL = _build_origin()
     else:
-        _default_host = os.getenv("RESEARCHMIND_HTTP_HOST", server_config.HTTP_HOST)
-        _default_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50006")
-        if _default_host == "0.0.0.0":
-            _default_host = "127.0.0.1"
-        BASE_URL = f"http://{_default_host}:{_default_port}"
+        BASE_URL = _build_origin()
 
     @staticmethod
     def set_base_url(host: str, port: int):
         """Set base URL for image access"""
-        # 优先使用 VITE_API_URL（前端调用的API地址）
         vite_api_url = os.getenv("VITE_API_URL")
         if vite_api_url:
-            ImageHandler.BASE_URL = vite_api_url
-        else:
-            http_host = os.getenv("RESEARCHMIND_HTTP_HOST", host)
-            http_port = os.getenv("RESEARCHMIND_HTTP_PORT", str(port))
-            if http_host == "0.0.0.0":
-                http_host = "127.0.0.1"
-            ImageHandler.BASE_URL = f"http://{http_host}:{http_port}"
-    
+            candidate = vite_api_url.strip()
+            parsed = urlparse(candidate)
+            if not candidate.startswith('/') and parsed.scheme and parsed.netloc:
+                ImageHandler.BASE_URL = f"{parsed.scheme}://{parsed.netloc}"
+                return
+
+        ImageHandler.BASE_URL = ImageHandler._build_origin(host, port)
+
     @staticmethod
     def extract_images_from_tool_result(result: Dict[str, Any]) -> List[Dict[str, Any]]:
         """

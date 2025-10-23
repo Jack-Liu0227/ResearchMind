@@ -20,6 +20,7 @@ from PyPDF2 import PdfReader
 import structlog
 import warnings
 import time
+import itertools
 
 # Suppress PyPDF2 warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="PyPDF2")
@@ -30,6 +31,7 @@ logger = structlog.get_logger(__name__)
 DEFAULT_TIMEOUT = 30
 MAX_RETRIES = 2
 RETRY_DELAY = 1
+ARXIV_MAX_RESULTS_LIMIT = 50
 
 PAPER_DIR = "./paper_search/papers"
 
@@ -70,6 +72,29 @@ def sanitize_filename(filename: str) -> str:
     return clean_name
 
 
+def _sanitize_max_results(value: Any) -> int:
+    """
+    Normalize the max_results argument to a safe, bounded positive integer.
+    """
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        logger.warning("Invalid max_results value, falling back to default", requested=value)
+        numeric = 5
+
+    if numeric < 1:
+        numeric = 1
+    if numeric > ARXIV_MAX_RESULTS_LIMIT:
+        logger.info(
+            "Clamping max_results to upper bound",
+            requested=numeric,
+            limit=ARXIV_MAX_RESULTS_LIMIT
+        )
+        numeric = ARXIV_MAX_RESULTS_LIMIT
+
+    return numeric
+
+
 def search_arxiv_papers(topic: str, max_results: int = 5, session_id: str = None) -> List[Dict[str, Any]]:
     """
     Search for papers on arXiv based on a topic and store their information.
@@ -82,9 +107,14 @@ def search_arxiv_papers(topic: str, max_results: int = 5, session_id: str = None
         List of dictionaries containing paper information (paper_id, title, authors, summary, etc.)
     """
     try:
-        # 确保 max_results 是有效的正整数
-        max_results = max(1, int(max_results))
-        logger.info(f"Starting ArXiv search with max_results={max_results}", topic=topic)
+        # 确保 max_results 是有效的正整数并限制在安全范围内
+        max_results = _sanitize_max_results(max_results)
+        logger.info(
+            "Starting ArXiv search",
+            topic=topic,
+            max_results=max_results,
+            limit=ARXIV_MAX_RESULTS_LIMIT
+        )
 
         # Use arxiv to find the papers
         client = arxiv.Client()
@@ -97,11 +127,8 @@ def search_arxiv_papers(topic: str, max_results: int = 5, session_id: str = None
         )
 
         # 获取结果并限制数量
-        papers = []
-        for i, paper in enumerate(client.results(search)):
-            if i >= max_results:
-                break
-            papers.append(paper)
+        papers = list(itertools.islice(client.results(search), max_results))
+        logger.info("ArXiv client returned results", requested=max_results, fetched=len(papers))
 
         # 使用会话文件夹管理器获取文件夹路径
         from ..shared.session_folder_manager import get_session_folder

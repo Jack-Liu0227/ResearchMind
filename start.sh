@@ -1,38 +1,29 @@
 #!/bin/bash
 
-# ============================================
-# ResearchMind 一键启动脚本 v2.0
-# ============================================
-# 功能：启动所有服务（后端、MCP服务器、前端）
-# 特性：
-#   - 支持分布式部署（不同主机运行不同服务）
-#   - 灵活的 HOST 和 PORT 配置
-#   - UI 强制为 0.0.0.0:50001（跨主机访问）
-#   - 完整的日志管理和错误处理
+# =============================================================================
+# ResearchMind unified launcher
+# =============================================================================
+# Starts every component (backend, MCP servers, frontend) using the variables
+# defined in .env. It also handles log redirection, process tracking, and
+# graceful shutdown on Ctrl+C.
 #
-# 用法：
-#   bash start.sh                    # 使用 .env 配置启动
+# Usage:
+#   bash start.sh
 #
-# 推荐：使用 quick_deploy.sh 快速部署
-#   bash quick_deploy.sh             # 本地部署
-#   bash quick_deploy.sh 192.168.1.100  # 局域网部署
-#   bash quick_deploy.sh api.example.com # 云服务器部署
+# NOTE: Nginx is not managed here. Configure and start it manually if needed.
+# =============================================================================
 
-set -e
-bash setup_nginx.sh
-# ============================================
-# 颜色输出定义
-# ============================================
+set -euo pipefail
+
+# ----------------------------- Colour definitions ----------------------------
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# ============================================
-# 日志函数
-# ============================================
+# ----------------------------- Logging utilities -----------------------------
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
@@ -53,287 +44,217 @@ log_config() {
     echo -e "${CYAN}[CONFIG]${NC} $1"
 }
 
-# ============================================
-# 清理函数
-# ============================================
+# ----------------------------- Cleanup handling ------------------------------
 cleanup() {
-    log_warning "\n正在停止所有服务..."
+    log_warning "Stopping all managed processes..."
 
-    # 停止所有后台进程
     if [ -f .service_pids ]; then
-        while read pid; do
-            if kill -0 $pid 2>/dev/null; then
-                log_info "停止进程 PID: $pid"
-                kill $pid 2>/dev/null || true
+        while read -r pid; do
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                log_info "Killing PID $pid"
+                kill "$pid" 2>/dev/null || true
             fi
         done < .service_pids
         rm -f .service_pids
     fi
 
-    log_success "所有服务已停止"
+    log_success "All services stopped."
     exit 0
 }
 
-# 设置信号处理
 trap cleanup SIGINT SIGTERM
 
-# ============================================
-# 加载配置函数
-# ============================================
+# ------------------------------- Load .env file ------------------------------
 load_config() {
     if [ ! -f .env ]; then
-        log_error ".env 文件不存在"
+        log_error ".env file is missing."
         exit 1
     fi
 
-    # 从 .env 文件加载配置（安全处理注释、空行和 BOM）
+    # shellcheck disable=SC2046,SC1090
     set -a
-    # 移除 BOM 并加载配置
-    source <(grep -v '^#' .env | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    source <(
+        sed '1s/^\xEF\xBB\xBF//' .env \
+        | sed 's/\r$//' \
+        | grep -v '^\s*#' \
+        | grep -v '^\s*$'
+    )
     set +a
 
-    log_success ".env 配置已加载"
+    log_success ".env configuration loaded."
 }
 
-# ============================================
-# 打印启动横幅
-# ============================================
-echo -e "${GREEN}"
-echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║                                                           ║"
-echo "║          ResearchMind 一键启动脚本 v2.0                  ║"
-echo "║                                                           ║"
-echo "║     支持分布式部署 | 灵活配置 | 跨主机访问               ║"
-echo "║                                                           ║"
-echo "╚═══════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
+# ------------------------------ Pre-flight checks ---------------------------
+print_banner() {
+    echo -e "${GREEN}"
+    echo "============================================================"
+    echo "   ResearchMind start script v2.0"
+    echo "   Distributed-ready | Flexible config | Cross-host access"
+    echo "============================================================"
+    echo -e "${NC}"
+}
 
-# ============================================
-# 环境检查
-# ============================================
-log_info "检查环境..."
+check_dependencies() {
+    log_info "Checking runtime dependencies..."
 
-# 检查 Python/uv
-if ! command -v uv &> /dev/null; then
-    log_error "uv 未安装，请先安装 uv: https://docs.astral.sh/uv/"
-    exit 1
-fi
-log_success "✓ uv 已安装"
-
-# 检查 Node.js/npm
-if ! command -v npm &> /dev/null; then
-    log_error "npm 未安装，请先安装 Node.js"
-    exit 1
-fi
-log_success "✓ npm 已安装"
-
-# ============================================
-# 清理旧进程和端口
-# ============================================
-log_info "清理旧进程..."
-pkill -9 -f "uv run python" 2>/dev/null || true
-pkill -9 -f "npm run dev" 2>/dev/null || true
-pkill -9 -f "node" 2>/dev/null || true
-
-# Windows 特定的端口清理
-if command -v netstat &> /dev/null; then
-    # 尝试释放占用的端口
-    for port in 50001 50002 50003 50004 50005 50006; do
-        pids=$(netstat -ano 2>/dev/null | grep ":$port " | awk '{print $NF}' | sort -u)
-        for pid in $pids; do
-            if [ ! -z "$pid" ] && [ "$pid" != "PID" ]; then
-                taskkill /PID $pid /F 2>/dev/null || true
-            fi
-        done
-    done
-fi
-
-sleep 8
-log_success "✓ 旧进程已清理"
-
-# ============================================
-# 配置文件检查
-# ============================================
-if [ ! -f .env ]; then
-    log_warning ".env 文件不存在，从 .env.example 复制..."
-    if [ -f .env.example ]; then
-        cp .env.example .env
-        log_warning "请编辑 .env 文件配置 API keys"
-    else
-        log_error ".env.example 文件也不存在"
+    if ! command -v uv >/dev/null 2>&1; then
+        log_error "uv is not installed. Install it from https://docs.astral.sh/uv/"
         exit 1
     fi
-fi
+    log_success "uv available."
 
-# 清理 UTF-8 BOM（如果存在）
-if file .env 2>/dev/null | grep -q "UTF-8 (with BOM)"; then
-    log_warning "清理 .env 中的 UTF-8 BOM..."
-    python3 -c "
-import sys
-with open('.env', 'rb') as f:
-    content = f.read()
-if content.startswith(b'\xef\xbb\xbf'):
-    content = content[3:]
-with open('.env', 'wb') as f:
-    f.write(content)
-" 2>/dev/null || sed -i '1s/^\xEF\xBB\xBF//' .env
-fi
+    if ! command -v npm >/dev/null 2>&1; then
+        log_error "npm is not installed. Install Node.js first."
+        exit 1
+    fi
+    log_success "npm available."
+}
 
-# 加载配置
+prepare_workspace() {
+    mkdir -p logs
+    : > .service_pids
+}
+
+kill_stale_processes() {
+    log_info "Cleaning up stale processes and occupied ports..."
+
+    pkill -9 -f "uv run python" 2>/dev/null || true
+    pkill -9 -f "npm run dev" 2>/dev/null || true
+    pkill -9 -f "node .*vite" 2>/dev/null || true
+
+    if command -v netstat >/dev/null 2>&1 && command -v awk >/dev/null 2>&1; then
+        for port in 50001 50002 50003 50004 50005 50006; do
+            pids=$(netstat -ano 2>/dev/null | awk -v p=":$port" '$0 ~ p {print $NF}' | sort -u)
+            for pid in $pids; do
+                # Skip non-numeric or PID 0 entries (system idle)
+                if ! [[ "$pid" =~ ^[0-9]+$ ]] || [ "$pid" -eq 0 ]; then
+                    continue
+                fi
+                if kill -0 "$pid" 2>/dev/null; then
+                    log_info "Releasing port $port (PID $pid)"
+                    kill "$pid" 2>/dev/null || true
+                fi
+            done
+        done
+    fi
+}
+
+# ---------------------------- Service start helpers -------------------------
+register_pid() {
+    echo "$1" >> .service_pids
+}
+
+start_mcp_service() {
+    local service_name=$1
+    local script_path=$2
+    local log_name=$3
+    local host=$4
+    local port=$5
+
+    log_info "Starting ${service_name} (${host}:${port})..."
+    pushd mcp_servers >/dev/null
+    uv run python "$script_path" 2>&1 | tee "../logs/${log_name}" &
+    local pid=$!
+    popd >/dev/null
+    register_pid "$pid"
+    sleep 3
+    log_success "${service_name} started (PID ${pid})."
+}
+
+start_backend() {
+    log_info "Starting backend services..."
+    log_info "WebSocket endpoint: ${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}"
+    log_info "HTTP endpoint:      ${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
+
+    uv run python main.py 2>&1 | tee logs/backend.log &
+    local pid=$!
+    register_pid "$pid"
+    sleep 4
+    log_success "Backend started (PID ${pid})."
+}
+
+start_frontend() {
+    log_info "Starting frontend..."
+
+    if [ ! -d "ui/node_modules" ]; then
+        log_info "Installing frontend dependencies..."
+        pushd ui >/dev/null
+        npm install
+        popd >/dev/null
+    fi
+
+    log_info "Launching Vite dev server (${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT})..."
+    pushd ui >/dev/null
+    npm run dev -- --host "${VITE_FRONTEND_HOST}" --port "${VITE_FRONTEND_PORT}" 2>&1 | tee ../logs/frontend.log &
+    local pid=$!
+    popd >/dev/null
+    register_pid "$pid"
+    sleep 3
+    log_success "Frontend started (PID ${pid})."
+}
+
+print_summary() {
+    echo -e "${GREEN}============================================================${NC}"
+    echo -e "${GREEN}   All services are up and running${NC}"
+    echo -e "${GREEN}============================================================${NC}\n"
+
+    echo -e "${BLUE}Direct access endpoints:${NC}"
+    echo -e "  ${YELLOW}Frontend UI:${NC}   http://${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT}"
+    echo -e "  ${YELLOW}Backend API:${NC}   http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
+    echo -e "  ${YELLOW}API Docs:${NC}      http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}/docs"
+    echo -e "  ${YELLOW}WebSocket:${NC}     ws://${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}/ws"
+    echo ""
+
+    echo -e "${BLUE}MCP services:${NC}"
+    echo -e "  ${YELLOW}Paper Search:${NC}  http://${PAPER_SEARCH_MCP_HOST}:${PAPER_SEARCH_MCP_PORT}/sse"
+    echo -e "  ${YELLOW}Simulation:${NC}    http://${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT}/sse"
+    echo -e "  ${YELLOW}Database:${NC}      http://${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT}/sse"
+    echo ""
+
+    echo -e "${BLUE}Logs:${NC}"
+    echo "  logs/backend.log"
+    echo "  logs/database.log"
+    echo "  logs/paper_search.log"
+    echo "  logs/simulation.log"
+    echo "  logs/frontend.log"
+    echo ""
+
+    echo -e "${BLUE}Remote deployment hints:${NC}"
+    echo "  - Set VITE_FRONTEND_HOST=0.0.0.0 to expose the UI"
+    echo "  - Set RESEARCHMIND_HTTP_HOST=0.0.0.0 for remote API access"
+    echo "  - Update VITE_API_URL, VITE_WS_URL and *_MCP_URL with the public host"
+    echo ""
+
+    echo -e "${YELLOW}Press Ctrl+C to stop all services.${NC}"
+}
+
+# -----------------------------------------------------------------------------
+# Main flow
+# -----------------------------------------------------------------------------
+print_banner
+check_dependencies
 load_config
+prepare_workspace
+kill_stale_processes
 
-# ============================================
-# 创建必要的目录
-# ============================================
-mkdir -p logs
-mkdir -p session_data/images
-mkdir -p session_data/metadata
-mkdir -p session_data/structures
-log_success "✓ 创建必要的目录"
-
-# 清空 PID 文件
-> .service_pids
-
-# ============================================
-# 显示配置信息
-# ============================================
-echo ""
-log_config "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-log_config "📋 服务配置信息"
-log_config "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-log_config "前端 UI:        ${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT}"
-log_config "HTTP API:      ${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
-log_config "WebSocket:     ${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}"
-log_config "论文搜索 MCP:   ${PAPER_SEARCH_MCP_HOST}:${PAPER_SEARCH_MCP_PORT}"
-log_config "模拟服务 MCP:   ${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT}"
-log_config "数据库服务 MCP: ${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT}"
-log_config "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_info "Loaded configuration:"
+log_config "Frontend:           ${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT}"
+log_config "Backend HTTP:       ${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
+log_config "Backend WebSocket:  ${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}"
+log_config "Paper Search MCP:   ${PAPER_SEARCH_MCP_HOST}:${PAPER_SEARCH_MCP_PORT}"
+log_config "Simulation MCP:     ${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT}"
+log_config "Database MCP:       ${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT}"
 echo ""
 
-# ============================================
-# 启动 MCP 服务器
-# ============================================
-log_info "启动 MCP 服务器..."
+log_info "Starting MCP services..."
+start_mcp_service "Database MCP" "database_call/server.py" "database.log" "${DATABASE_MCP_HOST}" "${DATABASE_MCP_PORT}"
+start_mcp_service "Paper Search MCP" "paper_search/server.py" "paper_search.log" "${PAPER_SEARCH_MCP_HOST}" "${PAPER_SEARCH_MCP_PORT}"
+start_mcp_service "Simulation MCP" "simulation/server.py" "simulation.log" "${SIMULATION_MCP_HOST}" "${SIMULATION_MCP_PORT}"
 
-# 数据库服务
-log_info "启动数据库服务 (${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT})..."
-cd mcp_servers
-uv run python database_call/server.py 2>&1 | tee ../logs/database.log &
-DB_PID=$!
-echo $DB_PID >> ../.service_pids
-cd ..
-sleep 3
-log_success "✓ 数据库服务已启动 (PID: $DB_PID)"
+start_backend
+start_frontend
+print_summary
 
-# 论文搜索服务
-log_info "启动论文搜索服务 (${PAPER_SEARCH_MCP_HOST}:${PAPER_SEARCH_MCP_PORT})..."
-cd mcp_servers
-uv run python paper_search/server.py 2>&1 | tee ../logs/paper_search.log &
-PAPER_PID=$!
-echo $PAPER_PID >> ../.service_pids
-cd ..
-sleep 3
-log_success "✓ 论文搜索服务已启动 (PID: $PAPER_PID)"
-
-# 模拟服务
-log_info "启动模拟服务 (${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT})..."
-cd mcp_servers
-uv run python simulation/server.py 2>&1 | tee ../logs/simulation.log &
-SIM_PID=$!
-echo $SIM_PID >> ../.service_pids
-cd ..
-sleep 3
-log_success "✓ 模拟服务已启动 (PID: $SIM_PID)"
-
-# ============================================
-# 启动后端服务
-# ============================================
-log_info "\n启动后端服务..."
-log_info "WebSocket 服务 (${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT})"
-log_info "HTTP API 服务 (${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT})"
-
-sleep 2
-uv run python main.py 2>&1 | tee logs/backend.log &
-BACKEND_PID=$!
-echo $BACKEND_PID >> .service_pids
-sleep 4
-log_success "✓ 后端服务已启动 (PID: $BACKEND_PID)"
-
-# ============================================
-# 启动前端服务
-# ============================================
-log_info "\n启动前端服务..."
-
-# 检查前端依赖
-if [ ! -d "ui/node_modules" ]; then
-    log_info "安装前端依赖..."
-    cd ui
-    npm install
-    cd ..
-fi
-
-# 启动前端开发服务器 (支持远程访问)
-log_info "启动前端开发服务器 (${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT})..."
-cd ui
-npm run dev -- --host ${VITE_FRONTEND_HOST} --port ${VITE_FRONTEND_PORT} 2>&1 | tee ../logs/frontend.log &
-FRONTEND_PID=$!
-echo $FRONTEND_PID >> ../.service_pids
-cd ..
-sleep 3
-log_success "✓ 前端服务已启动 (PID: $FRONTEND_PID)"
-
-# ============================================
-# Nginx 反向代理已禁用
-# ============================================
-# 注意: 已移除 Nginx 反向代理
-# 所有服务现在直接访问，无需反向代理
-#
-# 服务地址:
-#   - 前端 UI: http://127.0.0.1:50001
-#   - 后端 API: http://127.0.0.1:50006
-#   - WebSocket: ws://127.0.0.1:50003/ws
-#   - Paper Search MCP: http://127.0.0.1:50004/sse
-#   - Simulation MCP: http://127.0.0.1:50005/sse
-#   - Database MCP: http://127.0.0.1:50002/sse
-
-# ============================================
-# 服务状态总结
-# ============================================
-echo -e "\n${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║                    所有服务已启动                         ║${NC}"
-echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}\n"
-
-echo -e "${BLUE}📡 访问地址 (直接访问，无反向代理):${NC}"
-echo -e "   ${YELLOW}前端 UI:${NC}        http://127.0.0.1:${VITE_FRONTEND_PORT}"
-echo -e "   ${YELLOW}后端 API:${NC}       http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
-echo -e "   ${YELLOW}API 文档:${NC}       http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}/docs"
-echo ""
-echo -e "${BLUE}🔌 实时通信:${NC}"
-echo -e "   ${YELLOW}WebSocket:${NC}      ws://127.0.0.1:${RESEARCHMIND_WS_PORT}/ws"
-echo ""
-echo -e "${BLUE}🔧 MCP 服务:${NC}"
-echo -e "   ${YELLOW}论文搜索:${NC}       http://127.0.0.1:${PAPER_SEARCH_MCP_PORT}/sse"
-echo -e "   ${YELLOW}模拟服务:${NC}       http://127.0.0.1:${SIMULATION_MCP_PORT}/sse"
-echo -e "   ${YELLOW}数据库服务:${NC}     http://127.0.0.1:${DATABASE_MCP_PORT}/sse"
-echo ""
-echo -e "${BLUE}📝 日志文件:${NC}"
-echo -e "   logs/backend.log"
-echo -e "   logs/database.log"
-echo -e "   logs/paper_search.log"
-echo -e "   logs/simulation.log"
-echo -e "   logs/frontend.log"
-echo ""
-echo -e "${BLUE}💡 远程部署提示:${NC}"
-echo -e "   如需在不同主机运行服务，请修改 .env 文件中的配置："
-echo -e "   - 前端监听: VITE_FRONTEND_HOST=0.0.0.0 (允许外部访问)"
-echo -e "   - 后端监听: RESEARCHMIND_HTTP_HOST=0.0.0.0 (允许外部访问)"
-echo -e "   - 客户端连接: VITE_API_URL, VITE_WS_URL, *_MCP_URL (改为目标主机 IP 或域名)"
-echo ""
-echo -e "${YELLOW}按 Ctrl+C 停止所有服务${NC}\n"
-
-# ============================================
-# 保持脚本运行
-# ============================================
 while true; do
     sleep 1
 done

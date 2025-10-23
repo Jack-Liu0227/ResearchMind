@@ -6,7 +6,26 @@
 import { CrystalStructure } from '../types';
 import { API_CONFIG } from '../constants';
 
-const API_BASE_URL = API_CONFIG.BASE_URL;
+const API_ORIGIN = API_CONFIG.BASE_URL;
+const API_PATH = API_CONFIG.API_PATH || '/api';
+const API_BASE_URL = API_CONFIG.API_BASE_URL || `${API_ORIGIN}${API_PATH}`;
+
+const ensureLeadingSlash = (value: string) => (value.startsWith('/') ? value : `/${value}`);
+
+const buildApiUrl = (path: string) => `${API_BASE_URL}${ensureLeadingSlash(path)}`;
+
+const resolveEffectiveOrigin = () => {
+  if (API_ORIGIN.startsWith('http://') || API_ORIGIN.startsWith('https://')) {
+    return API_ORIGIN;
+  }
+
+  if (typeof window !== 'undefined') {
+    const { protocol, hostname, port } = window.location;
+    return port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
+  }
+
+  return API_ORIGIN;
+};
 
 /**
  * 处理 URL 转换：如果是相对路径，转换为完整 URL
@@ -17,69 +36,39 @@ const API_BASE_URL = API_CONFIG.BASE_URL;
  * 2. 反向代理：http://dyum1393797.bohrium.tech:50001/api/download/...
  */
 export function resolveFileUrl(url: string): string {
-  console.log('🔗 resolveFileUrl - input:', url)
-  console.log('🔗 resolveFileUrl - API_BASE_URL:', API_BASE_URL)
+  console.log('🔗 resolveFileUrl - input:', url);
+  console.log('🔗 resolveFileUrl - API_ORIGIN:', API_ORIGIN);
+  console.log('🔗 resolveFileUrl - API_PATH:', API_PATH);
 
-  // 如果已经是完整 URL，直接返回
   if (url.startsWith('http://') || url.startsWith('https://')) {
-    console.log('🔗 resolveFileUrl - already full URL, returning:', url)
+    console.log('🔗 resolveFileUrl - already full URL, returning:', url);
     return url;
   }
 
-  // 如果是相对路径，使用 API_BASE_URL 作为基础
+  const effectiveOrigin = resolveEffectiveOrigin();
+  console.log('🔗 resolveFileUrl - effective origin:', effectiveOrigin);
+
+  const ensureApiPath = (value: string) => {
+    const normalized = ensureLeadingSlash(value);
+    if (API_PATH === '/' || normalized.startsWith(API_PATH)) {
+      return normalized;
+    }
+    if (normalized.startsWith('/download/')) {
+      return `${API_PATH}${normalized}`;
+    }
+    return `${API_PATH}${normalized}`;
+  };
+
   if (url.startsWith('/')) {
-    // 关键修复：检查 API_BASE_URL 是否已经包含 /api
-    let finalUrl = url;
-
-    // 如果 API_BASE_URL 已经以 /api 结尾，就不要再添加 /api 前缀
-    if (API_BASE_URL.endsWith('/api') || API_BASE_URL === '/api') {
-      // API_BASE_URL 已经是 /api 或以 /api 结尾，直接使用 url
-      finalUrl = url;
-    } else if (!url.startsWith('/api/')) {
-      // API_BASE_URL 不包含 /api，需要添加
-      finalUrl = `/api${url}`;
-    }
-
-    // 如果 API_BASE_URL 是完整 URL
-    if (API_BASE_URL.startsWith('http://') || API_BASE_URL.startsWith('https://')) {
-      const result = `${API_BASE_URL}${finalUrl}`;
-      console.log('🔗 resolveFileUrl - using API_BASE_URL:', result)
-      return result;
-    }
-
-    // 如果 API_BASE_URL 是相对路径（如 /api），则需要使用当前域名
-    // 这种情况通常发生在通过反向代理访问时
-    const { protocol, hostname, port } = window.location;
-
-    // 构建基础 URL
-    // 注意：不使用 import.meta.env.VITE_API_PORT，因为在反向代理环境中应该使用当前访问的端口
-    const baseUrl = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
-
-    const result = `${baseUrl}${finalUrl}`;
-    console.log('🔗 resolveFileUrl - using window.location:', result)
-    console.log('🔗 resolveFileUrl - window.location:', { protocol, hostname, port })
+    const pathWithApi = ensureApiPath(url);
+    const result = `${effectiveOrigin}${pathWithApi}`;
+    console.log('🔗 resolveFileUrl - resolved absolute path:', result);
     return result;
   }
 
-  // 其他情况：相对路径（不以 / 开头）
-  // 例如：api/api/download/papers/...
-  console.log('🔗 resolveFileUrl - relative path case:', url)
-
-  // 转换为以 / 开头的路径
-  const pathWithSlash = `/${url}`;
-
-  // 如果 API_BASE_URL 是完整 URL
-  if (API_BASE_URL.startsWith('http://') || API_BASE_URL.startsWith('https://')) {
-    const result = `${API_BASE_URL}${pathWithSlash}`;
-    console.log('🔗 resolveFileUrl - relative path with API_BASE_URL:', result)
-    return result;
-  }
-
-  // 如果 API_BASE_URL 是相对路径，使用当前域名
-  const { protocol, hostname, port } = window.location;
-  const baseUrl = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
-  const result = `${baseUrl}${pathWithSlash}`;
-  console.log('🔗 resolveFileUrl - relative path with window.location:', result)
+  const pathWithApi = ensureApiPath(url);
+  const result = `${effectiveOrigin}${pathWithApi}`;
+  console.log('🔗 resolveFileUrl - resolved relative path:', result);
   return result;
 }
 
@@ -113,7 +102,7 @@ export async function convertToConventionalCell(
   cifContent: string
 ): Promise<CrystalStructure> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/convert_to_conventional`, {
+    const response = await fetch(buildApiUrl('convert_to_conventional'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -160,7 +149,7 @@ export async function parseCIF(
   toConventional: boolean = false
 ): Promise<CrystalStructure> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/parse_cif`, {
+    const response = await fetch(buildApiUrl('parse_cif'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -202,7 +191,8 @@ export async function parseCIF(
  */
 export async function checkAPIHealth(): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
+    const origin = resolveEffectiveOrigin();
+    const response = await fetch(`${origin}${ensureLeadingSlash('health')}`);
     if (!response.ok) return false;
 
     const data = await response.json();
@@ -244,7 +234,7 @@ export async function getPhononImage(
  */
 export async function getPhononResults(): Promise<string[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/phonon_results`);
+    const response = await fetch(buildApiUrl('phonon_results'));
 
     if (!response.ok) {
       throw new Error(`Failed to fetch phonon results: ${response.statusText}`);
@@ -263,7 +253,7 @@ export async function getPhononResults(): Promise<string[]> {
  */
 export async function getGeneratedStructures(): Promise<string[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/generated_structures`);
+    const response = await fetch(buildApiUrl('generated_structures'));
 
     if (!response.ok) {
       throw new Error(`Failed to fetch generated structures: ${response.statusText}`);
@@ -293,7 +283,7 @@ export interface PhononImage {
  */
 export async function getPhononExamples(): Promise<PhononImage[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/phonon_examples`);
+    const response = await fetch(buildApiUrl('phonon_examples'));
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { wsService } from '../services/websocket'
 import ChatInterface from '../components/ChatInterface'
@@ -31,13 +31,20 @@ const ChatPage: React.FC = () => {
     setCurrentSessionPhononImages,
     addToCurrentSessionPhononImages,
     setShowPhononVisualization,
-    messages,
     sessions
   } = useAppStore()
+
+  const pendingFileMetadataRef = useRef<any[]>([])
 
   useEffect(() => {
     // 初始化WebSocket连接
     const initWebSocket = async () => {
+      // 检查是否已经连接，避免重复连接
+      if (wsService.isConnected) {
+        console.log('🔌 WebSocket 已经连接，跳过重复连接')
+        return
+      }
+      
       try {
         console.log('🔌 正在连接 WebSocket...')
         await wsService.connect()
@@ -93,6 +100,23 @@ const ChatPage: React.FC = () => {
             metadata: message.data.metadata,
           }
           addMessage(newMessage)
+
+          if (pendingFileMetadataRef.current.length > 0) {
+            let mergedMetadata = { ...(newMessage.metadata || {}) }
+            while (pendingFileMetadataRef.current.length > 0) {
+              const pendingMetadata = pendingFileMetadataRef.current.shift()
+              if (!pendingMetadata) {
+                continue
+              }
+              mergedMetadata = {
+                ...mergedMetadata,
+                ...pendingMetadata
+              }
+            }
+            updateMessage(newMessage.id, {
+              metadata: mergedMetadata
+            })
+          }
 
           // 收到内容后，保持loading状态，等待complete状态
           // 不在这里关闭loading，因为可能还有后续消息
@@ -342,7 +366,8 @@ const ChatPage: React.FC = () => {
         // setShowPhononVisualization(true)
 
         // 将图片数据添加到当前消息的metadata中，并触发重新渲染
-        const currentMessage = messages[messages.length - 1]
+        const currentState = useAppStore.getState()
+        const currentMessage = currentState.messages[currentState.messages.length - 1]
         if (currentMessage) {
           // 使用updateMessage方法确保触发重新渲染
           updateMessage(currentMessage.id, {
@@ -356,17 +381,19 @@ const ChatPage: React.FC = () => {
       } else if ((message.type as any) === 'file_metadata' && message.data?.metadata) {
         // 处理文件元数据（CSV和MD文件链接）
         console.log('📄 收到文件元数据:', message.data.metadata)
-        console.log('📄 当前消息数:', messages.length)
-        console.log('📄 所有消息:', messages.map(m => ({ id: m.id, role: m.role, metadata: m.metadata })))
+        const storeState = useAppStore.getState()
+        const allMessages = storeState.messages
+        console.log('📄 当前消息数:', allMessages.length)
+        console.log('📄 所有消息:', allMessages.map(m => ({ id: m.id, role: m.role, metadata: m.metadata })))
 
         // 找到最后一条assistant消息，而不是最后一条消息
         // 因为最后一条消息可能是status消息或其他消息
-        const assistantMessages = messages.filter(m => m.role === 'assistant')
+        const assistantMessages = allMessages.filter(m => m.role === 'assistant')
         console.log('📄 Assistant消息数:', assistantMessages.length)
         console.log('📄 Assistant消息列表:', assistantMessages.map(m => ({ id: m.id, metadata: m.metadata })))
 
         // 使用 [...] 创建新数组副本，避免修改原数组
-        const currentMessage = [...assistantMessages].pop()
+        const currentMessage = assistantMessages[assistantMessages.length - 1]
         if (currentMessage) {
           console.log('📄 更新消息metadata:', currentMessage.id)
           console.log('📄 原metadata:', currentMessage.metadata)
@@ -374,15 +401,15 @@ const ChatPage: React.FC = () => {
 
           updateMessage(currentMessage.id, {
             metadata: {
-              ...currentMessage.metadata,
+              ...(currentMessage.metadata || {}),
               ...message.data.metadata
             }
           })
 
           // 验证更新是否成功
           setTimeout(() => {
-            const state = useAppStore.getState()
-            const updatedMsg = state.messages.find(m => m.id === currentMessage.id)
+            const latest = useAppStore.getState()
+            const updatedMsg = latest.messages.find(m => m.id === currentMessage.id)
             console.log('📄 更新后的消息metadata:', updatedMsg?.metadata)
           }, 100)
 
@@ -398,7 +425,8 @@ const ChatPage: React.FC = () => {
             })
           }
         } else {
-          console.warn('⚠️ 未找到assistant消息')
+          console.warn('⚠️ 未找到assistant消息，暂存文件元数据以便稍后应用')
+          pendingFileMetadataRef.current.push(message.data.metadata)
         }
       } else if (message.type === 'phonon_data' && message.data?.phonon_data) {
         // 直接处理声子谱数据
@@ -415,7 +443,8 @@ const ChatPage: React.FC = () => {
         }
 
         // 将声子谱数据添加到当前消息的metadata中
-        const currentMessage = messages[messages.length - 1]
+        const latestState = useAppStore.getState()
+        const currentMessage = latestState.messages[latestState.messages.length - 1]
         if (currentMessage) {
           updateMessage(currentMessage.id, {
             metadata: {
@@ -438,11 +467,12 @@ const ChatPage: React.FC = () => {
     })
 
     return () => {
+      console.log('🧹 ChatPage cleanup - 只清理事件监听，保持连接')
       unsubscribeMessage()
       unsubscribeConnection()
-      wsService.disconnect()
+      // 不断开WebSocket连接，让其他组件继续使用
     }
-  }, [setConnected, addMessage, setAgents])
+  }, []) // 移除函数依赖项，这些函数引用会导致不断重连
 
   // 自动创建会话 - 仅在发送消息时创建，避免刷新页面时自动创建
   // 移除自动创建逻辑，改为在发送消息时检查并创建

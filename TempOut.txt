@@ -1,0 +1,60 @@
+
+                return True
+            else:
+                logger.debug("No images found in tool result")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to process images: {e}")
+            return False
+    
+    @staticmethod
+    async def _process_file_links(
+        data: Dict[str, Any],
+        agent_id: str,
+        websocket: Any,
+        session_id: Optional[str] = None
+    ) -> bool:
+        """Process and send file download links (CSV and MD files)"""
+        try:
+            file_metadata = {}
+
+            # Extract CSV download URL
+            if 'csv_download_url' in data:
+                file_metadata['csv_download_url'] = data['csv_download_url']
+                if 'csv_file_path' in data:
+                    file_metadata['csv_file_path'] = data['csv_file_path']
+                    inline_csv = DataProcessor._read_text_file(data['csv_file_path'])
+                    if inline_csv is not None:
+                        file_metadata['csv_inline_content'] = inline_csv
+                logger.info(f"📄 Found CSV file: {data['csv_download_url']}")
+
+            # Extract MD download URL
+            if 'md_download_url' in data:
+                file_metadata['md_download_url'] = data['md_download_url']
+                if 'summary_file_path' in data:
+                    file_metadata['summary_file_path'] = data['summary_file_path']
+                    inline_md = DataProcessor._read_text_file(data['summary_file_path'])
+                    if inline_md is not None:
+                        file_metadata['md_inline_content'] = inline_md
+                elif 'report_file_path' in data:
+                    file_metadata['report_file_path'] = data['report_file_path']
+                    inline_md = DataProcessor._read_text_file(data['report_file_path'])
+                    if inline_md is not None:
+                        file_metadata['md_inline_content'] = inline_md
+                logger.info(f"📄 Found MD file: {data['md_download_url']}")
+
+            # If we found any file links, send them as metadata
+            if file_metadata:
+                logger.info(f"📄 Sending file metadata: {file_metadata}")
+
+                # Send file metadata as part of the message metadata
+                # This will be picked up by the frontend and displayed in the message
+                await DataProcessor._send_message(websocket, "file_metadata", {
+                    "agentId": agent_id,
+                    "sessionId": session_id,
+                    "metadata": file_metadata,
+                    "timestamp": datetime.now().isoformat()
+                })
+
+                logger.info(f"�?Sent file metadata to frontend (session: {session_id})")

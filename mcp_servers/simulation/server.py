@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional
 import sys
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 # Add services directory to path for SessionManager
@@ -26,15 +27,32 @@ else:
     print(f"WARNING: Environment file not found: {env_path}")
 
 # Get API URL from environment variable
-# 优先使用 VITE_API_URL（前端调用的API地址）
-API_BASE_URL = os.getenv("VITE_API_URL")
-if not API_BASE_URL:
-    http_host = os.getenv("RESEARCHMIND_HTTP_HOST", "127.0.0.1")
-    http_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")
-    # Use 127.0.0.1 if host is 0.0.0.0 (for local connections)
-    if http_host == "0.0.0.0":
-        http_host = "127.0.0.1"
-    API_BASE_URL = f"http://{http_host}:{http_port}"
+API_BASE_URL_RAW = (os.getenv('VITE_API_URL') or '').strip()
+
+
+def _build_default_api_origin() -> str:
+    host = os.getenv('RESEARCHMIND_HTTP_HOST', '127.0.0.1')
+    port = os.getenv('RESEARCHMIND_HTTP_PORT', '50002')
+    if host == '0.0.0.0':
+        host = '127.0.0.1'
+    return f'http://{host}:{port}'
+
+
+def _resolve_api_base_url(candidate: str) -> str:
+    if not candidate:
+        return _build_default_api_origin()
+
+    if candidate.startswith('/'):
+        return _build_default_api_origin()
+
+    parsed = urlparse(candidate)
+    if parsed.scheme and parsed.netloc:
+        return f'{parsed.scheme}://{parsed.netloc}'
+
+    return _build_default_api_origin()
+
+
+API_BASE_URL = _resolve_api_base_url(API_BASE_URL_RAW)
 print(f"API Base URL: {API_BASE_URL}")
 
 # 设置输出编码为UTF-8（解决Windows Unicode问题）

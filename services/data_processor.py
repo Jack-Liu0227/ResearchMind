@@ -7,6 +7,7 @@ Handles structure data, image data, and other result types.
 
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 from .structure_converter import StructureConverter
@@ -183,6 +184,9 @@ class DataProcessor:
                 file_metadata['csv_download_url'] = data['csv_download_url']
                 if 'csv_file_path' in data:
                     file_metadata['csv_file_path'] = data['csv_file_path']
+                    inline_csv = DataProcessor._read_text_file(data['csv_file_path'])
+                    if inline_csv is not None:
+                        file_metadata['csv_inline_content'] = inline_csv
                 logger.info(f"📄 Found CSV file: {data['csv_download_url']}")
 
             # Extract MD download URL
@@ -190,8 +194,14 @@ class DataProcessor:
                 file_metadata['md_download_url'] = data['md_download_url']
                 if 'summary_file_path' in data:
                     file_metadata['summary_file_path'] = data['summary_file_path']
+                    inline_md = DataProcessor._read_text_file(data['summary_file_path'])
+                    if inline_md is not None:
+                        file_metadata['md_inline_content'] = inline_md
                 elif 'report_file_path' in data:
                     file_metadata['report_file_path'] = data['report_file_path']
+                    inline_md = DataProcessor._read_text_file(data['report_file_path'])
+                    if inline_md is not None:
+                        file_metadata['md_inline_content'] = inline_md
                 logger.info(f"📄 Found MD file: {data['md_download_url']}")
 
             # If we found any file links, send them as metadata
@@ -260,7 +270,48 @@ class DataProcessor:
             logger.debug(f"📤 [WebSocket] Sent {message_type}, data size: {len(json.dumps(data))} bytes")
         except Exception as e:
             logger.warning(f"⚠️ Failed to send {message_type} message: {e}")
-    
+
+    @staticmethod
+    def _read_text_file(file_path: str, max_bytes: int = 512_000) -> Optional[str]:
+        """
+        Read small text files so that CSV/Markdown content can be inlined.
+
+        Args:
+            file_path: File path relative to project root or absolute
+            max_bytes: Safety limit to avoid shipping large payloads over WebSocket
+        """
+        try:
+            if not file_path:
+                return None
+
+            raw_path = Path(file_path)
+            candidate_paths = []
+
+            if raw_path.is_absolute():
+                candidate_paths.append(raw_path)
+            else:
+                candidate_paths.append((Path.cwd() / raw_path).resolve())
+                candidate_paths.append((Path.cwd() / "mcp_servers" / raw_path).resolve())
+                candidate_paths.append((Path(__file__).resolve().parent.parent.parent / raw_path).resolve())
+
+            path = next((p for p in candidate_paths if p.exists() and p.is_file()), None)
+            if path is None:
+                logger.warning(f"📄 Inline file not found: {file_path} -> tried {candidate_paths}")
+                return None
+
+            size = path.stat().st_size
+            if size > max_bytes:
+                logger.info(
+                    "📄 Skipping inline content because file is too large",
+                    extra={"file": str(path), "size": size, "limit": max_bytes}
+                )
+                return None
+
+            return path.read_text(encoding='utf-8', errors='ignore')
+        except Exception as e:
+            logger.warning(f"📄 Failed to read inline file {file_path}: {e}")
+            return None
+
     @staticmethod
     def validate_structure_data(structure: Dict[str, Any]) -> bool:
         """

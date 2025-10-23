@@ -5,7 +5,12 @@
 
 import { API_CONFIG } from '../constants'
 
-const API_BASE_URL = API_CONFIG.BASE_URL;
+const API_ORIGIN = API_CONFIG.BASE_URL;
+const API_PATH = API_CONFIG.API_PATH || '/api';
+const API_BASE_URL = API_CONFIG.API_BASE_URL || `${API_ORIGIN}${API_PATH}`;
+
+const ensureLeadingSlash = (value: string) => (value.startsWith('/') ? value : `/${value}`);
+const buildApiUrl = (path: string) => `${API_BASE_URL}${ensureLeadingSlash(path)}`;
 
 export interface StructureStorageResponse {
   success: boolean;
@@ -20,7 +25,7 @@ export interface StructureStorageResponse {
  */
 export async function saveStructure(structureData: any): Promise<StructureStorageResponse> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/structures`, {
+    const response = await fetch(buildApiUrl('structures'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -49,7 +54,7 @@ export async function saveStructure(structureData: any): Promise<StructureStorag
  */
 export async function getStructure(structureId: string): Promise<any> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/structures/${structureId}`);
+    const response = await fetch(buildApiUrl(`structures/${structureId}`));
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -74,7 +79,7 @@ export async function getStructure(structureId: string): Promise<any> {
  */
 export async function listStructures(): Promise<Array<{id: string, created_at: string}>> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/structures`);
+    const response = await fetch(buildApiUrl('structures'));
 
     if (!response.ok) {
       const error = await response.json();

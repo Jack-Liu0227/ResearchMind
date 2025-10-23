@@ -21,6 +21,7 @@ interface MarkdownViewerProps {
   filename?: string
   defaultExpanded?: boolean
   maxHeight?: string
+  inlineContent?: string
 }
 
 interface TocItem {
@@ -33,7 +34,8 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
   url,
   filename,
   defaultExpanded = true,  // 默认展开
-  maxHeight = '600px'
+  maxHeight = '600px',
+  inlineContent
 }) => {
   const [content, setContent] = useState<string>('')
   const [loading, setLoading] = useState(true)
@@ -49,8 +51,14 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    loadMarkdown()
-  }, [url])
+    if (inlineContent && inlineContent.trim().length > 0) {
+      setContent(inlineContent)
+      setLoading(false)
+      setError(null)
+    } else {
+      loadMarkdown()
+    }
+  }, [url, inlineContent])
 
   useEffect(() => {
     if (content) {
@@ -105,19 +113,32 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
 
   const handleDownload = async () => {
     try {
-      // 处理相对路径 URL
-      const resolvedUrl = resolveFileUrl(url)
-      const response = await fetch(resolvedUrl)
-      const blob = await response.blob()
-      const downloadUrl = URL.createObjectURL(blob)
-
-      const a = document.createElement('a')
-      a.href = downloadUrl
-      a.download = filename || 'document.md'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(downloadUrl)
+      if (inlineContent && inlineContent.trim().length > 0) {
+        const blob = new Blob([inlineContent], { type: 'text/markdown;charset=utf-8;' })
+        const downloadUrl = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = downloadUrl
+        a.download = filename || 'document.md'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(downloadUrl)
+      } else {
+        const resolvedUrl = resolveFileUrl(url)
+        const response = await fetch(resolvedUrl)
+        if (!response.ok) {
+          throw new Error(`Download failed: ${response.statusText}`)
+        }
+        const blob = await response.blob()
+        const downloadUrl = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = downloadUrl
+        a.download = filename || 'document.md'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(downloadUrl)
+      }
 
       toast.success('Markdown文件已下载')
     } catch (error) {

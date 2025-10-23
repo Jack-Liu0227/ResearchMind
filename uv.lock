@@ -6551,6 +6551,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aflow" },
+    { name = "aiohttp" },
     { name = "alembic" },
     { name = "anthropic" },
     { name = "arxiv" },
@@ -6630,6 +6631,7 @@ simulation = [
 [package.metadata]
 requires-dist = [
     { name = "aflow", specifier = "==0.0.11" },
+    { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "alembic", specifier = ">=1.12.0" },
     { name = "anthropic", specifier = ">=0.7.0" },
     { name = "arxiv", specifier = ">=1.4.0" },

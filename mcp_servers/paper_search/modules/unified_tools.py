@@ -7,10 +7,84 @@ Unified Tools Module (统一工具模块)
 3. 下载文献
 4. 获取全文内容
 """
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable, Awaitable, Union
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+SearchResultList = List[Dict[str, Any]]
+SyncSearchHandler = Callable[[str, int, Optional[str]], Union[SearchResultList, Dict[str, Any]]]
+AsyncSearchHandler = Callable[[str, int, Optional[str]], Awaitable[Union[SearchResultList, Dict[str, Any]]]]
+
+SOURCE_REGISTRY: Dict[str, Dict[str, Any]] = {}
+DEFAULT_SOURCES = ['arxiv', 'tavily_academic']
+
+
+def register_search_source(
+    name: str,
+    handler: Union[SyncSearchHandler, AsyncSearchHandler],
+    *,
+    is_async: bool,
+    description: str = ''
+) -> None:
+    """
+    Register a search source so unified search can call it.
+
+    Args:
+        name: Unique identifier for the source (e.g., 'arxiv')
+        handler: Callable that accepts (query, max_results, session_id)
+        is_async: True if handler is awaitable, False if synchronous
+        description: Optional human readable description
+    """
+    if not callable(handler):
+        raise ValueError(f"Handler for source '{name}' must be callable")
+
+    SOURCE_REGISTRY[name] = {
+        'handler': handler,
+        'is_async': is_async,
+        'description': description or name
+    }
+
+
+def get_registered_sources() -> Dict[str, Dict[str, Any]]:
+    """Return a copy of the registered sources."""
+    return dict(SOURCE_REGISTRY)
+
+
+def _ensure_default_sources() -> None:
+    """
+    Lazily register the built-in sources. This keeps the file extensible while
+    avoiding heavy imports unless search is executed.
+    """
+    if 'arxiv' not in SOURCE_REGISTRY:
+        from .search.arxiv import search_arxiv_papers
+
+        register_search_source(
+            'arxiv',
+            search_arxiv_papers,
+            is_async=False,
+            description='ArXiv preprint archive'
+        )
+
+    if 'tavily_academic' not in SOURCE_REGISTRY:
+        from .search.tavily import search_academic_web
+
+        register_search_source(
+            'tavily_academic',
+            search_academic_web,
+            is_async=True,
+            description='Tavily academic web search'
+        )
+
+    if 'tavily' not in SOURCE_REGISTRY:
+        from .search.tavily import search_web
+
+        register_search_source(
+            'tavily',
+            search_web,
+            is_async=True,
+            description='Tavily general web search'
+        )
 
 
 # ============================================================================
@@ -40,72 +114,117 @@ async def search_papers(
         - total_results: 总结果数
     """
     import asyncio
-    from .search.arxiv import search_arxiv_papers
-    from .search.tavily import search_web, search_academic_web
-    from .shared.field_mapping import batch_normalize_papers, merge_paper_data
+    from .shared.field_mapping import merge_paper_data
+
+    # Register built-in sources on demand so the registry stays extensible.
+    _ensure_default_sources()
 
     # 默认搜索所有源
     if sources is None:
-        sources = ['arxiv', 'tavily_academic']
+        sources = [src for src in DEFAULT_SOURCES if src in SOURCE_REGISTRY]
+    else:
+        seen = set()
+        sources = [src for src in sources if not (src in seen or seen.add(src))]
+
+    # 过滤掉未知的源但保留日志，方便未来扩展
+    unknown_sources = [src for src in sources if src not in SOURCE_REGISTRY]
+    if unknown_sources:
+        logger.warning(
+            "Requested sources are not registered and will be skipped",
+            unknown_sources=unknown_sources,
+            available=list(SOURCE_REGISTRY.keys())
+        )
+    sources = [src for src in sources if src in SOURCE_REGISTRY]
+    if not sources:
+        return {
+            'status': 'error',
+            'error': 'No valid sources available',
+            'message': 'Requested sources are not registered.'
+        }
+
+    # 规范化 max_results
+    try:
+        max_results_value = int(max_results)
+    except (TypeError, ValueError):
+        logger.warning("Invalid max_results provided to search_papers, falling back to default", requested=max_results)
+        max_results_value = 3
+
+    if max_results_value < 1:
+        max_results_value = 1
+    elif max_results_value > 50:
+        logger.info("Clamping max_results to 50 for unified search", requested=max_results_value)
+        max_results_value = 50
+
+    max_results = max_results_value
 
     try:
         # 异步搜索单个源
         async def search_source(source_name: str) -> tuple:
             """异步搜索单个源"""
             try:
-                if source_name == 'arxiv':
-                    # ArXiv搜索（同步，使用 executor 包装）
-                    loop = asyncio.get_event_loop()
-                    arxiv_results = await loop.run_in_executor(
-                        None,
-                        lambda: search_arxiv_papers(query, max_results=max_results, session_id=session_id)
-                    )
-                    # 检查返回值类型
-                    if isinstance(arxiv_results, dict) and arxiv_results.get('status') == 'success':
-                        papers = arxiv_results.get('papers', [])
-                        logger.info(f"ArXiv search: {len(papers)} papers")
-                        return (source_name, papers)
-                    elif isinstance(arxiv_results, list):
-                        logger.info(f"ArXiv search: {len(arxiv_results)} papers")
-                        return (source_name, arxiv_results)
-                    else:
-                        return (source_name, [])
-
-                elif source_name == 'tavily_academic':
-                    # Tavily Academic搜索
-                    tavily_results = await search_academic_web(query, max_results=max_results, session_id=session_id)
-                    if isinstance(tavily_results, list):
-                        logger.info(f"Tavily Academic search: {len(tavily_results)} papers")
-                        return (source_name, tavily_results)
-                    else:
-                        return (source_name, [])
-
-                elif source_name == 'tavily':
-                    # Tavily Web搜索
-                    tavily_results = await search_web(query, max_results=max_results, session_id=session_id)
-                    if isinstance(tavily_results, list):
-                        logger.info(f"Tavily Web search: {len(tavily_results)} papers")
-                        return (source_name, tavily_results)
-                    else:
-                        return (source_name, [])
-
-                else:
-                    logger.warning(f"Unknown source: {source_name}")
+                config = SOURCE_REGISTRY.get(source_name)
+                if not config:
+                    logger.warning("Search source is not registered", source=source_name)
                     return (source_name, [])
+
+                handler = config['handler']
+                is_async_handler = config['is_async']
+
+                if is_async_handler:
+                    results = await handler(query, max_results=max_results, session_id=session_id)
+                else:
+                    loop = asyncio.get_running_loop()
+                    results = await loop.run_in_executor(
+                        None,
+                        lambda: handler(query, max_results=max_results, session_id=session_id)
+                    )
+
+                # handler could return dict or list; normalize to list
+                if isinstance(results, dict):
+                    if results.get('status') == 'success':
+                        papers = results.get('papers', [])
+                    else:
+                        logger.warning(
+                            "Search source returned an error response",
+                            source=source_name,
+                            response=results
+                        )
+                        papers = []
+                else:
+                    papers = results
+
+                logger.info(
+                    "Search source completed",
+                    source=source_name,
+                    results=len(papers),
+                    description=config.get('description', source_name)
+                )
+                return (source_name, papers)
 
             except Exception as e:
                 logger.error(f"Search failed for {source_name}: {e}")
                 return (source_name, [])
 
         # 并行执行所有源的搜索
-        logger.info(f"Executing parallel search across {len(sources)} sources...")
+        logger.info(
+            "Executing parallel paper search",
+            source_count=len(sources),
+            max_results=max_results,
+            query=query
+        )
+
         search_tasks = [search_source(source_name) for source_name in sources]
-        search_results = await asyncio.gather(*search_tasks)
+        search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
         # 处理结果
         all_papers = []
         sources_used = []
-        for source_name, papers in search_results:
+        for result in search_results:
+            if isinstance(result, Exception):
+                logger.error("Search task failed with exception", error=str(result))
+                continue
+
+            source_name, papers = result
             if papers:
                 all_papers.append(papers)
                 sources_used.append(source_name)

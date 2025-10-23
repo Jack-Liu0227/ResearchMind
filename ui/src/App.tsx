@@ -7,6 +7,11 @@ import DiagnosticPage from './pages/DiagnosticPage'
 import StorageValidator from './components/StorageValidator'
 import { useAutoSave } from './hooks/useAutoSave'
 
+const routerFutureFlags = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+} as const
+
 function App() {
   console.log('App component rendering...')
   
@@ -18,7 +23,7 @@ function App() {
     return (
       <StorageValidator>
         <div className="min-h-screen bg-gray-50">
-          <Router>
+          <Router future={routerFutureFlags}>
             <Routes>
               {/* 诊断页面不需要 Layout */}
               <Route path="/diagnostic" element={<DiagnosticPage />} />

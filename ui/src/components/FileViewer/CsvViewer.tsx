@@ -16,6 +16,7 @@ interface CsvViewerProps {
   filename?: string
   maxHeight?: string
   defaultExpanded?: boolean
+  inlineContent?: string
 }
 
 interface CsvData {
@@ -27,7 +28,8 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
   url,
   filename,
   maxHeight = '400px',
-  defaultExpanded = true
+  defaultExpanded = true,
+  inlineContent
 }) => {
   const [csvData, setCsvData] = useState<CsvData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -40,8 +42,25 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    loadCsvData()
-  }, [url])
+    const hasInlineContent = typeof inlineContent === 'string' && inlineContent.trim().length > 0
+
+    if (hasInlineContent) {
+      try {
+        setLoading(true)
+        setError(null)
+        const parsed = parseCsv(inlineContent!)
+        setCsvData(parsed)
+      } catch (err) {
+        console.error('⚠️ Failed to parse inline CSV content:', err)
+        setCsvData(null)
+        setError(err instanceof Error ? err.message : 'Failed to parse CSV content')
+      } finally {
+        setLoading(false)
+      }
+    } else {
+      loadCsvData()
+    }
+  }, [url, inlineContent])
 
   const loadCsvData = async () => {
     try {
@@ -134,19 +153,32 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
 
   const handleDownload = async () => {
     try {
-      // 处理相对路径 URL
-      const resolvedUrl = resolveFileUrl(url)
-      const response = await fetch(resolvedUrl)
-      const blob = await response.blob()
-      const downloadUrl = URL.createObjectURL(blob)
-
-      const a = document.createElement('a')
-      a.href = downloadUrl
-      a.download = filename || 'data.csv'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(downloadUrl)
+      if (inlineContent && inlineContent.trim().length > 0) {
+        const blob = new Blob([inlineContent], { type: 'text/csv;charset=utf-8;' })
+        const downloadUrl = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = downloadUrl
+        a.download = filename || 'data.csv'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(downloadUrl)
+      } else {
+        const resolvedUrl = resolveFileUrl(url)
+        const response = await fetch(resolvedUrl)
+        if (!response.ok) {
+          throw new Error(`Download failed: ${response.statusText}`)
+        }
+        const blob = await response.blob()
+        const downloadUrl = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = downloadUrl
+        a.download = filename || 'data.csv'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(downloadUrl)
+      }
 
       toast.success('CSV文件已下载')
     } catch (error) {

@@ -55,6 +55,7 @@ interface FileLink {
   type: 'csv' | 'md'
   url: string
   filename?: string
+  content?: string
 }
 
 /**
@@ -68,20 +69,24 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
     console.log('📄 extractFileLinks - metadata:', metadata)
 
     if (metadata.csv_download_url) {
-      console.log('📄 Found CSV URL:', metadata.csv_download_url)
+      const resolvedCsvUrl = resolveFileUrl(metadata.csv_download_url)
+      console.log('📄 Found CSV URL:', metadata.csv_download_url, '->', resolvedCsvUrl)
       links.push({
         type: 'csv',
-        url: metadata.csv_download_url,
-        filename: metadata.csv_file_path ? metadata.csv_file_path.split('/').pop() : undefined
+        url: resolvedCsvUrl,
+        filename: metadata.csv_file_path ? metadata.csv_file_path.split('/').pop() : undefined,
+        content: typeof metadata.csv_inline_content === 'string' ? metadata.csv_inline_content : undefined
       })
     }
     if (metadata.md_download_url) {
-      console.log('📄 Found MD URL:', metadata.md_download_url)
+      const resolvedMdUrl = resolveFileUrl(metadata.md_download_url)
+      console.log('📄 Found MD URL:', metadata.md_download_url, '->', resolvedMdUrl)
       const mdFilePath = metadata.summary_file_path || metadata.report_file_path
       links.push({
         type: 'md',
-        url: metadata.md_download_url,
-        filename: mdFilePath ? mdFilePath.split('/').pop() : undefined
+        url: resolvedMdUrl,
+        filename: mdFilePath ? mdFilePath.split('/').pop() : undefined,
+        content: typeof metadata.md_inline_content === 'string' ? metadata.md_inline_content : undefined
       })
     }
   } else {
@@ -100,7 +105,7 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
     if (!links.some(link => link.url === url)) {
       links.push({
         type: ext,
-        url: url,
+        url: resolveFileUrl(url),
         filename: url.split('/').pop()
       })
     }
@@ -603,11 +608,13 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
                         <CsvViewer
                           url={file.url}
                           filename={file.filename}
+                          inlineContent={file.content}
                         />
                       ) : (
                         <MarkdownViewer
                           url={file.url}
                           filename={file.filename}
+                          inlineContent={file.content}
                           defaultExpanded={false}
                         />
                       )}
