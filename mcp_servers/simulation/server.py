@@ -3,7 +3,6 @@ Simulation MCP Server
 Provides tools for computational simulation setup and analysis (VASP, Gaussian, LAMMPS).
 Also provides MatterSim-based energy calculation, structure relaxation, and phonon calculation.
 """
-import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -11,6 +10,7 @@ import sys
 import os
 from pathlib import Path
 from urllib.parse import urlparse
+import uuid
 from dotenv import load_dotenv
 
 # Add services directory to path for SessionManager
@@ -113,6 +113,32 @@ try:
 except ImportError as e:
     logger.warning(f"SessionManager not available: {e}")
     SESSION_MANAGER_AVAILABLE = False
+
+
+def _build_kappa_working_dir(session_id: Optional[str], prefix: str) -> Optional[Path]:
+    """
+    Build a session-scoped working directory for thermal conductivity runs.
+
+    Args:
+        session_id: Session identifier (optional)
+        prefix: Directory name prefix (e.g., "single", "batch")
+
+    Returns:
+        Path to working directory or None if session isolation is not available.
+    """
+    if not (SESSION_MANAGER_AVAILABLE and session_id):
+        return None
+
+    base_dir = SessionManager.get_session_structures_dir(session_id) / "thermal_conductivity"
+    try:
+        base_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"Failed to prepare session thermal conductivity directory: {e}", session_id=session_id)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_suffix = uuid.uuid4().hex[:8]
+    target_dir = base_dir / f"{prefix}_{timestamp}_{unique_suffix}"
+    return target_dir
 
 # Create FastMCP app
 app = FastMCP("simulation")
@@ -634,7 +660,9 @@ async def calculate_kappa_from_cif(
     cif_content,  # Can be str or List[Dict]
     cif_filename: str = "material.cif",
     method: str = "kappa_p",
-    temperature: float = 300.0
+    temperature: float = 300.0,
+    session_id: Optional[str] = None,
+    keep_files: bool = False
 ) -> Dict[str, Any]:
     """
     Calculate thermal conductivity from CIF file content.
@@ -650,6 +678,8 @@ async def calculate_kappa_from_cif(
         cif_filename: Name of the CIF file (default: "material.cif", used only for single CIF)
         method: Calculation method - "kappa_p" or "kappa_mtp" (default: "kappa_p")
         temperature: Temperature in Kelvin (default: 300K)
+        session_id: Optional session identifier used to isolate intermediate files
+        keep_files: Whether to keep generated CIF files for inspection
 
     Returns:
         SINGLE: Dict containing calculated thermal conductivity and results
@@ -666,33 +696,54 @@ async def calculate_kappa_from_cif(
         ]
         result = await calculate_kappa_from_cif(structures, method="kappa_p")
     """
-    return calculate_kappa_from_cif_impl(
+    working_dir_path = _build_kappa_working_dir(session_id, prefix="single")
+    if working_dir_path:
+        logger.info(
+            "Using session-scoped working directory for thermal conductivity",
+            session_id=session_id,
+            working_dir=str(working_dir_path)
+        )
+    elif session_id and SESSION_MANAGER_AVAILABLE:
+        logger.warning("Session ID provided but failed to build working directory", session_id=session_id)
+
+    result = calculate_kappa_from_cif_impl(
         cif_content=cif_content,
         cif_filename=cif_filename,
         method=method,
-        temperature=temperature
+        temperature=temperature,
+        working_dir=str(working_dir_path) if working_dir_path else None,
+        keep_files=keep_files
     )
+
+    if keep_files and working_dir_path:
+        result["working_directory"] = str(working_dir_path)
+
+    return result
 
 
 @app.tool
 async def batch_calculate_kappa(
     structures: List[Dict[str, Any]],
     method: str = "kappa_p",
-    temperature: float = 300.0
+    temperature: float = 300.0,
+    session_id: Optional[str] = None,
+    keep_files: bool = False
 ) -> Dict[str, Any]:
     """
-    批量计算多个结构的热导率 - 这是处理多个结构的主要工具
-    
-    ⚠️ 重要：当有多个结构需要计算热导率时，必须使用此工具而不是多次调用单个计算工具
-    
+    批量计算多个结构的热导率 - 这是处理多个结构的主要工具。
+
+    ⚠️ 重要：当有多个结构需要计算热导率时，必须使用此工具而不是多次调用单个计算工具。
+
     Args:
         structures: 结构列表，每个结构必须包含：
                    - cifContent 或 metadata.cifData: CIF 文件内容
                    - formula: 化学式（用于命名）
                    - id: 结构ID（可选）
         method: 计算方法 - "kappa_p" 或 "kappa_mtp" (默认: "kappa_p")
-        temperature: 温度（开尔文）(默认: 300K)
-    
+        temperature: 温度（开尔文，默认: 300K)
+        session_id: 会话 ID，用于隔离临时文件（可选）
+        keep_files: 是否保留中间生成的 CIF 文件（默认: False）
+
     Returns:
         Dict 包含：
         - success: 是否成功
@@ -701,7 +752,7 @@ async def batch_calculate_kappa(
         - failed: 失败的数量
         - results: 每个结构的计算结果列表
         - summary: 结果摘要
-    
+
     Example:
         structures = [
             {"cifContent": "...", "formula": "NaCl", "id": "struct1"},
@@ -709,106 +760,51 @@ async def batch_calculate_kappa(
         ]
         result = await batch_calculate_kappa(structures, method="kappa_p")
     """
-    import asyncio
-    
-    logger.info(f"🔄 Starting batch thermal conductivity calculation for {len(structures)} structures")
-    
-    results = []
-    completed = 0
-    failed = 0
-    
-    for i, structure in enumerate(structures):
-        structure_id = structure.get("id", f"structure_{i+1}")
-        formula = structure.get("formula", f"Unknown_{i+1}")
-        
-        # 获取 CIF 内容（统一使用 cifContent 字段）
-        cif_content = structure.get("cifContent")
-        
-        if not cif_content:
-            logger.warning(f"WARNING: Structure {i+1} ({formula}) has no CIF content, skipping")
-            results.append({
-                "structure_id": structure_id,
-                "formula": formula,
-                "success": False,
-                "error": "No CIF content available"
-            })
-            failed += 1
-            continue
-        
-        try:
-            logger.info(f"📊 Calculating thermal conductivity for structure {i+1}/{len(structures)}: {formula}")
-            
-            # 调用单个计算函数
-            result = calculate_kappa_from_cif_impl(
-                cif_content=cif_content,
-                cif_filename=f"{formula}_{structure_id}.cif",
-                method=method,
-                temperature=temperature
-            )
-            
-            # 添加结构信息到结果
-            result["structure_id"] = structure_id
-            result["formula"] = formula
-            result["index"] = i + 1
-            
-            if result.get("success", False):
-                completed += 1
-                logger.info(f"Structure {i+1} ({formula}): kappa = {result.get('kappa_total', 'N/A')} W/mK")
-            else:
-                failed += 1
-                logger.warning(f"ERROR: Structure {i+1} ({formula}) calculation failed: {result.get('error', 'Unknown error')}")
-            
-            results.append(result)
-            
-        except Exception as e:
-            logger.error(f"ERROR: Error calculating structure {i+1} ({formula}): {e}")
-            results.append({
-                "structure_id": structure_id,
-                "formula": formula,
-                "index": i + 1,
-                "success": False,
-                "error": str(e)
-            })
-            failed += 1
-    
-    # 生成摘要
-    summary = {
-        "total_structures": len(structures),
-        "completed": completed,
-        "failed": failed,
-        "success_rate": f"{(completed/len(structures)*100):.1f}%" if structures else "0%",
-        "method": method,
-        "temperature": temperature
-    }
-    
-    # 提取成功的热导率值
-    successful_kappas = [
-        {
-            "formula": r["formula"],
-            "kappa_total": r.get("kappa_total"),
-            "kappa_xx": r.get("kappa_xx"),
-            "kappa_yy": r.get("kappa_yy"),
-            "kappa_zz": r.get("kappa_zz")
+    logger.info(
+        "🔄 Starting batch thermal conductivity calculation",
+        structures=len(structures),
+        method=method,
+        temperature=temperature,
+        session_id=session_id
+    )
+
+    working_dir_path = _build_kappa_working_dir(session_id, prefix="batch")
+    if working_dir_path:
+        logger.info(
+            "Using session-scoped batch working directory",
+            session_id=session_id,
+            working_dir=str(working_dir_path)
+        )
+    elif session_id and SESSION_MANAGER_AVAILABLE:
+        logger.warning("Session ID provided but failed to build batch working directory", session_id=session_id)
+
+    batch_result = calculate_kappa_from_cif_impl(
+        cif_content=structures,
+        method=method,
+        temperature=temperature,
+        working_dir=str(working_dir_path) if working_dir_path else None,
+        keep_files=keep_files
+    )
+
+    if keep_files and working_dir_path:
+        batch_result["working_directory"] = str(working_dir_path)
+
+    if batch_result.get("success"):
+        response = {
+            "success": True,
+            "batch_mode": batch_result.get("batch_mode", True),
+            "total": batch_result.get("total", len(structures)),
+            "completed": batch_result.get("completed", 0),
+            "failed": batch_result.get("failed", 0),
+            "results": batch_result.get("results", []),
+            "summary": batch_result.get("summary", {}),
+            "timestamp": batch_result.get("timestamp", datetime.now().isoformat())
         }
-        for r in results if r.get("success", False) and r.get("kappa_total") is not None
-    ]
-    
-    if successful_kappas:
-        summary["thermal_conductivities"] = successful_kappas
-        # 计算平均值
-        avg_kappa = sum(k["kappa_total"] for k in successful_kappas) / len(successful_kappas)
-        summary["average_kappa"] = round(avg_kappa, 4)
-    
-    logger.info(f"Batch calculation completed: {completed}/{len(structures)} successful")
-    
-    return {
-        "success": True,
-        "total": len(structures),
-        "completed": completed,
-        "failed": failed,
-        "results": results,
-        "summary": summary
-    }
+        if keep_files and working_dir_path:
+            response["working_directory"] = str(working_dir_path)
+        return response
+
+    return batch_result
 
 
 @app.tool

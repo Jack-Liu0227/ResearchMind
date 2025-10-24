@@ -7,7 +7,8 @@ import re
 import os
 import tempfile
 import shutil
-from typing import Dict, List, Any
+from pathlib import Path
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 import structlog
 
@@ -184,29 +185,42 @@ def calculate_kappa_from_cif_impl(
     cif_content,  # Can be str or List[Dict]
     cif_filename: str = "material.cif",
     method: str = "kappa_p",
-    temperature: float = 300.0
+    temperature: float = 300.0,
+    working_dir: str = None,
+    keep_files: bool = False
 ) -> Dict[str, Any]:
     """
     Calculate thermal conductivity from CIF file content.
     Supports both single CIF and batch calculation of multiple CIFs.
-    
+
     Args:
         cif_content: Single CIF string OR list of dicts with structure:
                     [{"cifContent": "...", "formula": "NaCl", "id": "struct1"}, ...]
         cif_filename: Name of the CIF file (used only for single CIF)
         method: Calculation method - "kappa_p" or "kappa_mtp"
         temperature: Temperature in Kelvin
-    
+        working_dir: Optional directory used to store intermediate CIF files.
+                     When None a temporary directory will be created.
+        keep_files: Whether to keep the generated CIF files after calculation.
+
     Returns:
         Dict containing calculated thermal conductivity and results
         For batch: returns summary with all results
     """
     # Check if this is a batch calculation
     if isinstance(cif_content, list):
-        return _calculate_kappa_batch(cif_content, method, temperature)
+        return _calculate_kappa_batch(
+            cif_content,
+            method,
+            temperature,
+            working_dir=working_dir,
+            keep_files=keep_files
+        )
     
     # Single CIF calculation (original logic)
-    temp_dir = None
+    working_path: Optional[Path] = None
+    created_working_dir = False
+    cif_path: Optional[Path] = None
     try:
         logger.info("Starting thermal conductivity calculation from CIF",
                    filename=cif_filename,
@@ -227,9 +241,16 @@ def calculate_kappa_from_cif_impl(
         # Normalize CIF content (add data_ block if missing)
         cif_content = normalize_cif_content(cif_content)
 
-        # Create temporary directory for CIF file
-        temp_dir = tempfile.mkdtemp(prefix="kappa_cif_")
-        cif_path = os.path.join(temp_dir, cif_filename)
+        # Decide where to store CIF file(s)
+        if working_dir:
+            working_path = Path(working_dir)
+            created_working_dir = not working_path.exists()
+            working_path.mkdir(parents=True, exist_ok=True)
+        else:
+            working_path = Path(tempfile.mkdtemp(prefix="kappa_cif_"))
+            created_working_dir = True
+
+        cif_path = working_path / cif_filename
 
         # Save CIF content to file
         with open(cif_path, 'w', encoding='utf-8') as f:
@@ -243,7 +264,7 @@ def calculate_kappa_from_cif_impl(
                 logger.info("Using real kappa library for calculation")
                 
                 # Create calculator
-                calculator = ThermalConductivityCalculator(temp_dir)
+                calculator = ThermalConductivityCalculator(str(working_path))
                 
                 # Calculate based on method
                 if method.lower() == "kappa_p":
@@ -333,15 +354,26 @@ def calculate_kappa_from_cif_impl(
             "success": False
         }
     finally:
-        # Clean up temporary directory
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        if working_path and working_path.exists():
+            if keep_files:
+                logger.info(f"📁 Keeping intermediate CIF files at {working_path}")
+            else:
+                if created_working_dir:
+                    shutil.rmtree(working_path, ignore_errors=True)
+                else:
+                    if cif_path and cif_path.exists():
+                        try:
+                            cif_path.unlink()
+                        except Exception as cleanup_error:
+                            logger.warning(f"Failed to remove CIF file {cif_path}: {cleanup_error}")
 
 
 def _calculate_kappa_batch(
     structures: List[Dict[str, Any]],
     method: str = "kappa_p",
-    temperature: float = 300.0
+    temperature: float = 300.0,
+    working_dir: Optional[str] = None,
+    keep_files: bool = False
 ) -> Dict[str, Any]:
     """
     Batch thermal conductivity calculation - processes all CIFs together in one temp directory.
@@ -350,16 +382,26 @@ def _calculate_kappa_batch(
         structures: List of structure dicts with cifContent, formula, id
         method: Calculation method
         temperature: Temperature in Kelvin
+        working_dir: Optional directory where CIF files will be staged. When None a
+                     temporary directory is created automatically.
+        keep_files: Whether to keep generated CIF files/directories after calculation.
     
     Returns:
         Dict with batch calculation results and summary
     """
-    temp_dir = None
+    working_path: Optional[Path] = None
+    created_working_dir = False
+    generated_files: List[Path] = []
     try:
         logger.info(f"🔄 Starting batch thermal conductivity calculation for {len(structures)} structures")
-        
-        # Create single temporary directory for all CIFs
-        temp_dir = tempfile.mkdtemp(prefix="kappa_batch_")
+        # Decide target directory for this batch
+        if working_dir:
+            working_path = Path(working_dir)
+            created_working_dir = not working_path.exists()
+            working_path.mkdir(parents=True, exist_ok=True)
+        else:
+            working_path = Path(tempfile.mkdtemp(prefix="kappa_batch_"))
+            created_working_dir = True
         
         results = []
         completed = 0
@@ -371,6 +413,8 @@ def _calculate_kappa_batch(
             structure_id = structure.get("id", f"structure_{i+1}")
             formula = structure.get("formula", f"Unknown_{i+1}")
             cif_content = structure.get("cifContent")
+            if not cif_content and isinstance(structure.get("metadata"), dict):
+                cif_content = structure["metadata"].get("cifData")
             
             if not cif_content:
                 logger.warning(f"⚠️ Structure {i+1} ({formula}) has no CIF content, skipping")
@@ -387,7 +431,7 @@ def _calculate_kappa_batch(
             try:
                 # Handle base64 encoded content if needed
                 try:
-                    if not cif_content.strip().startswith('data_'):
+                    if not str(cif_content).strip().startswith('data_'):
                         decoded = base64.b64decode(cif_content).decode('utf-8')
                         cif_content = decoded
                 except Exception:
@@ -397,11 +441,15 @@ def _calculate_kappa_batch(
                 cif_content = normalize_cif_content(cif_content)
                 
                 # Save CIF file
-                cif_filename = f"{formula}_{structure_id}.cif"
-                cif_path = os.path.join(temp_dir, cif_filename)
+                safe_formula = re.sub(r'[^0-9A-Za-z_\-]+', '_', str(formula)) or f"structure_{i+1}"
+                safe_id = re.sub(r'[^0-9A-Za-z_\-]+', '_', str(structure_id))
+                cif_filename = f"{safe_formula}_{safe_id}.cif"
+                cif_path = working_path / cif_filename
                 
                 with open(cif_path, 'w', encoding='utf-8') as f:
                     f.write(cif_content)
+                
+                generated_files.append(cif_path)
                 
                 cif_files.append({
                     "path": cif_path,
@@ -430,7 +478,7 @@ def _calculate_kappa_batch(
                 logger.info(f"🚀 Running batch calculation with kappa library for {len(cif_files)} structures")
                 
                 # Create calculator with the temp directory containing all CIFs
-                calculator = ThermalConductivityCalculator(temp_dir)
+                calculator = ThermalConductivityCalculator(str(working_path))
                 
                 # Calculate based on method (this processes all CIFs in the directory)
                 if method.lower() == "kappa_p":
@@ -443,7 +491,7 @@ def _calculate_kappa_batch(
                     raise ValueError(f"Unknown method: {method}")
                 
                 # Process results for each structure
-                for cif_info in cif_files:
+                for result_idx, cif_info in enumerate(cif_files):
                     try:
                         # Find matching row in result dataframe
                         # The result_df should have a row for each CIF file
@@ -452,11 +500,12 @@ def _calculate_kappa_batch(
                         # Try to match by filename or index
                         if not result_df.empty:
                             # Assuming results are in the same order as files
-                            idx = cif_info["index"] - 1 - failed  # Adjust for failed structures
+                            idx = result_idx
                             if idx < len(result_df):
                                 kappa_value = float(result_df[kappa_column].iloc[idx])
                                 
                                 calc_id = f"calc_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{cif_info['index']}"
+                                kappa_value_rounded = round(kappa_value, 2)
                                 
                                 result = {
                                     "calculation_id": calc_id,
@@ -468,13 +517,14 @@ def _calculate_kappa_batch(
                                     "temperature": temperature,
                                     "temperature_unit": "K",
                                     "thermal_conductivity": {
-                                        "value": round(kappa_value, 2),
+                                        "value": kappa_value_rounded,
                                         "unit": "W/(m·K)"
                                     },
                                     "calculation_mode": "real_batch",
                                     "timestamp": datetime.now().isoformat(),
                                     "success": True
                                 }
+                                result["kappa_total"] = kappa_value_rounded
                                 
                                 results.append(result)
                                 completed += 1
@@ -501,6 +551,7 @@ def _calculate_kappa_batch(
                 for cif_info in cif_files:
                     mock_kappa = 100.0 + (hash(cif_info["filename"]) % 100)
                     calc_id = f"calc_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{cif_info['index']}"
+                    mock_value = round(mock_kappa, 2)
                     
                     results.append({
                         "calculation_id": calc_id,
@@ -512,7 +563,7 @@ def _calculate_kappa_batch(
                         "temperature": temperature,
                         "temperature_unit": "K",
                         "thermal_conductivity": {
-                            "value": round(mock_kappa, 2),
+                            "value": mock_value,
                             "unit": "W/(m·K)"
                         },
                         "calculation_mode": "mock_batch",
@@ -520,6 +571,7 @@ def _calculate_kappa_batch(
                         "timestamp": datetime.now().isoformat(),
                         "success": True
                     })
+                    results[-1]["kappa_total"] = mock_value
                     completed += 1
         else:
             # Kappa library not available - use mock calculations
@@ -527,8 +579,9 @@ def _calculate_kappa_batch(
             for cif_info in cif_files:
                 mock_kappa = 100.0 + (hash(cif_info["filename"]) % 100)
                 calc_id = f"calc_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{cif_info['index']}"
+                mock_value = round(mock_kappa, 2)
                 
-                results.append({
+                result = {
                     "calculation_id": calc_id,
                     "structure_id": cif_info["structure_id"],
                     "formula": cif_info["formula"],
@@ -538,14 +591,16 @@ def _calculate_kappa_batch(
                     "temperature": temperature,
                     "temperature_unit": "K",
                     "thermal_conductivity": {
-                        "value": round(mock_kappa, 2),
+                        "value": mock_value,
                         "unit": "W/(m·K)"
                     },
                     "calculation_mode": "mock_batch",
                     "note": "Kappa library not available. Using mock values.",
                     "timestamp": datetime.now().isoformat(),
                     "success": True
-                })
+                }
+                result["kappa_total"] = mock_value
+                results.append(result)
                 completed += 1
         
         # Generate summary
@@ -598,10 +653,20 @@ def _calculate_kappa_batch(
             "timestamp": datetime.now().isoformat()
         }
     finally:
-        # Clean up temporary directory
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            logger.info(f"🧹 Cleaned up temp directory: {temp_dir}")
+        if working_path and working_path.exists():
+            if keep_files:
+                logger.info(f"📁 Keeping batch CIF files at {working_path}")
+            else:
+                if created_working_dir:
+                    shutil.rmtree(working_path, ignore_errors=True)
+                    logger.info(f"🧹 Cleaned up temp directory: {working_path}")
+                else:
+                    for cif_file in generated_files:
+                        if cif_file.exists():
+                            try:
+                                cif_file.unlink()
+                            except Exception as cleanup_error:
+                                logger.warning(f"Failed to remove CIF file {cif_file}: {cleanup_error}")
 
 
 def convert_cif_to_frontend_structure(
