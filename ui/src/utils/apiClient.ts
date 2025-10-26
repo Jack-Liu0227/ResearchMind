@@ -41,6 +41,18 @@ export function resolveFileUrl(url: string): string {
   console.log('🔗 resolveFileUrl - API_PATH:', API_PATH);
 
   if (url.startsWith('http://') || url.startsWith('https://')) {
+    try {
+      const parsed = new URL(url)
+      // If absolute URL path starts with /download/, rewrite to /api/download/ to match backend mount
+      if (parsed.pathname.startsWith('/download/')) {
+        const newPath = `${API_PATH}${parsed.pathname.startsWith('/api/') ? parsed.pathname.slice(4) : parsed.pathname}`
+        const result = `${parsed.origin}${newPath}${parsed.search}${parsed.hash}`
+        console.log('🔗 resolveFileUrl - rewrote absolute /download to:', result)
+        return result
+      }
+    } catch (e) {
+      console.warn('🔗 resolveFileUrl - failed to parse absolute URL, returning as is')
+    }
     console.log('🔗 resolveFileUrl - already full URL, returning:', url);
     return url;
   }
@@ -102,7 +114,7 @@ export async function convertToConventionalCell(
   cifContent: string
 ): Promise<CrystalStructure> {
   try {
-    const response = await fetch(buildApiUrl('convert_to_conventional'), {
+    const response = await fetch(buildApiUrl('cif'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -119,7 +131,7 @@ export async function convertToConventionalCell(
     }
 
     const data: APIStructureResponse = await response.json();
-    
+
     // 转换为 CrystalStructure 格式
     return {
       id: `api_${Date.now()}`,
@@ -149,7 +161,7 @@ export async function parseCIF(
   toConventional: boolean = false
 ): Promise<CrystalStructure> {
   try {
-    const response = await fetch(buildApiUrl('parse_cif'), {
+    const response = await fetch(buildApiUrl('cif'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -166,7 +178,7 @@ export async function parseCIF(
     }
 
     const data: APIStructureResponse = await response.json();
-    
+
     // 转换为 CrystalStructure 格式
     return {
       id: `api_${Date.now()}`,
@@ -191,8 +203,7 @@ export async function parseCIF(
  */
 export async function checkAPIHealth(): Promise<boolean> {
   try {
-    const origin = resolveEffectiveOrigin();
-    const response = await fetch(`${origin}${ensureLeadingSlash('health')}`);
+    const response = await fetch(buildApiUrl('health'));
     if (!response.ok) return false;
 
     const data = await response.json();
@@ -234,7 +245,7 @@ export async function getPhononImage(
  */
 export async function getPhononResults(): Promise<string[]> {
   try {
-    const response = await fetch(buildApiUrl('phonon_results'));
+    const response = await fetch(buildApiUrl('files?type=phonon_results'));
 
     if (!response.ok) {
       throw new Error(`Failed to fetch phonon results: ${response.statusText}`);
@@ -253,7 +264,7 @@ export async function getPhononResults(): Promise<string[]> {
  */
 export async function getGeneratedStructures(): Promise<string[]> {
   try {
-    const response = await fetch(buildApiUrl('generated_structures'));
+    const response = await fetch(buildApiUrl('files?type=generated_structures'));
 
     if (!response.ok) {
       throw new Error(`Failed to fetch generated structures: ${response.statusText}`);
@@ -283,7 +294,7 @@ export interface PhononImage {
  */
 export async function getPhononExamples(): Promise<PhononImage[]> {
   try {
-    const response = await fetch(buildApiUrl('phonon_examples'));
+    const response = await fetch(buildApiUrl('files?type=phonon_examples'));
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -294,6 +305,27 @@ export async function getPhononExamples(): Promise<PhononImage[]> {
   } catch (error) {
     console.error('❌ 获取声子谱示例失败:', error);
     throw error;
+  }
+}
+
+// Safer health check that tolerates non-JSON responses
+export async function checkAPIHealthSafe(): Promise<boolean> {
+  const apiHealthUrl = buildApiUrl('health');
+
+  try {
+    const res = await fetch(apiHealthUrl);
+    if (res.ok) {
+      try {
+        const data = await res.json();
+        return data.status === 'healthy' && (typeof data.pymatgen_available === 'boolean' ? true : true);
+      } catch {
+        const txt = await res.text();
+        return /healthy/i.test(txt);
+      }
+    }
+  } catch (e) {
+    console.error('API health check failed:', e);
+    return false;
   }
 }
 

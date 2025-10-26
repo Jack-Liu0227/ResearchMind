@@ -55,6 +55,8 @@ class StructureConverter:
             missing_keywords = [kw for kw in required_keywords if kw not in cif_content]
             if missing_keywords:
                 logger.warning(f"⚠️ CIF content missing keywords: {missing_keywords}")
+                # Early fallback for obviously invalid CIF to avoid heavy parsing
+                raise ValueError(f"Invalid CIF: missing keywords {missing_keywords}")
 
             structure_id = str(uuid.uuid4())
             
@@ -71,11 +73,13 @@ class StructureConverter:
             conventional_structure = None
             primitive_data = None
             conventional_data = None
+            # Ensure display_struct is always defined to avoid UnboundLocalError
+            display_struct = None
 
             try:
                 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
-                # 关键修复：添加详细的CIF解析日志
+                # 详细日志，帮助定位解析问题
                 logger.info(f"🔍 Attempting to parse CIF with pymatgen...")
                 logger.info(f"   CIF content length: {len(cif_content)} characters")
                 logger.info(f"   CIF content starts with: {cif_content[:100]}")
@@ -187,10 +191,10 @@ class StructureConverter:
             # Get space group number and crystal system if available
             space_group_number = None
             crystal_system = None
-            if primitive_structure or display_struct:
+            if primitive_structure is not None or display_struct is not None:
                 try:
                     from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-                    sga_temp = SpacegroupAnalyzer(display_struct if display_struct else primitive_structure)
+                    sga_temp = SpacegroupAnalyzer(display_struct if display_struct is not None else primitive_structure)
                     space_group_number = sga_temp.get_space_group_number()
                     crystal_system = sga_temp.get_crystal_system()
                 except Exception as e:
@@ -207,8 +211,8 @@ class StructureConverter:
                 "spaceGroup": space_group,
                 "cifContent": cif_content,  # 统一使用 cifContent 字段
                 "properties": {
-                    "density": float(display_struct.density) if display_struct else None,
-                    "volume": float(display_struct.lattice.volume) if display_struct else None,
+                    "density": float(display_struct.density) if display_struct is not None else None,
+                    "volume": float(display_struct.lattice.volume) if display_struct is not None else None,
                     "numAtoms": len(atoms) if atoms else 0,
                     "spaceGroupNumber": space_group_number,
                     "crystalSystem": crystal_system
@@ -239,8 +243,75 @@ class StructureConverter:
             return result
 
         except Exception as e:
-            logger.error(f"CIF conversion failed: {e}")
-            return None
+            # Fallback: build minimal structure without pymatgen
+            logger.warning(f"⚠️ CIF parse failed or pymatgen unavailable, using fallback parser: {e}")
+
+            # Try to extract formula from CIF text
+            try:
+                import re
+                formula = composition
+                m = re.search(r"^_chemical_formula_sum\s+(.+)$", cif_content, flags=re.MULTILINE)
+                if m:
+                    formula = m.group(1).strip().strip('"\'')
+                else:
+                    m2 = re.search(r"^data_([A-Za-z0-9_]+)$", cif_content, flags=re.MULTILINE)
+                    if m2:
+                        formula = m2.group(1).strip()
+            except Exception:
+                formula = composition or "Unknown"
+
+            # Extract lattice parameters if present
+            lattice_params = None
+            try:
+                import re
+                def find_float(tag: str) -> Optional[float]:
+                    mm = re.search(rf"^{tag}\\s+([0-9]+(?:\\.[0-9]+)?)", cif_content, flags=re.MULTILINE)
+                    return float(mm.group(1)) if mm else None
+
+                a = find_float("_cell_length_a")
+                b = find_float("_cell_length_b")
+                c = find_float("_cell_length_c")
+                alpha = find_float("_cell_angle_alpha")
+                beta = find_float("_cell_angle_beta")
+                gamma = find_float("_cell_angle_gamma")
+
+                if all(v is not None for v in [a, b, c, alpha, beta, gamma]):
+                    lattice_params = {
+                        "a": a, "b": b, "c": c,
+                        "alpha": alpha, "beta": beta, "gamma": gamma
+                    }
+            except Exception:
+                lattice_params = None
+
+            # Minimal result; atoms left empty so UI can still show metadata
+            minimal = {
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "formula": formula,
+                "source": {
+                    "database": source,
+                    "materialId": "unknown",
+                },
+                "spaceGroup": StructureConverter._extract_space_group(cif_content),
+                "cifContent": cif_content,
+                "properties": {
+                    "density": None,
+                    "volume": None,
+                    "numAtoms": 0,
+                    "spaceGroupNumber": None,
+                    "crystalSystem": None,
+                },
+                "metadata": {
+                    "source": source,
+                    "timestamp": datetime.now().isoformat(),
+                },
+                "atoms": [],
+            }
+            if lattice_params:
+                minimal["latticeParameters"] = lattice_params
+
+            logger.info("✅ Fallback structure created (no atoms). Frontend can still display metadata and allow CIF download.")
+            return minimal
     
     @staticmethod
     def _extract_space_group(cif_content: str) -> str:

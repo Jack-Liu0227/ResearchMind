@@ -27,6 +27,7 @@ class MessageHandler:
             "message": self.handle_chat_message,  # Alias for "chat"
             "upload_structure": self.handle_upload_structure,
             "upload_structures": self.handle_upload_structures,  # Multiple files
+            "chat_with_attachments": self.handle_chat_with_attachments,
             "ping": self.handle_ping,
         }
     
@@ -98,6 +99,49 @@ class MessageHandler:
             content=content,
             agent_id=agent_id,
             session_id=session_id
+        )
+
+    async def handle_chat_with_attachments(
+        self,
+        client_id: str,
+        websocket: Any,
+        data: dict,
+        agent_coordinator: "AgentCoordinator"
+    ) -> None:
+        """Handle chat message that includes attachments (e.g., CIF content).
+
+        Expects data like:
+        {
+          type: "chat_with_attachments",
+          content: "请用这个CIF计算声子谱",
+          agentId: "simulation_agent",
+          sessionId: "...",
+          attachments: [
+            { filename: "struct.cif", content: "data_..." },
+            ...
+          ]
+        }
+        """
+        content = data.get("content", "")
+        agent_id = data.get("agentId")
+        session_id = data.get("sessionId")
+        attachments = data.get("attachments", [])
+
+        if not content and not attachments:
+            await self.send_error(websocket, "Message content or attachments required")
+            return
+
+        if not agent_id:
+            await self.send_error(websocket, "Please select an agent first")
+            return
+
+        await agent_coordinator.process_chat_message(
+            client_id=client_id,
+            websocket=websocket,
+            content=content or "",
+            agent_id=agent_id,
+            session_id=session_id,
+            attachments=attachments
         )
     
     async def handle_upload_structure(

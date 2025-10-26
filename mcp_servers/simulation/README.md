@@ -1,82 +1,62 @@
 # Simulation MCP Server
 
-## 📖 简介
+FastMCP 驱动的材料仿真服务端，负责为 Simulation Agent 提供结构生成、弛豫、声子谱、热导率及能量属性等工具。
 
-Simulation MCP Server 是一个基于 FastMCP 构建的材料仿真计算服务器。它提供 8 个核心工具，支持晶体结构生成、结构弛豫、声子谱计算、热导率计算和能量属性预测。
+> ### 2025-10 更新
+> - 默认监听端口更新为 `50005`（`SIMULATION_MCP_PORT`），SSE 端点 `http://localhost:50005/sse`。  
+> - 热导率工具新增 `session_id` / `keep_files` 参数，并提供批量计算接口，支持共享工作目录和文件保留。  
+> - 文件下载接口统一返回 `/api/download/...` 相对路径，适配前端与 Nginx 代理。
 
-## ✨ 核心特性
+## 工具概览（共 8 个）
 
-### 🔬 晶体结构生成
-- **CrystaLLM**：从化学式生成晶体结构（CIF 格式）
-- **自动验证**：自动验证生成的结构是否合理
+| 类别 | 工具 | 描述 |
+| ---- | ---- | ---- |
+| 结构生成 | `generate_crystal_structure` | 使用 CrystaLLM 根据化学式生成 CIF 与前端结构数据 |
+|  | `extract_and_validate_cif` | 解析/验证上传的 CIF，自动 base64 解码与规范化 |
+| 结构弛豫 | `relax_structure` | 调用 MatterSim (ASE) 优化结构，输出弛豫后 CIF 与能量变化 |
+| 声子谱 | `calculate_phonon` | 生成声子色散、DOS 及对应图像（需先弛豫） |
+| 热导率 | `calculate_kappa_from_cif` | 单体热导率计算，支持 `session_id`、`keep_files`、`method`、`temperature` |
+|  | `batch_calculate_kappa` | 批量热导率计算，复用工作目录并返回总结数据 |
+| 能量属性 | `calculate_energy_from_cif` | 生成形成能、分解能、受力、应力等指标 |
+| 辅助 | `extract_and_validate_cif` |（同上）|
 
-### 🔧 结构弛豫
-- **MatterSim**：使用 ASE 优化器（BFGS, FIRE, LBFGS）优化晶体结构
-- **能量优化**：最小化结构能量，获得稳定构型
+## 典型流程
 
-### 📊 声子谱计算
-- **MatterSim**：计算声子色散和声子态密度
-- **⚠️ 必须先弛豫**：计算声子谱前必须先调用 `relax_structure()`
+1. **生成 → 弛豫 → 声子谱**  
+   `generate_crystal_structure` → `relax_structure` → `calculate_phonon`
 
-### 🔥 热导率计算
-- **AI4Kappa**：支持 Kappa-P（Slack 模型）和 Kappa-MTP（ML 预测）
+2. **生成 → 弛豫 → 热导率**  
+   `generate_crystal_structure` → `relax_structure` → `calculate_kappa_from_cif`
 
-### ⚡ 能量属性计算
-- **MatterSim**：计算形成能、分解能、受力、应力
+3. **批量热导率**  
+   准备结构列表（含 `cifContent` / `formula` / `id`），调用 `batch_calculate_kappa`，可设置 `keep_files=True` 在会话目录中保留输入输出。
 
-## 🏗️ 架构
+4. **上传结构 → 能量/热导率**  
+   `extract_and_validate_cif` → `relax_structure`（可选） → `calculate_energy_from_cif` / `calculate_kappa_from_cif`
 
+## 端口与环境变量
+
+```env
+SIMULATION_MCP_HOST=127.0.0.1
+SIMULATION_MCP_PORT=50005
+SIMULATION_MCP_URL=http://localhost:50005/sse
 ```
-┌─────────────────────────────────────────────────────────────┐
-│              Simulation MCP Server                          │
-│              (FastMCP Server - Port 5003)                   │
-│              SSE Endpoint: http://localhost:5003/sse        │
-└─────────────────────────────────────────────────────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-        ▼                   ▼                   ▼
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│  CrystaLLM   │    │  MatterSim   │    │  AI4Kappa    │
-│              │    │              │    │              │
-│ 结构生成      │    │ 弛豫+声子谱   │    │ 热导率计算    │
-└──────────────┘    └──────────────┘    └──────────────┘
-```
 
-## 🔧 可用工具（8个）
+SSE 端点：`http://localhost:50005/sse`  
+健康检查：`http://localhost:50005/health`
 
-### 1. 结构生成工具（2个）
-- `generate_crystal_structure(composition)` - 从化学式生成晶体结构
-- `extract_and_validate_cif(message_parts)` - 提取并验证用户提供的 CIF 文件
+## 启动
 
-### 2. 结构弛豫工具（1个）
-- `relax_structure(cif_content, optimizer="BFGS", max_steps=500, fmax=0.01)` - 结构弛豫
-
-### 3. 声子谱工具（1个）
-- `calculate_phonon(cif_content, supercell_matrix=[4,4,4])` - 计算声子谱（⚠️ 必须先弛豫）
-
-### 4. 热导率工具（1个）
-- `calculate_kappa_from_cif(cif_content, method="kappa_p", temperature=300.0)` - 计算热导率
-
-### 5. 能量属性工具（1个）
-- `calculate_energy_from_cif(cif_content)` - 计算形成能、分解能、受力、应力
-
-## 🚀 快速开始
-
-### 启动 Server
 ```bash
+uv sync
 uv run python mcp_servers/simulation/server.py
 ```
 
-Server 将在以下端点启动：
-- **SSE Endpoint**: `http://localhost:5003/sse`
-- **Health Check**: `http://localhost:5003/health`
+## 关联文档
 
-## 📖 相关文档
+- [Simulation Agent README](../../agents/simulation_agent/README.md)  
+- [Simulation MCP Architecture](./ARCHITECTURE.md)
 
-- **Simulation Agent**: [agents/simulation_agent/README.md](../../agents/simulation_agent/README.md)
-- **项目主文档**: [README.md](../../README.md)
-
-## 📄 许可证
+## 许可
 
 MIT License

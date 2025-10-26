@@ -133,23 +133,32 @@ export function isMobile(): boolean {
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
   try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch (err) {
-    // 降级方案
+    const value = String(text || '')
+    if (!value.trim()) return false
+
+    // 优先使用现代剪贴板 API（需用户手势与安全上下文）
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(value)
+      return true
+    }
+
+    // 兼容降级方案：使用隐藏 textarea + execCommand('copy')
     const textArea = document.createElement('textarea')
-    textArea.value = text
+    textArea.value = value
+    // 隐藏但可选择
+    textArea.setAttribute('readonly', '')
+    textArea.style.position = 'fixed'
+    textArea.style.top = '0'
+    textArea.style.left = '-9999px'
+    textArea.style.opacity = '0'
     document.body.appendChild(textArea)
     textArea.focus()
     textArea.select()
-    try {
-      document.execCommand('copy')
-      document.body.removeChild(textArea)
-      return true
-    } catch (err) {
-      document.body.removeChild(textArea)
-      return false
-    }
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textArea)
+    return !!ok
+  } catch {
+    return false
   }
 }
 

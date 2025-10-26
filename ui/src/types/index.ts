@@ -35,6 +35,18 @@ export interface Message {
 }
 
 // 对话会话类型
+export interface SessionFile {
+  id: string
+  type: 'csv' | 'md' | 'image' | 'pdf' | 'text' | string
+  name: string
+  downloadUrl?: string
+  filePath?: string
+  inlineContent?: string
+  sourceMessageId?: string
+  createdAt: number
+  extra?: Record<string, any>
+}
+
 export interface ChatSession {
   id: string
   title: string
@@ -46,6 +58,7 @@ export interface ChatSession {
   // 会话独立的数据
   structures?: CrystalStructure[]  // 晶体结构列表
   phononImages?: any[]             // 声子谱图片列表
+  files?: SessionFile[]            // 会话文件列表（CSV/MD 等）
 }
 
 // 晶胞类型数据
@@ -144,7 +157,7 @@ export interface Citation {
 
 // WebSocket消息类型
 export interface WebSocketMessage {
-  type: 'message' | 'status' | 'error' | 'structure' | 'structure_data' | 'image_data' | 'phonon_data' | 'analysis' | 'connection' | 'agents_list' | 'agent_selected' | 'pong' | 'session_cleared' | 'agent_selected' | 'feedback_request'
+  type: 'message' | 'status' | 'error' | 'structure' | 'structure_data' | 'image_data' | 'phonon_data' | 'analysis' | 'connection' | 'agents_list' | 'agent_selected' | 'pong' | 'session_cleared' | 'agent_selected' | 'feedback_request' | 'chat_with_attachments'
   data: any
   sessionId?: string
   agentId?: string

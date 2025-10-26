@@ -1,11 +1,13 @@
 import React, { useEffect, useRef } from 'react'
 import { useAppStore } from '../store/useAppStore'
+import { SessionFile } from '../types'
 import { wsService } from '../services/websocket'
 import ChatInterface from '../components/ChatInterface'
 import AgentSelector from '../components/AgentSelector'
 import PhononVisualization from '../components/PhononVisualization'
 import toast from 'react-hot-toast'
 import { smartParseStructure, hasStructureData } from '../utils/structureParser'
+import { resolveFileUrl } from '../utils/apiClient'
 
 const ChatPage: React.FC = () => {
   console.log('ChatPage rendering...')
@@ -22,6 +24,7 @@ const ChatPage: React.FC = () => {
     setCurrentStructure,
     addToStructureList,
     addToCurrentSessionStructures,
+    addToCurrentSessionFiles,
     agents,
     setIsLoading,
     setLoadingMessage,
@@ -35,6 +38,161 @@ const ChatPage: React.FC = () => {
   } = useAppStore()
 
   const pendingFileMetadataRef = useRef<any[]>([])
+
+  const normalizePath = (input?: string): string | undefined => {
+    if (!input) return undefined
+    return input.replace(/^[./\\]+/, '').replace(/\\/g, '/')
+  }
+
+  const normalizeDownloadUrl = (rawUrl?: string, filePath?: string): string | undefined => {
+    if (rawUrl && rawUrl.trim().length > 0) {
+      return resolveFileUrl(rawUrl.trim())
+    }
+    const normalizedPath = normalizePath(filePath)
+    if (normalizedPath) {
+      return resolveFileUrl(`/download/${normalizedPath}`)
+    }
+    return undefined
+  }
+
+  const extractFileName = (input?: string, fallback?: string) => {
+    if (!input) return fallback || '数据文件'
+    const clean = input.split('?')[0]
+    const segments = clean.split('/').filter(Boolean)
+    return segments.pop() || fallback || '数据文件'
+  }
+
+  const createSessionFilesFromMetadata = (metadata: any, sourceMessageId?: string): SessionFile[] => {
+    if (!metadata) {
+      return []
+    }
+
+    const timestamp = Date.now()
+
+    const files: SessionFile[] = []
+
+    const pushFile = (
+      type: string,
+      url?: string,
+      rawPath?: string,
+      explicitName?: string
+    ) => {
+      const normalizedPath = normalizePath(rawPath)
+      const downloadUrl = normalizeDownloadUrl(url, normalizedPath)
+
+      if (!downloadUrl && !normalizedPath) {
+        return
+      }
+
+      const idSeed = normalizedPath || downloadUrl || `${type}-${timestamp}`
+      const id = `${type}:${idSeed}`
+
+      if (files.some((file) => file.id === id)) {
+        return
+      }
+
+      files.push({
+        id,
+        type,
+        name: explicitName || extractFileName(normalizedPath || downloadUrl, type.toUpperCase()),
+        downloadUrl,
+        filePath: normalizedPath,
+        sourceMessageId,
+        createdAt: timestamp,
+        extra: metadata,
+      })
+    }
+
+    pushFile(
+      'csv',
+      metadata.csv_download_url || metadata.csv_url,
+      metadata.csv_file_path,
+      metadata.csv_filename
+    )
+
+    pushFile(
+      'md',
+      metadata.md_download_url || metadata.summary_download_url,
+      metadata.summary_file_path || metadata.report_file_path,
+      metadata.md_filename
+    )
+
+    pushFile(
+      'pdf',
+      metadata.pdf_download_url,
+      metadata.pdf_file_path,
+      metadata.pdf_filename
+    )
+
+    pushFile(
+      'zip',
+      metadata.zip_download_url,
+      metadata.zip_file_path,
+      metadata.zip_filename
+    )
+
+    return files
+  }
+
+  const createSessionFilesFromPhononData = (phononData: any, sourceMessageId?: string): SessionFile[] => {
+    if (!phononData) {
+      return []
+    }
+
+    const files: SessionFile[] = []
+    const timestamp = Date.now()
+
+    const push = (entry: Partial<SessionFile> & { id?: string }) => {
+      const normalizedPath = normalizePath(entry.filePath)
+      const downloadUrl = normalizeDownloadUrl(entry.downloadUrl, normalizedPath)
+      if (!downloadUrl && !normalizedPath) {
+        return
+      }
+
+      const idSeed = entry.id || normalizedPath || downloadUrl || `${entry.type || 'data'}-${timestamp}`
+      if (files.some((file) => file.id === idSeed)) {
+        return
+      }
+
+      files.push({
+        id: idSeed,
+        type: entry.type || 'data',
+        name: entry.name || extractFileName(normalizedPath || downloadUrl, '数据文件'),
+        downloadUrl,
+        filePath: normalizedPath,
+        sourceMessageId,
+        createdAt: timestamp,
+        extra: entry.extra ?? phononData,
+      })
+    }
+
+    createSessionFilesFromMetadata(phononData, sourceMessageId).forEach((file) => push(file))
+
+    if (Array.isArray(phononData.files)) {
+      phononData.files.forEach((item: any) => {
+        if (!item) return
+        push({
+          id: item.id,
+          type: item.type || 'data',
+          name: item.name || item.filename,
+          downloadUrl: item.downloadUrl || item.url,
+          filePath: item.filePath,
+          extra: item,
+        })
+      })
+    }
+
+    if (phononData.zip_download_url || phononData.zip_file_path) {
+      push({
+        type: 'zip',
+        name: phononData.zip_filename,
+        downloadUrl: phononData.zip_download_url,
+        filePath: phononData.zip_file_path,
+      })
+    }
+
+    return files
+  }
 
   useEffect(() => {
     // 初始化WebSocket连接
@@ -88,35 +246,38 @@ const ChatPage: React.FC = () => {
         }
 
         // 如果消息有内容，添加到消息列表
-        if (message.data.content && message.data.content.trim()) {
-          const newMessage = {
-            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            content: message.data.content,
-            role: 'assistant' as const,
+      if (message.data.content && message.data.content.trim()) {
+        const newMessage = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          content: message.data.content,
+          role: 'assistant' as const,
             timestamp: new Date(message.data.timestamp || Date.now()),
             agentId: message.data.agentId,
             agentName: message.data.agentName,
             type: (message.data.type || 'text') as 'text' | 'structure' | 'analysis' | 'error',
             metadata: message.data.metadata,
           }
-          addMessage(newMessage)
+        addMessage(newMessage)
 
-          if (pendingFileMetadataRef.current.length > 0) {
-            let mergedMetadata = { ...(newMessage.metadata || {}) }
-            while (pendingFileMetadataRef.current.length > 0) {
-              const pendingMetadata = pendingFileMetadataRef.current.shift()
-              if (!pendingMetadata) {
-                continue
-              }
-              mergedMetadata = {
-                ...mergedMetadata,
-                ...pendingMetadata
-              }
+        if (pendingFileMetadataRef.current.length > 0) {
+          let mergedMetadata = { ...(newMessage.metadata || {}) }
+          const bufferedFiles: SessionFile[] = []
+          while (pendingFileMetadataRef.current.length > 0) {
+            const pendingMetadata = pendingFileMetadataRef.current.shift()
+            if (!pendingMetadata) {
+              continue
             }
-            updateMessage(newMessage.id, {
-              metadata: mergedMetadata
-            })
+            mergedMetadata = {
+              ...mergedMetadata,
+              ...pendingMetadata
+            }
+            bufferedFiles.push(...createSessionFilesFromMetadata(pendingMetadata, newMessage.id))
           }
+          updateMessage(newMessage.id, {
+            metadata: mergedMetadata
+          })
+          bufferedFiles.forEach((file) => addToCurrentSessionFiles(file))
+        }
 
           // 收到内容后，保持loading状态，等待complete状态
           // 不在这里关闭loading，因为可能还有后续消息
@@ -406,6 +567,9 @@ const ChatPage: React.FC = () => {
             }
           })
 
+          const generatedFiles = createSessionFilesFromMetadata(message.data.metadata, currentMessage.id)
+          generatedFiles.forEach((file) => addToCurrentSessionFiles(file))
+
           // 验证更新是否成功
           setTimeout(() => {
             const latest = useAppStore.getState()
@@ -436,6 +600,7 @@ const ChatPage: React.FC = () => {
         // 提取声子谱图片
         if (phononData.images && Array.isArray(phononData.images)) {
           setPhononImages(phononData.images)
+          setCurrentSessionPhononImages(phononData.images)
           setShowPhononVisualization(true)
           toast.success(`已加载 ${phononData.images.length} 个声子谱图像`)
         } else {
@@ -452,6 +617,9 @@ const ChatPage: React.FC = () => {
               phononData: phononData
             }
           })
+
+          const phononFiles = createSessionFilesFromPhononData(phononData, currentMessage.id)
+          phononFiles.forEach((file) => addToCurrentSessionFiles(file))
         }
       }
     })

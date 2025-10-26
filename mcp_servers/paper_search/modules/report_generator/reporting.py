@@ -410,11 +410,11 @@ URL: {paper.get('url', 'N/A')}
                 year = paper.get('published', 'Unknown')[:4] if paper.get('published') else 'Unknown'
                 source = paper.get('source', 'unknown')
                 paper_id = paper.get('paper_id', 'unknown')
+                url = paper.get('url', '')
 
                 if source == 'arxiv':
-                    references += f"[{i}] {authors}. \"{title}\". arXiv:{paper_id}, {year}.\n"
+                    references += f"[{i}] {authors}. \"{title}\". arXiv:{paper_id}, {year}. {url}\n"
                 else:
-                    url = paper.get('url', '')
                     references += f"[{i}] {authors}. \"{title}\". {year}. {url}\n"
 
             full_report += references
@@ -518,7 +518,8 @@ URL: {paper.get('url', 'N/A')}
 
             if source == 'arxiv':
                 paper_id = paper.get('paper_id', 'unknown')
-                report_sections.append(f"[{i}] {authors}. \"{title}\". arXiv:{paper_id}, {year}.\n")
+                url = paper.get('url', '')
+                report_sections.append(f"[{i}] {authors}. \"{title}\". arXiv:{paper_id}, {year}. {url}\n")
             else:
                 url = paper.get('url', '')
                 report_sections.append(f"[{i}] {authors}. \"{title}\". {year}. {url}\n")
@@ -590,7 +591,8 @@ URL: {paper.get('url', 'N/A')}
 
             if source == 'arxiv':
                 paper_id = paper.get('paper_id', 'unknown')
-                report_sections.append(f"[{i}] {authors}. \"{title}\". arXiv:{paper_id}, {year}.\n")
+                url = paper.get('url', '')
+                report_sections.append(f"[{i}] {authors}. \"{title}\". arXiv:{paper_id}, {year}. {url}\n")
             else:
                 url = paper.get('url', '')
                 report_sections.append(f"[{i}] {authors}. \"{title}\". {year}. {url}\n")

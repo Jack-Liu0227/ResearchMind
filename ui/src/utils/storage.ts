@@ -80,8 +80,7 @@ export function isStorageValid(): boolean {
     
     // 检查必要的字段
     const state = data.state
-    if (typeof state.sidebarOpen !== 'boolean' || 
-        typeof state.structureViewOpen !== 'boolean') {
+    if (typeof state.sidebarOpen !== 'boolean') {
       return false
     }
     
@@ -103,13 +102,10 @@ export function repairStorage(): void {
       return
     }
     
-    // 确保侧边栏状态为 true
-    if (data.state.sidebarOpen === false || data.state.structureViewOpen === false) {
-      console.log('🔧 修复侧边栏状态...')
-      data.state.sidebarOpen = true
-      data.state.structureViewOpen = true
+    if (typeof data.state.sidebarOpen !== 'boolean') {
+      data.state.sidebarOpen = false
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-      console.log('✅ 侧边栏状态已修复')
+      console.log('🔧 初始化侧边栏状态为默认值 (关闭)')
     }
   } catch (error) {
     console.error('修复存储时出错:', error)
@@ -131,6 +127,7 @@ export function forceSaveState(state: any): void {
         // 持久化结构数据
         currentStructure: state.currentStructure || null,
         currentSessionStructures: state.currentSessionStructures || [],
+        currentSessionFiles: state.currentSessionFiles || [],
         // 持久化声子谱数据
         phononImages: state.phononImages || [],
         currentSessionPhononImages: state.currentSessionPhononImages || [],
@@ -141,7 +138,16 @@ export function forceSaveState(state: any): void {
     }
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave))
-    console.log('💾 强制保存状态完成 - 会话数:', state.sessions?.length || 0, '消息数:', state.messages?.length || 0, '结构数:', state.currentSessionStructures?.length || 0)
+    console.log(
+      '💾 强制保存状态完成 - 会话数:',
+      state.sessions?.length || 0,
+      '消息数:',
+      state.messages?.length || 0,
+      '结构数:',
+      state.currentSessionStructures?.length || 0,
+      '文件数:',
+      state.currentSessionFiles?.length || 0
+    )
   } catch (error) {
     console.error('强制保存状态时出错:', error)
   }
@@ -175,16 +181,8 @@ export function initStorage(): void {
   try {
     // 只修复侧边栏状态，不清除其他数据
     const data = getStorageData()
-    if (data && data.state) {
-      // 确保侧边栏默认显示
-      if (data.state.sidebarOpen === false) {
-        console.log('🔧 修复左侧边栏状态为显示')
-        data.state.sidebarOpen = true
-      }
-      if (data.state.structureViewOpen === false) {
-        console.log('🔧 修复右侧边栏状态为显示')
-        data.state.structureViewOpen = true
-      }
+    if (data && data.state && typeof data.state.sidebarOpen !== 'boolean') {
+      data.state.sidebarOpen = false
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
     }
     console.log('✅ 存储系统初始化完成')

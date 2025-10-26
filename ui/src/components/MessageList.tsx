@@ -558,6 +558,77 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
                               target.style.display = 'none'
                             }}
                           />
+                          <div className="mt-2 flex items-center space-x-2">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const srcUrl = (image as any).url
+                                    ? resolveFileUrl((image as any).url)
+                                    : image.path
+                                    ? resolveFileUrl(`/images/${image.path}`)
+                                    : ''
+                                  if (!srcUrl && !image.base64) {
+                                    toast.error('没有可下载的图片')
+                                    return
+                                  }
+                                  if (image.base64) {
+                                    await downloadFile(`data:image/png;base64,${image.base64}`, (image.name || `image_${index + 1}.png`))
+                                  } else {
+                                    const response = await fetch(srcUrl)
+                                    if (!response.ok) throw new Error('下载失败')
+                                    const blob = await response.blob()
+                                    await downloadFile(blob, (image.name || `image_${index + 1}.png`), blob.type)
+                                  }
+                                  toast.success('图片已下载')
+                                } catch (err) {
+                                  console.error('下载图片失败:', err)
+                                  toast.error('下载失败，请稍后重试')
+                                }
+                              }}
+                              className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-500"
+                            >
+                              下载
+                            </button>
+                            <button
+                              onClick={async () => {
+                                // 优先使用后端提供的 url；否则根据类型和文件名构造
+                                const buildUrl = () => {
+                                  const rawUrl = (image as any).url
+                                  if (rawUrl && typeof rawUrl === 'string') {
+                                    return resolveFileUrl(rawUrl)
+                                  }
+                                  const rawPath = (image as any).path as string | undefined
+                                  const filename = (image as any).filename || (rawPath ? rawPath.split(/[/\\]/).pop() : undefined)
+                                  if (!filename) return ''
+                                  const t = String((image as any).type || '').toLowerCase()
+                                  const kind = t.includes('phonon')
+                                    ? 'phonon_results'
+                                    : t.includes('generated') || t.includes('structure')
+                                    ? 'generated_structures'
+                                    : 'images'
+                                  return resolveFileUrl(`/images/${kind}/${filename}`)
+                                }
+                                const srcUrl = buildUrl()
+                                if (!srcUrl || !srcUrl.trim()) {
+                                  toast.error('没有可复制的链接')
+                                  return
+                                }
+                                const success = await copyToClipboard(srcUrl)
+                                if (success) {
+                                  toast.success('链接已复制到剪贴板')
+                                } else {
+                                  // 最终兜底：显示可复制提示框
+                                  const manual = window.prompt('复制此链接到剪贴板', srcUrl)
+                                  if (manual !== null) {
+                                    toast('请使用 Ctrl+C 复制链接', { icon: 'ℹ️' })
+                                  }
+                                }
+                              }}
+                              className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                            >
+                              复制链接
+                            </button>
+                          </div>
                           <div className="text-xs text-gray-500 mt-1">
                             {(image.path || (image as any).url || image.name || 'unknown').split(/[/\\]/).pop()}
                           </div>

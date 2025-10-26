@@ -1,41 +1,53 @@
-# Database Agent (数据库检索助手)
+# Database Agent
 
-## 📖 简介
+The Database Agent queries multiple materials databases via the Database MCP Server and can invoke the Simulation Agent when structures need to be generated.
 
-Database Agent 是一个基于 Google ADK 构建的材料数据库检索助手。它通过 MCP 与 Database MCP Server 通信，提供多数据库查询和结构获取功能。
+> **October 2025 refresh**
+> - Database MCP listens on `50006` (`DATABASE_MCP_PORT`); SSE endpoint: `http://localhost:50006/sse`.  
+> - Response payloads record whether a structure was fetched or generated.  
+> - CIF downloads share the same `/api/download/...` relative path convention as other agents.
 
-## ✨ 核心特性
+## Capabilities
 
-### 🔍 多数据库查询
-- **Materials Project**: 材料数据库
-- **OQMD**: 开放量子材料数据库
-- **COD**: 晶体学开放数据库
-- **AFLOW**: 自动流程材料数据库
+- **Multi-database search**: Materials Project, OQMD, COD, AFLOW, and any additional providers configured in the MCP.  
+- **Structure retrieval**: Returns CIF data plus key properties (band gap, formation energy, density, etc.).  
+- **Automatic fallback**: When a target is absent, triggers Simulation MCP to generate a plausible structure.  
+- **Property aggregation**: Normalises result formats so downstream agents or the UI can display comparable metadata.
 
-### 📊 结构获取
-- **CIF 格式**：获取晶体结构（CIF 格式）
-- **属性查询**：查询材料属性（能带隙、形成能、密度等）
+## MCP Tools (Examples)
 
-### 🤖 自动生成
-- **自动生成**：数据库查询失败时自动调用 Simulation Agent 生成结构
+| Tool | Description |
+|------|-------------|
+| `search_materials_project`, `search_oqmd`, `search_cod`, `search_aflow` | Source-specific queries. |
+| `search_all_databases` | Convenience wrapper that tries each provider in turn. |
+| `get_structure_details` | Returns full CIF + property bundle. |
+| `generate_structure_if_missing` | Delegates to Simulation MCP when no entry exists. |
 
-## 🚀 快速开始
+## Typical Workflow
 
-### 启动 Database MCP Server
+1. Search Materials Project (or combined search) for the desired composition or mp-id.  
+2. If found, return CIF + properties.  
+3. If missing, automatically call Simulation Agent → CrystaLLM to seed a structure, then relay the generated CIF.  
+4. Optionally kick off Simulation Agent for relaxation/analysis.
+
+## Start-Up
+
 ```bash
-uv run python mcp_servers/database_call/server.py --port 50002
-```
+# dependencies
+uv sync
 
-### 启动 Database Agent
-```bash
+# Database MCP (port 50006)
+uv run python mcp_servers/database_call/server.py --port 50006
+
+# Database Agent
 uv run python agents/database_agent/agent.py
 ```
 
-## 📖 相关文档
+## Related Docs
 
-- **Database MCP Server**: [mcp_servers/database_call/README.md](../../mcp_servers/database_call/README.md)
-- **项目主文档**: [README.md](../../README.md)
+- [Database MCP README](../../mcp_servers/database_call/README.md)  
+- [Database Agent Architecture](./ARCHITECTURE.md)
 
-## 📄 许可证
+## License
 
 MIT License

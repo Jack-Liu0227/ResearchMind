@@ -181,6 +181,24 @@ class WebSocketService {
     }
   }
 
+  // 发送带附件的聊天消息（例如内联CIF内容）
+  sendChatWithAttachments(params: { content?: string; agentId?: string; sessionId?: string; attachments: Array<{ filename: string; content: string }> }): void {
+    const { content, agentId, sessionId, attachments } = params
+    const message: any = {
+      type: 'chat_with_attachments',
+      content,
+      agentId,
+      sessionId,
+      attachments,
+      timestamp: new Date().toISOString(),
+    }
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message))
+    } else {
+      console.warn('WebSocket is not connected')
+    }
+  }
+
   onMessage(handler: MessageHandler): () => void {
     this.messageHandlers.push(handler)
     return () => {

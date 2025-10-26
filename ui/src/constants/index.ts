@@ -293,13 +293,13 @@ export const DEFAULT_SETTINGS = {
 
 // 错误消息
 export const ERROR_MESSAGES = {
-  NETWORK_ERROR: '网络连接失败，请检查网络设置',
-  SERVER_ERROR: '服务器错误，请稍后重试',
-  INVALID_INPUT: '输入内容无效',
-  FILE_TOO_LARGE: '文件大小超过限制',
-  UNSUPPORTED_FILE_TYPE: '不支持的文件类型',
-  WEBSOCKET_ERROR: 'WebSocket 连接失败',
-  AGENT_NOT_AVAILABLE: '智能体暂不可用',
+  NETWORK_ERROR: '网络请求失败，请检查网络连接。',
+  SERVER_ERROR: '服务器暂时不可用，请稍后再试。',
+  INVALID_INPUT: '输入不合法，请检查并重试。',
+  FILE_TOO_LARGE: '文件体积过大，请上传更小的文件。',
+  UNSUPPORTED_FILE_TYPE: '当前文件类型不受支持。',
+  WEBSOCKET_ERROR: 'WebSocket 连接失败，请刷新页面。',
+  AGENT_NOT_AVAILABLE: '相关智能体暂未就绪，请稍后再试。'
 } as const
 
 // 成功消息
@@ -307,8 +307,8 @@ export const SUCCESS_MESSAGES = {
   MESSAGE_SENT: '消息发送成功',
   FILE_UPLOADED: '文件上传成功',
   SETTINGS_SAVED: '设置保存成功',
-  SESSION_CREATED: '会���创建成功',
-  SESSION_DELETED: '会话删除成功',
+  SESSION_CREATED: '会话创建成功',
+  SESSION_DELETED: '会话删除成功'
 } as const
 
 // 路由路径

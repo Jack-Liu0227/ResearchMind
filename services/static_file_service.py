@@ -80,7 +80,14 @@ class StaticFileService:
                 StaticFiles(directory=paper_search_dir),
                 name="papers_download"
             )
+            # Legacy path support without /api prefix
+            app.mount(
+                "/download",
+                StaticFiles(directory=paper_search_dir),
+                name="papers_download_legacy"
+            )
             logger.info(f"✅ Static files: /api/download -> {paper_search_dir}")
+            logger.info(f"✅ Static files: /download -> {paper_search_dir}")
         else:
             logger.warning(f"⚠️ Paper search directory not found: {paper_search_dir}")
 

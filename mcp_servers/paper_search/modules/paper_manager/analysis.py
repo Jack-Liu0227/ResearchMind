@@ -95,6 +95,8 @@ async def analyze_paper_content(
             'paper_id': paper_id,
             'title': title,
             'authors': authors,
+            'url': paper.get('url') or paper.get('pdf_url') or '',
+            'pdf_url': paper.get('pdf_url', ''),
             'source': source,
             'abstract_zh': abstract_zh,
             'key_info': key_info,

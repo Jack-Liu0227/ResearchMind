@@ -14,8 +14,10 @@ import structlog
 logger = structlog.get_logger()
 
 # 会话文件夹映射文件
-SESSION_MAPPING_FILE = "./paper_search/session_folders.json"
-PAPER_DIR = "./paper_search/papers"
+# Ensure saved files live under the mounted static directory so downloads work.
+# StaticFileService mounts mcp_servers/paper_search as /api/download (and /download for compatibility).
+SESSION_MAPPING_FILE = "./mcp_servers/paper_search/session_folders.json"
+PAPER_DIR = "./mcp_servers/paper_search/papers"
 
 
 class SessionFolderManager:

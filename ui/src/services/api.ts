@@ -38,7 +38,7 @@ api.interceptors.response.use(
 
 // 健康检查
 export const healthCheck = async (): Promise<ApiResponse> => {
-  return api.get('/health')
+  return api.get('/api/health')
 }
 
 // 服务状态
@@ -46,23 +46,40 @@ export const getServiceStatus = async (): Promise<ApiResponse> => {
   return api.get('/api/service_status')
 }
 
-// 声子谱结果列表
+// 获取文件列表 (统一端点)
+export const getFiles = async (type: string = 'phonon_results'): Promise<ApiResponse> => {
+  return api.get(`/api/files?type=${type}`)
+}
+
+// 声子谱结果列表 (兼容性，使用新端点)
 export const getPhononResults = async (): Promise<ApiResponse> => {
-  return api.get('/api/phonon_results')
+  return getFiles('phonon_results')
 }
 
-// 生成结构列表
+// 生成结构列表 (兼容性，使用新端点)
 export const getGeneratedStructures = async (): Promise<ApiResponse> => {
-  return api.get('/api/generated_structures')
+  return getFiles('generated_structures')
 }
 
-// 文件上传
-export const uploadFile = async (file: File, type?: string): Promise<ApiResponse> => {
-  const formData = new FormData()
-  formData.append('file', file)
-  if (type) formData.append('type', type)
+// 获取声子谱示例 (新端点)
+export const getPhononExamples = async (): Promise<ApiResponse> => {
+  return getFiles('phonon_examples')
+}
 
-  return api.post('/api/upload/structure', formData, {
+// 文件上传 (统一端点)
+export const uploadFile = async (files: File | File[], type: string = 'structure'): Promise<ApiResponse> => {
+  const formData = new FormData()
+
+  // 支持单个文件或多个文件
+  if (Array.isArray(files)) {
+    files.forEach(file => formData.append('files', file))
+  } else {
+    formData.append('files', files)
+  }
+
+  formData.append('type', type)
+
+  return api.post('/api/upload', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },

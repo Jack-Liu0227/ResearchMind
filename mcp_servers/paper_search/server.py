@@ -9,6 +9,7 @@ import json
 import os
 import logging
 from datetime import datetime
+from urllib.parse import urlparse
 
 
 def get_api_base_url() -> str:
@@ -73,15 +74,24 @@ def get_download_url(file_path: str) -> str:
 
     # 规范化文件路径：移除 ./ 前缀，转换反斜杠为正斜杠
     file_path = file_path.replace('\\', '/').lstrip('./')
+
     # 移除前缀 "mcp_servers/paper_search/" 如果存在
     if file_path.startswith('mcp_servers/paper_search/'):
         file_path = file_path[len('mcp_servers/paper_search/'):]
     elif file_path.startswith('paper_search/'):
         file_path = file_path[len('paper_search/'):]
 
+    normalized = file_path.lstrip('/')
+
+    # 避免重复的 download 或 api/download 前缀
+    if normalized.startswith('api/download/'):
+        normalized = normalized[len('api/download/'):]
+    elif normalized.startswith('download/'):
+        normalized = normalized[len('download/'):]
+
     # 返回相对路径：/api/download/...
     # 前端会转换为完整 URL，Nginx 会转发到后端的 /api/download/...
-    return f"/api/download/{file_path}"
+    return f"/api/download/{normalized}"
 from typing import List, Dict, Any, Optional
 
 from fastmcp import FastMCP
@@ -121,6 +131,7 @@ from modules import (
     generate_research_report_with_data_collection,
     # Export Tools
     save_papers_to_csv as save_papers_to_csv_impl,
+    ingest_uploaded_documents as ingest_uploaded_documents_impl,
 )
 
 # Import unified tools
@@ -206,7 +217,7 @@ def sanitize_tool_response(data: Any, max_string_length: int = 5000) -> Any:
 def parse_args():
     """Parse command line arguments for MCP server."""
     parser = argparse.ArgumentParser(description="Paper Search MCP Server")
-    parser.add_argument('--port', type=int, default=50005, help='Server port (default: 50005)')
+    parser.add_argument('--port', type=int, default=50004, help='Server port (default: 50004)')
     parser.add_argument('--host', default='0.0.0.0', help='Server host (default: 0.0.0.0)')
     parser.add_argument('--log-level', default='INFO',
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
@@ -218,7 +229,7 @@ def parse_args():
         args = parser.parse_args()
     except SystemExit:
         class Args:
-            port = 50005
+            port = 50004
             host = '0.0.0.0'
             transport = 'stdio'
             log_level = 'INFO'
@@ -308,7 +319,7 @@ deep learning metallurgy
 
 
 # ============================================================================
-# Search Agent 工具 (7个)
+# Search Agent 工具 (8个)
 # ============================================================================
 # 职责：只负责检索论文信息，不做分析、下载、总结等操作
 
@@ -487,6 +498,110 @@ async def search_papers(
 
 
 # --- 单源搜索 (保留用于特定需求) ---
+
+
+@mcp.tool()
+async def ingest_uploaded_papers(
+    files: Any,
+    session_id: str = None,
+    topic: str = None,
+    file_prefix: str = "uploaded_papers"
+) -> Dict[str, Any]:
+    """
+    将用户上传的文件转为论文条目，写入会话目录并生成 CSV。
+
+    Args:
+        files: 单个或多个文件字典，包含 filename、content、encoding 等字段
+        session_id: 会话 ID（可选，未提供时自动生成）
+        topic: 会话主题（可选）
+        file_prefix: CSV 文件名前缀
+
+    Returns:
+        与 search_papers 类似的结果字典，包含简化条目及 CSV 下载链接。
+    """
+    logger.info("Ingesting uploaded papers", session_id=session_id, topic=topic)
+
+    if not files:
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': 'No files provided'
+        })
+
+    # Normalize files input to list
+    if isinstance(files, dict):
+        files_list = [files]
+    else:
+        files_list = list(files)
+
+    if not session_id:
+        from datetime import datetime
+        import uuid
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_id = str(uuid.uuid4())[:8]
+        session_id = f"upload_{timestamp}_{unique_id}"
+        logger.info("Generated upload session_id", session_id=session_id)
+
+    topic = topic or "uploaded_documents"
+
+    ingestion_result = ingest_uploaded_documents_impl(
+        files=files_list,
+        session_id=session_id,
+        topic=topic,
+        file_prefix=file_prefix
+    )
+
+    if ingestion_result.get('status') != 'success':
+        return sanitize_tool_response(ingestion_result)
+
+    papers = ingestion_result.get('papers', [])
+    csv_result = ingestion_result.get('csv_result', {})
+
+    simplified_papers = []
+    file_downloads = []
+    for paper in papers:
+        abstract = paper.get('abstract', '')
+        preview = abstract[:200] + '...' if len(abstract) > 200 else abstract
+        simplified_papers.append({
+            'paper_id': paper.get('paper_id'),
+            'title': paper.get('title', 'Uploaded Document'),
+            'source': paper.get('source', 'upload'),
+            'preview': preview,
+            'uploaded_filename': paper.get('upload_metadata', {}).get('filename'),
+        })
+
+        local_path = paper.get('upload_metadata', {}).get('saved_path')
+        if local_path:
+            try:
+                download_url = get_download_url(local_path)
+                file_downloads.append({
+                    'paper_id': paper.get('paper_id'),
+                    'filename': paper.get('upload_metadata', {}).get('filename'),
+                    'download_url': download_url
+                })
+            except Exception as err:
+                logger.warning("Failed to build download URL for uploaded file", error=str(err))
+
+    final_result: Dict[str, Any] = {
+        'status': 'success',
+        'session_id': session_id,
+        'topic': topic,
+        'papers': simplified_papers,
+        'total_results': len(papers),
+        'sources_used': ['upload'],
+        'uploaded_files': file_downloads,
+        'message': f'Processed {len(papers)} uploaded document(s)'
+    }
+
+    csv_path = csv_result.get('file_path')
+    if csv_path:
+        try:
+            final_result['csv_download_url'] = get_download_url(csv_path)
+        except Exception as err:
+            logger.warning("Failed to build CSV download URL", error=str(err))
+        final_result['csv_file_path'] = csv_path
+
+    return sanitize_tool_response(final_result)
 
 @mcp.tool()
 async def search_papers_all_sources(
@@ -1400,11 +1515,12 @@ async def semantic_search_papers(
 
 
 # ============================================================================
-# 工具优化完成 - 17 个核心工具
+# 工具优化完成 - 18 个核心工具
 # ============================================================================
 # 1. 规划类 (1个): generate_research_plan
 # 2. 检索类 (8个):
-#    - search_papers_all_sources (推荐：默认使用综合检索)
+#    - search_papers（推荐，统一接口）
+#    - ingest_uploaded_papers（用户上传文档转换）
 #    - search_arxiv_papers, search_papers_by_author, get_paper_info
 #    - tavily_search, tavily_academic_search, tavily_news_search
 # 3. 文献下载 (1个): download_paper
@@ -1417,12 +1533,13 @@ async def semantic_search_papers(
 # 新增功能：
 # - ✅ 统一字段命名（paper_id, abstract, url等）
 # - ✅ CSV导出支持所有字段
-# - ✅ 向量存储支持多collection和多源文献
+# - ✅ 向量存储支持多 collection 和多源文献
 # - ✅ 语义搜索支持按来源过滤
-# - ✅ LLM翻译摘要
-# - ✅ 通用URL全文提取（PDF和HTML）
+# - ✅ LLM 翻译摘要
+# - ✅ 通用 URL 全文提取（PDF 和 HTML）
 # - ✅ 失败时自动回退到摘要
 # ============================================================================
+
 
 
 if __name__ == "__main__":
@@ -1453,7 +1570,7 @@ if __name__ == "__main__":
     logger.info(f"Server will run on {args.host}:{args.port}")
     logger.info("V9.0 Features: Reorganized tools by agent responsibilities")
     logger.info("Available tools:")
-    logger.info("  - Search Agent: 7 tools (Planning: 1, ArXiv: 3, Tavily: 3)")
+    logger.info("  - Search Agent: 8 tools (Planning: 1, ArXiv: 3, Tavily: 3, Upload: 1)")
     logger.info("  - Paper Manager: 5 tools (Get Content: 2, Analysis: 2, Save: 1)")
     logger.info("  - Report Generator: 1 tool (Generate Report)")
     logger.info("  - Context Manager: 4 tools (Vector: 2, Cache: 2)")

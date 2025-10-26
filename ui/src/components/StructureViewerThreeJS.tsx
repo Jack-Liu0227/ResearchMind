@@ -89,7 +89,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
   // 检查原子数是否超过限制
   const MAX_ATOMS = 50;
-  const atomCount = structure.atoms.length;
+  const atomCount = Array.isArray(structure?.atoms) ? structure.atoms.length : 0;
   const isTooLarge = atomCount > MAX_ATOMS;
 
   // StructureViewerThreeJS 组件初始化
@@ -105,7 +105,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
         setDisplayStructure(structure);
       } else {
         // 优先使用 API 返回的惯胞数据
-        if (structure.metadata?.conventionalStructure) {
+        if (structure.metadata?.conventionalStructure && Array.isArray(structure.metadata.conventionalStructure.atoms)) {
           console.log('✅ 使用metadata中的惯胞数据');
           setDisplayStructure(structure.metadata.conventionalStructure);
         } else {
@@ -120,7 +120,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
       console.log('✅ 使用cellTypes数据，可用类型:', Object.keys(structure.cellTypes));
 
       const cellData = structure.cellTypes[cellType];
-      if (!cellData) {
+      if (!cellData || !cellData.latticeParameters || !Array.isArray(cellData.atoms)) {
         console.error(`❌ cellTypes中没有${cellType}数据，可用类型:`, Object.keys(structure.cellTypes));
         // 回退到primitive
         const fallbackData = structure.cellTypes['primitive'];
@@ -129,12 +129,18 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
           setCellType('primitive');
           return;
         }
+        // 无法回退，使用原始结构以避免崩溃
+        setDisplayStructure({
+          ...structure,
+          atoms: Array.isArray(structure.atoms) ? structure.atoms : [],
+        });
+        return;
       }
 
       const { a, b, c, alpha, beta, gamma } = cellData.latticeParameters;
 
       // 将分数坐标转换为笛卡尔坐标
-      const cartesianAtoms = cellData.atoms.map(atom => ({
+      const cartesianAtoms = (cellData.atoms || []).map(atom => ({
         ...atom,
         position: fractionalToCartesian(
           atom.position as [number, number, number],
@@ -173,7 +179,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     sceneRef.current = scene;
 
     // 计算结构边界以调整相机
-    const bounds = calculateBounds(displayStructure.atoms);
+    const bounds = calculateBounds(Array.isArray(displayStructure?.atoms) ? displayStructure.atoms : []);
     const structureSize = Math.max(bounds.size, 3); // 最小视野为3单位
     
     // 正交相机 - 根据容器大小和结构大小智能调整视野
@@ -311,13 +317,14 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
   // 计算结构边界
   const calculateBounds = (atoms: typeof structure.atoms) => {
-    if (atoms.length === 0) return { min: new THREE.Vector3(), max: new THREE.Vector3(), center: new THREE.Vector3(), size: 0 };
+    const list = Array.isArray(atoms) ? atoms : []
+    if (list.length === 0) return { min: new THREE.Vector3(), max: new THREE.Vector3(), center: new THREE.Vector3(), size: 0 };
     
-    let minX = atoms[0].position[0], maxX = atoms[0].position[0];
-    let minY = atoms[0].position[1], maxY = atoms[0].position[1];
-    let minZ = atoms[0].position[2], maxZ = atoms[0].position[2];
+    let minX = list[0].position[0], maxX = list[0].position[0];
+    let minY = list[0].position[1], maxY = list[0].position[1];
+    let minZ = list[0].position[2], maxZ = list[0].position[2];
     
-    atoms.forEach(atom => {
+    list.forEach(atom => {
       minX = Math.min(minX, atom.position[0]);
       maxX = Math.max(maxX, atom.position[0]);
       minY = Math.min(minY, atom.position[1]);
@@ -336,16 +343,17 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
   // 绘制原子 (原子位置已经是笛卡尔坐标)
   const drawAtom = (atoms: typeof structure.atoms) => {
+    const list = Array.isArray(atoms) ? atoms : []
     const atomGroup = new THREE.Group();
     atomGroup.name = 'atoms';
     
     // 计算结构边界
-    const bounds = calculateBounds(atoms);
+    const bounds = calculateBounds(list);
     
     // 根据结构大小调整原子半径，确保足够可见
     const baseRadius = Math.max(0.3, Math.min(1.2, bounds.size * 0.08));
 
-    atoms.forEach((atom, index) => {
+    list.forEach((atom, index) => {
       // 原子位置已经是笛卡尔坐标,直接使用
       const [x, y, z] = atom.position;
       
@@ -382,17 +390,18 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
   // 绘制化学键 (原子位置已经是笛卡尔坐标)
   const drawBand = (atoms: typeof structure.atoms) => {
+    const list = Array.isArray(atoms) ? atoms : []
     const bandGroup = new THREE.Group();
     bandGroup.name = 'bands';
 
     // 简单的键检测: 距离小于某个阈值的原子之间绘制键
     const bondThreshold = 3.0; // Å
 
-    for (let i = 0; i < atoms.length; i++) {
-      for (let j = i + 1; j < atoms.length; j++) {
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
         // 原子位置已经是笛卡尔坐标,直接使用
-        const point1 = new THREE.Vector3(...atoms[i].position);
-        const point2 = new THREE.Vector3(...atoms[j].position);
+        const point1 = new THREE.Vector3(...list[i].position);
+        const point2 = new THREE.Vector3(...list[j].position);
         const distance = point1.distanceTo(point2);
 
         if (distance < bondThreshold) {
@@ -400,8 +409,8 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
           const midpoint = new THREE.Vector3().addVectors(point1, point2).multiplyScalar(0.5);
 
           // 创建两个半圆柱 (不同颜色)
-          const color1 = atomColor[atoms[i].element.toLowerCase()] || atomColor.default;
-          const color2 = atomColor[atoms[j].element.toLowerCase()] || atomColor.default;
+          const color1 = atomColor[list[i].element.toLowerCase()] || atomColor.default;
+          const color2 = atomColor[list[j].element.toLowerCase()] || atomColor.default;
 
           // 第一个半圆柱 (原子1到中点)
           const cylinder1 = createCylinder(point1, midpoint, color1);
@@ -460,7 +469,12 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     latticeGroup.name = 'lattice';
 
     // 使用 displayStructure 的晶格参数 (已经根据 cellType 转换过)
-    const { a, b, c, alpha, beta, gamma } = displayStructure.latticeParameters;
+    const lpAny = (displayStructure as any)?.latticeParameters;
+    const hasLP = lpAny && typeof lpAny.a === 'number' && typeof lpAny.b === 'number' && typeof lpAny.c === 'number' && typeof lpAny.alpha === 'number' && typeof lpAny.beta === 'number' && typeof lpAny.gamma === 'number';
+    if (!hasLP) {
+      return latticeGroup;
+    }
+    const { a, b, c, alpha, beta, gamma } = lpAny as { a: number; b: number; c: number; alpha: number; beta: number; gamma: number };
     const alphaRad = (alpha * Math.PI) / 180;
     const betaRad = (beta * Math.PI) / 180;
     const gammaRad = (gamma * Math.PI) / 180;

@@ -11,6 +11,8 @@ Content Fetcher Module (内容获取模块)
 import asyncio
 import aiohttp
 import requests
+import zipfile
+from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 import structlog
@@ -25,13 +27,17 @@ MAX_RETRIES = 2  # 最大重试次数
 RETRY_DELAY = 1  # 重试延迟（秒）
 MAX_CONTENT_SIZE = 10 * 1024 * 1024  # 最大内容大小（10MB）
 
-# Try to import PDF reader
+# Try to import PDF reader (prefer pypdf)
 try:
-    from PyPDF2 import PdfReader
+    from pypdf import PdfReader  # type: ignore
     PDF_AVAILABLE = True
-except ImportError:
-    PDF_AVAILABLE = False
-    logger.warning("PyPDF2 not available, PDF extraction will be disabled")
+except Exception:
+    try:
+        from PyPDF2 import PdfReader  # type: ignore
+        PDF_AVAILABLE = True
+    except Exception:
+        PDF_AVAILABLE = False
+        logger.warning("PyPDF2/pypdf not available, PDF extraction will be disabled")
 
 # Try to import HTML parser
 try:
@@ -541,27 +547,19 @@ async def get_paper_content_by_source_async(
 ) -> Dict[str, Any]:
     """
     异步获取论文内容（基于来源类型）。
-
-    Args:
-        paper: 论文字典（包含url、pdf_url、abstract等）
-        source: 来源类型（arxiv、tavily等）
-        timeout: 超时时间（秒）
-
-    Returns:
-        包含status、content和metadata的字典
     """
-    # 自动检测来源
     if not source:
         source = paper.get('source', 'unknown')
 
-    # 对于ArXiv，使用专门的函数
     if source == 'arxiv':
         from ..search.arxiv import get_arxiv_paper_content_async
         arxiv_id = paper.get('id') or paper.get('paper_id')
         if arxiv_id:
             return await get_arxiv_paper_content_async(arxiv_id, timeout=timeout)
 
-    # 对于其他来源，尝试URL提取
+    if source == 'upload':
+        return await _fetch_uploaded_file_async(paper)
+
     url = paper.get('pdf_url') or paper.get('url')
     abstract = paper.get('abstract') or paper.get('summary', '')
     paper_id = paper.get('paper_id', 'unknown')
@@ -580,26 +578,19 @@ def get_paper_content_by_source(
 ) -> Dict[str, Any]:
     """
     获取论文内容（基于来源类型）。
-
-    Args:
-        paper: 论文字典（包含url、pdf_url、abstract等）
-        source: 来源类型（arxiv、tavily等）
-
-    Returns:
-        包含status、content和metadata的字典
     """
-    # 自动检测来源
     if not source:
         source = paper.get('source', 'unknown')
 
-    # 对于ArXiv，使用专门的函数
     if source == 'arxiv':
         from ..search.arxiv import get_arxiv_paper_content
         arxiv_id = paper.get('id') or paper.get('paper_id')
         if arxiv_id:
             return get_arxiv_paper_content(arxiv_id)
 
-    # 对于其他来源，尝试URL提取
+    if source == 'upload':
+        return _fetch_uploaded_file(paper)
+
     url = paper.get('pdf_url') or paper.get('url')
     abstract = paper.get('abstract') or paper.get('summary', '')
     paper_id = paper.get('paper_id', 'unknown')
@@ -610,3 +601,131 @@ def get_paper_content_by_source(
         fallback_abstract=abstract
     )
 
+
+async def _fetch_uploaded_file_async(paper: Dict[str, Any]) -> Dict[str, Any]:
+    return await asyncio.to_thread(_fetch_uploaded_file, paper)
+
+
+def _fetch_uploaded_file(paper: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = paper.get('upload_metadata', {})
+    local_path = metadata.get('saved_path') or paper.get('local_file')
+
+    if not local_path:
+        return {
+            'status': 'error',
+            'content': paper.get('abstract', ''),
+            'metadata': {
+                'fallback': True,
+                'fallback_reason': 'No local file recorded for uploaded document'
+            }
+        }
+
+    path = Path(local_path)
+    if not path.is_absolute():
+        path = Path('.').resolve() / path
+    path = path.resolve()
+
+    if not path.exists():
+        logger.warning('Uploaded file not found', expected_path=str(path))
+        return {
+            'status': 'error',
+            'content': paper.get('abstract', ''),
+            'metadata': {
+                'fallback': True,
+                'fallback_reason': f'Uploaded file not found: {path}'
+            }
+        }
+
+    try:
+        text = _extract_uploaded_text(path)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error('Failed to extract uploaded file content', path=str(path), error=str(exc))
+        text = ''
+
+    if not text.strip():
+        text = paper.get('abstract', '') or '（上传文档已保存，暂未提取文本内容。）'
+
+    return {
+        'status': 'success',
+        'content': text,
+        'metadata': {
+            'source_type': 'uploaded_file',
+            'local_path': str(path),
+            'extraction_timestamp': datetime.now().isoformat()
+        }
+    }
+
+
+def _extract_uploaded_text(path: Path) -> str:
+    suffix = path.suffix.lower()
+
+    if suffix == '.pdf':
+        if not PDF_AVAILABLE:
+            return '（PDF 内容已保存，本环境未安装 PdfReader 提取文本。）'
+        # First attempt via PdfReader
+        try:
+            reader = PdfReader(path)
+            try:
+                if getattr(reader, 'is_encrypted', False):
+                    reader.decrypt('')
+            except Exception:
+                pass
+            texts = []
+            for page in getattr(reader, 'pages', []):
+                try:
+                    page_text = page.extract_text() or ''
+                except Exception:
+                    page_text = ''
+                if page_text:
+                    texts.append(page_text)
+            joined = '\n'.join(texts).strip()
+            bad_char_ratio = (joined.count('\uFFFD') / max(len(joined), 1)) if joined else 0.0
+            if joined and len(joined) >= 50 and bad_char_ratio < 0.05:
+                return joined
+            # Fallback to pdfminer if result is empty/garbled
+            try:
+                from pdfminer.high_level import extract_text as pdfminer_extract_text  # type: ignore
+                text2 = (pdfminer_extract_text(str(path)) or '').strip()
+                return text2 or '（PDF 内容已保存，但未提取到文本。）'
+            except Exception as exc2:
+                logger.warning('pdfminer.six not available or failed', error=str(exc2))
+                return joined or '（PDF 内容已保存，但未提取到文本。）'
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning('Failed to extract PDF text via PdfReader', path=str(path), error=str(exc))
+            # Try pdfminer as a last resort
+            try:
+                from pdfminer.high_level import extract_text as pdfminer_extract_text  # type: ignore
+                text3 = (pdfminer_extract_text(str(path)) or '').strip()
+                return text3 or '（PDF 内容已保存，但未提取到文本。）'
+            except Exception as exc3:
+                logger.warning('pdfminer.six not available or failed', error=str(exc3))
+                return '（PDF 内容已保存，文本提取失败。）'
+
+    if suffix == '.docx':
+        try:
+            with zipfile.ZipFile(path) as zf:
+                with zf.open('word/document.xml') as doc_xml:
+                    xml_content = doc_xml.read().decode('utf-8', errors='ignore')
+        except Exception as exc:
+            logger.warning('Failed to open DOCX', path=str(path), error=str(exc))
+            return '（DOCX 内容已保存，暂未提取文本。）'
+
+        try:
+            from xml.etree import ElementTree as ET  # noqa: PLC0415
+
+            tree = ET.fromstring(xml_content)
+            namespace = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+            paragraphs = [elem.text or '' for elem in tree.iter(f'{namespace}t')]
+            text = '\n'.join(paragraphs).strip()
+            return text or '（DOCX 内容已保存，但未提取到文本。）'
+        except Exception as exc:  # pragma: no cover
+            logger.warning('Failed to parse DOCX XML', path=str(path), error=str(exc))
+            return '（DOCX 内容已保存，文本提取失败。）'
+
+    if suffix in {'.txt', '.md', '.csv', '.json'}:
+        return path.read_text(encoding='utf-8', errors='ignore')
+
+    try:
+        return path.read_text(encoding='utf-8', errors='ignore')
+    except Exception:
+        return path.read_text(encoding='latin-1', errors='ignore')

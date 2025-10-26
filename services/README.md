@@ -4,6 +4,11 @@
 
 ## 📖 概述
 
+> **2025-10 更新**  
+> - 前端对外统一端口为 `50001`（通过 Nginx/start 脚本转发到内部 `VITE_FRONTEND_PORT`）。  
+> - HTTP API 固定监听 `127.0.0.1:50002`，WebSocket 服务监听 `127.0.0.1:50003`。  
+> - 所有文件下载链接均返回 `/api/download/...` 相对路径，避免在代理环境下出现错误的 `file://` 或缺失域名。  
+
 Services层是ResearchMind系统的核心后端服务层，负责：
 - 管理WebSocket和HTTP通信
 - 协调Google ADK Agents
@@ -16,7 +21,7 @@ Services层是ResearchMind系统的核心后端服务层，负责：
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Frontend (UI)                          │
-│                   Port: 5173                                │
+│                   Port: 50001 (via Nginx / start scripts)                                │
 └─────────────────────────────────────────────────────────────┘
                             │
                 ┌───────────┴───────────┐
@@ -24,7 +29,7 @@ Services层是ResearchMind系统的核心后端服务层，负责：
                 ▼ WebSocket             ▼ HTTP
 ┌──────────────────────────┐  ┌──────────────────────────┐
 │  WebSocket Server        │  │    HTTP Server           │
-│  Port: 8001              │  │    Port: 8000            │
+│  Port: 50003 (internal)              │  │    Port: 50002 (internal)            │
 │                          │  │                          │
 │  - Client管理            │  │  - REST API              │
 │  - 消息路由              │  │  - 文件上传/下载          │
@@ -94,7 +99,7 @@ class WebSocketServer:
     async def broadcast(message: dict)
 ```
 
-**端口**: 8001
+**端口**: 50003 (内部监听)
 
 **消息格式**:
 ```json
@@ -119,9 +124,10 @@ class WebSocketServer:
 ```
 GET /api/download/{file_path}
 ```
-- 支持CSV、MD、CIF文件下载
+- 支持 CSV / MD / CIF 下载
 - 自动路径规范化
-- 安全性检查（仅允许papers目录）
+- 安全性检查（仅允许 papers 目录）
+- 返回 `/api/download/...` 相对路径，便于前端或 Nginx 自动补全域名
 
 #### 文件上传
 ```
@@ -143,7 +149,7 @@ GET /api/images/{file_path}
 GET /health
 ```
 
-**端口**: 8000
+**端口**: 50002 (内部监听)
 
 ### 3. Agent Coordinator (`agent_coordinator.py`)
 
@@ -204,7 +210,7 @@ class DataProcessor:
   "files": [
     {
       "type": "csv",
-      "url": "http://localhost:8000/api/download/papers/.../file.csv",
+      "url": "http://localhost:50002/api/download/papers/.../file.csv",
       "filename": "file.csv"
     }
   ]
@@ -314,7 +320,7 @@ Agent Coordinator接收文件路径
 MODEL_USE=gemini/gemini-2.5-flash
 PAPER_SEARCH_MCP_URL=http://localhost:50001/sse
 DATABASE_MCP_URL=http://localhost:5002/sse
-SIMULATION_MCP_URL=http://localhost:5003/sse
+SIMULATION_MCP_URL=http://localhost:50005/sse
 ```
 
 ### 启动命令
@@ -326,7 +332,7 @@ uv run python main.py
 
 这将同时启动：
 - WebSocket Server (Port 8002)
-- HTTP Server (Port 8000)
+- HTTP Server (Port 50002)
 - Agent Coordinator
 
 ### 日志配置
@@ -344,7 +350,7 @@ import websockets
 import json
 
 async def test_websocket():
-    uri = "ws://localhost:8001/ws/test_client"
+    uri = "ws://localhost:50003/ws/test_client"
     async with websockets.connect(uri) as websocket:
         message = {
             "type": "message",
@@ -362,13 +368,13 @@ asyncio.run(test_websocket())
 
 ```bash
 # 健康检查
-curl http://localhost:8000/health
+curl http://localhost:50002/health
 
 # 文件下载
-curl -O http://localhost:8000/api/download/papers/test/file.csv
+curl -O http://localhost:50002/api/download/papers/test/file.csv
 
 # 文件上传
-curl -X POST -F "file=@structure.cif" http://localhost:8000/api/upload
+curl -X POST -F "file=@structure.cif" http://localhost:50002/api/upload
 ```
 
 ## 📊 性能指标

@@ -15,6 +15,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import toast from 'react-hot-toast'
 import { resolveFileUrl } from '../../utils/apiClient'
+import { copyToClipboard } from '../../utils'
 
 interface MarkdownViewerProps {
   url: string
@@ -147,6 +148,21 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
     }
   }
 
+  const handleCopyLink = async () => {
+    try {
+      const resolvedUrl = resolveFileUrl(url)
+      const success = await copyToClipboard(resolvedUrl)
+      if (success) {
+        toast.success('链接已复制到剪贴板')
+      } else {
+        toast.error('复制失败，请手动复制链接')
+      }
+    } catch (error) {
+      console.error('复制链接失败:', error)
+      toast.error('复制失败')
+    }
+  }
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isFullscreen && e.target === e.currentTarget) {
       setIsDragging(true)
@@ -245,6 +261,13 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
                 >
                   <Download className="w-4 h-4" />
                   <span>下载</span>
+                </button>
+                <button
+                  onClick={handleCopyLink}
+                  className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                  title="复制链接"
+                >
+                  <span>复制</span>
                 </button>
                 <button
                   onClick={toggleFullscreen}
@@ -367,13 +390,20 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
                   <span>目录</span>
                 </button>
               )}
-              <button
-                onClick={handleDownload}
-                className="flex items-center space-x-1 px-3 py-1 text-sm text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                <span>下载</span>
-              </button>
+                <button
+                  onClick={handleDownload}
+                  className="flex items-center space-x-1 px-3 py-1 text-sm text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>下载</span>
+                </button>
+                <button
+                  onClick={handleCopyLink}
+                  className="flex items-center space-x-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                  title="复制链接"
+                >
+                  <span>复制</span>
+                </button>
               <button
                 onClick={toggleFullscreen}
                 className="p-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"

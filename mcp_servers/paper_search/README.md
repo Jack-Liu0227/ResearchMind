@@ -2,7 +2,12 @@
 
 ## 📖 简介
 
-Paper Search MCP Server 是一个基于 FastMCP 构建的学术文献检索和分析服务器。它提供 17 个核心工具，支持多源检索（ArXiv + Tavily）、智能分析、报告生成和向量化存储。
+> **2025-10 更新提示**
+> - 默认 SSE 端口为 50004（`PAPER_SEARCH_MCP_PORT`）。
+> - `search_papers_all_sources` 默认并行查询 ArXiv 与 Tavily，`max_results_per_source` 控制每源条数。
+> - 文件元数据中的 CSV/MD 下载链接改为 `/api/download/...` 相对路径，前端会补全域名并通过 Nginx 代理。
+
+Paper Search MCP Server 是一个基于 FastMCP 构建的学术文献检索和分析服务器。它提供 18 个核心工具（并行检索 + 相对路径下载 + 上传文档转换），支持多源检索（ArXiv + Tavily）、智能分析、报告生成和向量化存储。
 
 ## ✨ 核心特性
 
@@ -31,8 +36,8 @@ Paper Search MCP Server 是一个基于 FastMCP 构建的学术文献检索和�
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │              Paper Search MCP Server                        │
-│              (FastMCP Server - Port 50001)                  │
-│              SSE Endpoint: http://localhost:50001/sse       │
+│              (FastMCP Server - Port 50004)                  │
+│              SSE Endpoint: http://localhost:50004/sse       │
 └─────────────────────────────────────────────────────────────┘
                             │
         ┌───────────────────┼───────────────────┐
@@ -45,7 +50,7 @@ Paper Search MCP Server 是一个基于 FastMCP 构建的学术文献检索和�
 └──────────────┘    └──────────────┘    └──────────────┘
 ```
 
-## 🔧 可用工具（17个）
+## 🔧 可用工具（18个）
 
 ### 1. 规划工具（1个）
 
@@ -70,7 +75,35 @@ Paper Search MCP Server 是一个基于 FastMCP 构建的学术文献检索和�
 
 ---
 
-### 2. 检索工具（8个）
+### 2. 检索工具（9个）
+
+#### `ingest_uploaded_papers`（上传文档 → 文献条目）
+**功能**: 将用户上传的文本 / PDF / DOCX 转换为 `source="upload"` 的论文条目，自动写入会话目录并生成 CSV。
+
+**参数**:
+- `files` (List[Dict]): 每个文件需要 `filename`、`content`（文本或 base64）、`encoding`（默认 utf-8）
+- `session_id` (str, 可选): 指定会话 ID；未提供时自动生成
+- `topic` (str, 可选): 会话主题（用于文件夹命名）
+
+**返回**:
+```json
+{
+  "status": "success",
+  "session_id": "upload_20251024_xxxxxxxx",
+  "total_results": 2,
+  "csv_download_url": "/api/download/...",
+  "papers": [
+    {
+      "paper_id": "upload_ab12cd34",
+      "title": "用户上传的报告",
+      "source": "upload",
+      "preview": "..."
+    }
+  ]
+}
+```
+
+---
 
 #### `search_papers_all_sources` ⭐ 推荐
 **功能**: 综合搜索所有源（ArXiv + Tavily Academic + Tavily Web）
@@ -343,12 +376,12 @@ TAVILY_API_KEY=your_tavily_api_key_here
 
 ### 启动 Server
 ```bash
-uv run python mcp_servers/paper_search/server.py --port 50001
+uv run python mcp_servers/paper_search/server.py --port 50004
 ```
 
 Server 将在以下端点启动：
-- **SSE Endpoint**: `http://localhost:50001/sse`
-- **Health Check**: `http://localhost:50001/health`
+- **SSE Endpoint**: `http://localhost:50004/sse`
+- **Health Check**: `http://localhost:50004/health`
 
 ## 📁 项目结构
 

@@ -13,7 +13,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   console.log('Layout component rendering...')
 
   const { sidebarOpen, setSidebarOpen } = useAppStore()
-  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
 
   // 拖拽调整大小
   const [sidebarWidth, setSidebarWidth] = useState(320) // 左侧边栏宽度

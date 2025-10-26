@@ -46,7 +46,8 @@ class AgentCoordinator:
         content: str,
         agent_id: str,
         session_id: Optional[str] = None,
-        retry_count: int = 0
+        retry_count: int = 0,
+        attachments: Optional[List[Dict[str, Any]]] = None
     ) -> None:
         """
         Process chat message with specified agent
@@ -104,10 +105,16 @@ class AgentCoordinator:
             logger.info(f"🤖 Running agent: {agent_id} (message #{self.session_message_counts[session_key]})")
 
             # 创建用户消息 - 需要使用 types.Content 包装 types.Part
-            user_message = types.Content(
-                role='user',
-                parts=[types.Part(text=content)]
-            )
+            parts = [types.Part(text=content)]
+            # Attach optional file/text parts (e.g., CIF content) so agents can parse them
+            if attachments:
+                for att in attachments:
+                    fname = att.get('filename') or 'attachment.txt'
+                    text = att.get('content') or ''
+                    # Prefix to help agent tools detect attachment context
+                    att_text = f"[附件: {fname}]\n{text}"
+                    parts.append(types.Part(text=att_text))
+            user_message = types.Content(role='user', parts=parts)
 
             # Google ADK API: run_async() 需要 user_id, session_id 和 new_message 参数
             event_count = 0
