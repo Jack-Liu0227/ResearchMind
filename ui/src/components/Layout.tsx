@@ -17,7 +17,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   // 拖拽调整大小
   const [sidebarWidth, setSidebarWidth] = useState(320) // 左侧边栏宽度
-  const [rightPanelWidth, setRightPanelWidth] = useState(384) // 右侧面板宽度
+  const [rightPanelWidth, setRightPanelWidth] = useState(480) // 右侧面板宽度（增加到 480px 以完整显示所有按钮）
   const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const [isResizingRightPanel, setIsResizingRightPanel] = useState(false)
 

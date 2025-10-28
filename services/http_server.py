@@ -608,54 +608,17 @@ class HTTPServer:
                         detail="Invalid file encoding. File must be UTF-8 encoded"
                     )
 
-                # Parse CIF to extract formula using PyMatGen and convert to primitive/conventional cells
-                formula = "Unknown"
-                primitive_cif = cif_content
-                conventional_cif = cif_content
-                try:
-                    if PYMATGEN_AVAILABLE:
-                        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-                        parser = CifParser.from_str(cif_content)
-                        pmg_structure = parser.get_structures()[0]
-                        formula = pmg_structure.composition.reduced_formula
-                        
-                        # Convert to primitive cell
-                        sga = SpacegroupAnalyzer(pmg_structure)
-                        primitive_structure = sga.get_primitive_standard_structure()
-                        conventional_structure = sga.get_conventional_standard_structure()
-                        
-                        # Generate CIF content for primitive and conventional cells
-                        from pymatgen.io.cif import CifWriter
-                        primitive_cif = str(CifWriter(primitive_structure))
-                        conventional_cif = str(CifWriter(conventional_structure))
-                        
-                        logger.info(f"✅ Successfully converted CIF to primitive and conventional cells")
-                        logger.info(f"   Primitive CIF length: {len(primitive_cif)}")
-                        logger.info(f"   Conventional CIF length: {len(conventional_cif)}")
-                    else:
-                        logger.warning("⚠️ PyMatGen not available, using original CIF content")
-                except Exception as e:
-                    logger.warning(f"Failed to process CIF with PyMatGen: {e}")
-
-                # Convert CIF to structure
+                # Convert CIF to structure (StructureConverter will handle PyMatGen analysis)
+                # This avoids duplicate processing
+                logger.info(f"🔄 Converting CIF to structure format...")
                 structure = StructureConverter.convert_cif_to_structure(
                     cif_content=cif_content,
                     name=file.filename.replace('.cif', ''),
-                    composition=formula,
+                    composition="Unknown",  # Will be extracted by StructureConverter
                     source="Upload"
                 )
-                
-                # Add primitive and conventional cell data if pymatgen is available
-                if PYMATGEN_AVAILABLE and structure:
-                    structure['cellTypes'] = {
-                        'primitive': {
-                            'cifContent': primitive_cif
-                        },
-                        'conventional': {
-                            'cifContent': conventional_cif
-                        }
-                    }
-                    structure['currentCellType'] = 'primitive'  # Default to primitive
+
+                logger.info(f"✅ Structure conversion completed")
 
                 if not structure:
                     logger.error(f"❌ Failed to convert CIF to structure")
@@ -836,21 +799,12 @@ class HTTPServer:
                         cif_content = content.decode('utf-8')
                         logger.info(f"✅ CIF content decoded: {len(cif_content)} characters")
 
-                        # Parse CIF to extract formula
-                        formula = "Unknown"
-                        try:
-                            if PYMATGEN_AVAILABLE:
-                                parser = CifParser.from_str(cif_content)
-                                pmg_structure = parser.get_structures()[0]
-                                formula = pmg_structure.composition.reduced_formula
-                        except Exception as e:
-                            logger.warning(f"Failed to extract formula from {file.filename}: {e}")
-
-                        # Convert CIF to structure
+                        # Convert CIF to structure (StructureConverter will extract formula)
+                        logger.info(f"🔄 Converting {file.filename} to structure format...")
                         structure = StructureConverter.convert_cif_to_structure(
                             cif_content=cif_content,
                             name=file.filename.replace('.cif', ''),
-                            composition=formula,
+                            composition="Unknown",  # Will be extracted by StructureConverter
                             source="Upload"
                         )
 

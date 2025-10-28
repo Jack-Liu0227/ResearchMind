@@ -29,7 +29,7 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
   url,
   filename,
   maxHeight = '400px',
-  defaultExpanded = true,
+  defaultExpanded = false,  // 默认折叠
   inlineContent
 }) => {
   const [csvData, setCsvData] = useState<CsvData | null>(null)
@@ -40,6 +40,7 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
   const [isDragging, setIsDragging] = useState(false)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set())
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -242,6 +243,51 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
     }
   }
 
+  const toggleCellExpansion = (rowIndex: number, cellIndex: number) => {
+    const key = `${rowIndex}-${cellIndex}`
+    const newExpanded = new Set(expandedCells)
+    if (newExpanded.has(key)) {
+      newExpanded.delete(key)
+    } else {
+      newExpanded.add(key)
+    }
+    setExpandedCells(newExpanded)
+  }
+
+  const isCellExpanded = (rowIndex: number, cellIndex: number) => {
+    return expandedCells.has(`${rowIndex}-${cellIndex}`)
+  }
+
+  const shouldTruncate = (text: string, maxLength: number = 100) => {
+    return text && text.length > maxLength
+  }
+
+  const renderCellContent = (cell: string, rowIndex: number, cellIndex: number) => {
+    const isExpanded = isCellExpanded(rowIndex, cellIndex)
+    const needsTruncate = shouldTruncate(cell)
+
+    if (!needsTruncate) {
+      return <span>{cell}</span>
+    }
+
+    return (
+      <div className="group">
+        <div className={isExpanded ? '' : 'line-clamp-2'}>
+          {cell}
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            toggleCellExpansion(rowIndex, cellIndex)
+          }}
+          className="mt-1 text-xs text-blue-600 hover:text-blue-800 hover:underline focus:outline-none"
+        >
+          {isExpanded ? '收起' : '展开全部'}
+        </button>
+      </div>
+    )
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-8 bg-gray-50 rounded-lg border border-gray-200">
@@ -354,10 +400,10 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
                       {row.map((cell, cellIndex) => (
                         <td
                           key={cellIndex}
-                          className="px-4 py-2 text-gray-700 border-b border-gray-100"
+                          className="px-4 py-2 text-gray-700 border-b border-gray-100 align-top"
                         >
-                          <div className="max-w-md overflow-hidden text-ellipsis">
-                            {cell}
+                          <div className="max-w-2xl">
+                            {renderCellContent(cell, rowIndex, cellIndex)}
                           </div>
                         </td>
                       ))}
@@ -388,31 +434,29 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
                 ({csvData.rows.length} 行)
               </span>
             </button>
-            {isExpanded && (
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={handleDownload}
-                  className="flex items-center space-x-1 px-3 py-1 text-sm text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>下载</span>
-                </button>
-                <button
-                  onClick={handleCopyLink}
-                  className="flex items-center space-x-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                  title="复制链接"
-                >
-                  <span>复制</span>
-                </button>
-                <button
-                  onClick={toggleFullscreen}
-                  className="p-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                  title="全屏查看"
-                >
-                  <Maximize2 className="w-4 h-4" />
-                </button>
-              </div>
-            )}
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleDownload}
+                className="flex items-center space-x-1 px-3 py-1 text-sm text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span>下载</span>
+              </button>
+              <button
+                onClick={handleCopyLink}
+                className="flex items-center space-x-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                title="复制链接"
+              >
+                <span>复制</span>
+              </button>
+              <button
+                onClick={toggleFullscreen}
+                className="p-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                title="全屏查看"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Table */}
@@ -443,10 +487,10 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
                     {row.map((cell, cellIndex) => (
                       <td
                         key={cellIndex}
-                        className="px-4 py-2 text-gray-700 border-b border-gray-100"
+                        className="px-4 py-2 text-gray-700 border-b border-gray-100 align-top"
                       >
-                        <div className="max-w-md overflow-hidden text-ellipsis">
-                          {cell}
+                        <div className="max-w-md">
+                          {renderCellContent(cell, rowIndex, cellIndex)}
                         </div>
                       </td>
                     ))}

@@ -530,33 +530,33 @@ const FilesTab: React.FC<FilesTabProps> = ({ files }) => {
                 </div>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => handleOpen(file, key)}
-                className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40"
-                disabled={!url}
-              >
-                <ExternalLink className="w-4 h-4 mr-1" />
-                View
-              </button>
-              <button
-                onClick={() => handleCopyLink(file)}
-                className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800"
-              >
-                Copy
-              </button>
+            <div className="flex items-center space-x-2 flex-shrink-0">
               <button
                 onClick={() => handleDownload(file)}
-                className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-500 disabled:opacity-40"
+                className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-500 disabled:opacity-40 whitespace-nowrap"
                 disabled={!url}
               >
                 <Download className="w-4 h-4 mr-1" />
                 Download
               </button>
+              <button
+                onClick={() => handleCopyLink(file)}
+                className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 whitespace-nowrap"
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => handleOpen(file, key)}
+                className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 whitespace-nowrap"
+                disabled={!url}
+              >
+                <ExternalLink className="w-4 h-4 mr-1" />
+                View
+              </button>
             </div>
           </div>
           {previewKey === key && url && (
-            <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden">
+            <div className="mt-2">
               {file.type.toLowerCase().startsWith('csv') ? (
                 <CsvViewer url={url} filename={displayName} defaultExpanded={true} />
               ) : file.type.toLowerCase().startsWith('md') ? (

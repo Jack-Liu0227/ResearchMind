@@ -377,6 +377,27 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
             </button>
 
             <div className="flex items-center space-x-2">
+              <button
+                onClick={handleDownload}
+                className="flex items-center space-x-1 px-3 py-1 text-sm text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span>下载</span>
+              </button>
+              <button
+                onClick={handleCopyLink}
+                className="flex items-center space-x-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                title="复制链接"
+              >
+                <span>复制</span>
+              </button>
+              <button
+                onClick={toggleFullscreen}
+                className="p-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                title="全屏查看"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
               {toc.length > 0 && expanded && (
                 <button
                   onClick={() => setShowToc(!showToc)}
@@ -390,27 +411,6 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
                   <span>目录</span>
                 </button>
               )}
-                <button
-                  onClick={handleDownload}
-                  className="flex items-center space-x-1 px-3 py-1 text-sm text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>下载</span>
-                </button>
-                <button
-                  onClick={handleCopyLink}
-                  className="flex items-center space-x-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                  title="复制链接"
-                >
-                  <span>复制</span>
-                </button>
-              <button
-                onClick={toggleFullscreen}
-                className="p-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                title="全屏查看"
-              >
-                <Maximize2 className="w-4 h-4" />
-              </button>
             </div>
           </div>
 

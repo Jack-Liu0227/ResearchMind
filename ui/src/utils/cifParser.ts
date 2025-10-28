@@ -281,7 +281,22 @@ export function isValidCIF(content: string): boolean {
  * 这里我们根据晶格参数判断晶系，然后生成对应的惯胞
  */
 export function convertToConventionalCell(structure: CrystalStructure): CrystalStructure {
+  // 防御性检查：如果没有 latticeParameters，直接返回原结构
+  if (!structure.latticeParameters) {
+    console.warn('⚠️ convertToConventionalCell: structure 缺少 latticeParameters，返回原结构')
+    return structure
+  }
+
   const { latticeParameters, atoms } = structure
+
+  // 防御性检查：确保 latticeParameters 包含所有必需的字段
+  if (!latticeParameters.a || !latticeParameters.b || !latticeParameters.c ||
+      latticeParameters.alpha === undefined || latticeParameters.beta === undefined ||
+      latticeParameters.gamma === undefined) {
+    console.warn('⚠️ convertToConventionalCell: latticeParameters 缺少必需字段，返回原结构')
+    return structure
+  }
+
   const { a, b, c, alpha, beta, gamma } = latticeParameters
 
   // 判断晶系

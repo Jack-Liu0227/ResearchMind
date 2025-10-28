@@ -111,8 +111,15 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
         } else {
           // 回退到本地转换
           console.log('🔧 使用本地转换生成惯胞');
-          const converted = localConvertToConventionalCell(structure);
-          setDisplayStructure(converted);
+
+          // 检查 structure 是否有 latticeParameters
+          if (!structure.latticeParameters) {
+            console.error('❌ structure 缺少 latticeParameters，无法转换为惯胞，使用原始结构');
+            setDisplayStructure(structure);
+          } else {
+            const converted = localConvertToConventionalCell(structure);
+            setDisplayStructure(converted);
+          }
         }
       }
     } else {
@@ -822,23 +829,27 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
               <div>位点数: {displayStructure.properties.numSites}</div>
             )}
 
-            <div className="mt-2 pt-2 border-t border-gray-200 space-y-1">
-              <div className="font-medium">晶格参数:</div>
-              <div>a = {displayStructure.latticeParameters.a.toFixed(3)} Å</div>
-              <div>b = {displayStructure.latticeParameters.b.toFixed(3)} Å</div>
-              <div>c = {displayStructure.latticeParameters.c.toFixed(3)} Å</div>
-              <div>α = {displayStructure.latticeParameters.alpha.toFixed(2)}°</div>
-              <div>β = {displayStructure.latticeParameters.beta.toFixed(2)}°</div>
-              <div>γ = {displayStructure.latticeParameters.gamma.toFixed(2)}°</div>
+            {displayStructure.latticeParameters && (
+              <div className="mt-2 pt-2 border-t border-gray-200 space-y-1">
+                <div className="font-medium">晶格参数:</div>
+                <div>a = {displayStructure.latticeParameters.a.toFixed(3)} Å</div>
+                <div>b = {displayStructure.latticeParameters.b.toFixed(3)} Å</div>
+                <div>c = {displayStructure.latticeParameters.c.toFixed(3)} Å</div>
+                <div>α = {displayStructure.latticeParameters.alpha.toFixed(2)}°</div>
+                <div>β = {displayStructure.latticeParameters.beta.toFixed(2)}°</div>
+                <div>γ = {displayStructure.latticeParameters.gamma.toFixed(2)}°</div>
 
-              {displayStructure.properties?.volume && (
-                <div className="mt-1">体积: {displayStructure.properties.volume.toFixed(2)} Å³</div>
-              )}
-              {displayStructure.properties?.density && (
-                <div>密度: {displayStructure.properties.density.toFixed(2)} g/cm³</div>
-              )}
+                {displayStructure.properties?.volume && (
+                  <div className="mt-1">体积: {displayStructure.properties.volume.toFixed(2)} Å³</div>
+                )}
+                {displayStructure.properties?.density && (
+                  <div>密度: {displayStructure.properties.density.toFixed(2)} g/cm³</div>
+                )}
+              </div>
+            )}
 
-              <div className="mt-2 font-medium">原子列表:</div>
+            <div className="mt-2 pt-2 border-t border-gray-200">
+              <div className="font-medium">原子列表:</div>
               <div className="max-h-40 overflow-y-auto">
                 {displayStructure.atoms.map((atom, index) => (
                   <div key={index} className="text-xs">

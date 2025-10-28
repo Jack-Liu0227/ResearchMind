@@ -446,18 +446,17 @@ async def calculate_phonon(
         images = []
 
         # 确定保存目录
-        # 确保 API_BASE_URL 没有尾部斜杠
-        base_url = API_BASE_URL.rstrip('/')
-
         if SESSION_MANAGER_AVAILABLE and session_id:
             # 使用会话目录
             phonon_dir = SessionManager.get_session_phonon_dir(session_id)
-            url_prefix = f"{base_url}/api/images/{session_id}/phonon_results"
+            # 使用相对路径，前端会自动解析为完整 URL
+            url_prefix = f"/images/{session_id}/phonon_results"
             logger.info(f"📁 Using session phonon directory: {phonon_dir}")
         else:
             # 使用全局目录（向后兼容）
             phonon_dir = Path(__file__).parent / "phonon_results"
-            url_prefix = f"{base_url}/api/images/phonon_results"
+            # 使用相对路径，前端会自动解析为完整 URL
+            url_prefix = f"/images/phonon_results"
             logger.info(f"📁 Using global phonon directory: {phonon_dir}")
 
         phonon_dir.mkdir(parents=True, exist_ok=True)

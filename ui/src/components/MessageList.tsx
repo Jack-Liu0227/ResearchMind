@@ -3,7 +3,7 @@ import { Bot, User, Copy, ThumbsUp, ThumbsDown, RotateCcw, Download } from 'luci
 import { Message } from '../types'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { ensureValidTimestamp, downloadFile } from '../utils'
+import { ensureValidTimestamp, downloadFile, copyToClipboard } from '../utils'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -574,10 +574,14 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
                                   if (image.base64) {
                                     await downloadFile(`data:image/png;base64,${image.base64}`, (image.name || `image_${index + 1}.png`))
                                   } else {
-                                    const response = await fetch(srcUrl)
-                                    if (!response.ok) throw new Error('下载失败')
-                                    const blob = await response.blob()
-                                    await downloadFile(blob, (image.name || `image_${index + 1}.png`), blob.type)
+                                    // 使用 <a> 标签下载，避免 CORS 问题
+                                    const a = document.createElement('a')
+                                    a.href = srcUrl
+                                    a.download = image.name || `image_${index + 1}.png`
+                                    a.target = '_blank'
+                                    document.body.appendChild(a)
+                                    a.click()
+                                    document.body.removeChild(a)
                                   }
                                   toast.success('图片已下载')
                                 } catch (err) {

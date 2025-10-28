@@ -113,20 +113,47 @@ DATABASE_MCP_PORT=50006
 
 ## 🔧 故障排除
 
-### 端口被占用
-```powershell
-# Windows
-.\start_complete.ps1 -Force
+## 🛠️ 常见问题
 
-# Linux/Mac
-./start_complete.sh --force
-```
+### 1. 前端依赖加载错误 (ERR_CONTENT_LENGTH_MISMATCH)
 
-### IP地址配置错误
-```powershell
-# 修复环境配置
-.\fix_env.ps1
-```
+如果在访问前端时遇到 `ERR_CONTENT_LENGTH_MISMATCH` 错误，通常是由于 Nginx 缓冲设置导致的。系统已自动配置了解决方案：
 
-### 服务启动失败
-检查对应的日志文件，查看具体错误信息。
+1. 确保使用了最新版本的 Nginx 配置文件
+2. 重启 Nginx 服务使配置生效：
+   ```bash
+   # Windows
+   nginx -s reload
+   
+   # Linux
+   sudo systemctl reload nginx
+   ```
+
+### 2. 端口冲突
+
+如果遇到端口冲突错误，可以修改 `.env` 文件中的端口配置：
+
+```bash
+# UI 服务监听（start_complete.* 会把 50001 转发到该端口）
+VITE_FRONTEND_HOST=127.0.0.1
+VITE_FRONTEND_PORT=50010
+
+# 前端调用 API/WS 时使用的相对路径 + 对外端口
+VITE_API_URL=/api
+VITE_API_PORT=50001
+VITE_WS_URL=/ws
+VITE_WS_PORT=50001
+
+# 后端实际监听（默认仅限本机）
+RESEARCHMIND_HTTP_HOST=127.0.0.1
+RESEARCHMIND_HTTP_PORT=50002
+RESEARCHMIND_WS_HOST=127.0.0.1
+RESEARCHMIND_WS_PORT=50003
+
+# MCP 服务
+PAPER_SEARCH_MCP_HOST=127.0.0.1
+PAPER_SEARCH_MCP_PORT=50004
+SIMULATION_MCP_HOST=127.0.0.1
+SIMULATION_MCP_PORT=50005
+DATABASE_MCP_HOST=127.0.0.1
+DATABASE_MCP_PORT=50006

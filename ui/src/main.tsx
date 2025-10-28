@@ -19,6 +19,9 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       refetchOnWindowFocus: false,
+      // 内存优化：减少缓存时间和缓存数量
+      gcTime: 5 * 60 * 1000,  // 5分钟后清理未使用的缓存（原 cacheTime）
+      staleTime: 2 * 60 * 1000,  // 2分钟后数据标记为过期
     },
   },
 })
