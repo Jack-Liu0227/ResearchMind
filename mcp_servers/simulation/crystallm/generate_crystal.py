@@ -498,14 +498,59 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                 logger.info(f"✅ Analyzed structure: {composition}")
                 logger.info(f"   Primitive: {len(primitive_structure)} sites")
                 logger.info(f"   Conventional: {len(conventional_structure)} sites")
+
+                # 准备原胞和惯胞的cellTypes数据（用于前端切换）
+                prim_lattice = primitive_structure.lattice
+                primitive_data = {
+                    "latticeParameters": {
+                        "a": round(prim_lattice.a, 6),
+                        "b": round(prim_lattice.b, 6),
+                        "c": round(prim_lattice.c, 6),
+                        "alpha": round(prim_lattice.alpha, 6),
+                        "beta": round(prim_lattice.beta, 6),
+                        "gamma": round(prim_lattice.gamma, 6)
+                    },
+                    "atoms": [],
+                    "volume": float(prim_lattice.volume),
+                    "numAtoms": len(primitive_structure)
+                }
+                for site in primitive_structure:
+                    primitive_data["atoms"].append({
+                        "element": site.species_string,
+                        "position": [round(x, 6) for x in site.frac_coords.tolist()],  # 分数坐标
+                        "occupancy": 1.0
+                    })
+
+                conv_lattice = conventional_structure.lattice
+                conventional_data = {
+                    "latticeParameters": {
+                        "a": round(conv_lattice.a, 6),
+                        "b": round(conv_lattice.b, 6),
+                        "c": round(conv_lattice.c, 6),
+                        "alpha": round(conv_lattice.alpha, 6),
+                        "beta": round(conv_lattice.beta, 6),
+                        "gamma": round(conv_lattice.gamma, 6)
+                    },
+                    "atoms": [],
+                    "volume": float(conv_lattice.volume),
+                    "numAtoms": len(conventional_structure)
+                }
+                for site in conventional_structure:
+                    conventional_data["atoms"].append({
+                        "element": site.species_string,
+                        "position": [round(x, 6) for x in site.frac_coords.tolist()],  # 分数坐标
+                        "occupancy": 1.0
+                    })
             except Exception as sga_error:
                 logger.warning(f"⚠️ SpacegroupAnalyzer failed: {sga_error}, using original structure")
                 display_struct = struct
                 # Keep the space_group from CIF parsing above
                 space_group_number = None
                 crystal_system = "triclinic"
+                primitive_data = None
+                conventional_data = None
 
-            # 提取晶格参数
+            # 提取晶格参数（用于主显示）
             lattice = display_struct.lattice
             lattice_params = {
                 "a": round(lattice.a, 6),
@@ -516,7 +561,7 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                 "gamma": round(lattice.gamma, 6)
             }
 
-            # 提取原子位置（使用笛卡尔坐标）
+            # 提取原子位置（使用笛卡尔坐标用于主显示）
             atoms = []
             for site in display_struct:
                 atoms.append({
@@ -524,8 +569,8 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                     "position": [round(x, 6) for x in site.coords.tolist()],  # 使用笛卡尔坐标
                     "occupancy": 1.0
                 })
-            
-            return {
+
+            result = {
                 "id": structure_id,
                 "name": filename.replace('.cif', ''),
                 "formula": formula,
@@ -553,6 +598,17 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                     "timestamp": datetime.now().isoformat()
                 }
             }
+
+            # 添加cellTypes数据（如果成功分析了原胞和惯胞）
+            if primitive_data and conventional_data:
+                result["cellTypes"] = {
+                    "primitive": primitive_data,
+                    "conventional": conventional_data
+                }
+                result["currentCellType"] = "primitive"
+                logger.info(f"✅ Added cellTypes data: primitive ({primitive_data['numAtoms']} atoms) and conventional ({conventional_data['numAtoms']} atoms)")
+
+            return result
             
         except Exception as parse_error:
             logger.warning(f"Could not parse CIF with pymatgen: {parse_error}, returning basic structure")
