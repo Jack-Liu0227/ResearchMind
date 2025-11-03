@@ -119,7 +119,7 @@ export function repairStorage(): void {
 export function forceSaveState(state: any): void {
   try {
     // 在保存前，确保当前会话的数据已同步到 sessions 数组中
-    let sessionsToSave = state.sessions || []
+    let sessionsToSave = [...(state.sessions || [])]
 
     if (state.currentSession) {
       const currentSessionIndex = sessionsToSave.findIndex(
@@ -127,7 +127,7 @@ export function forceSaveState(state: any): void {
       )
 
       if (currentSessionIndex !== -1) {
-        // 更新当前会话的数据
+        // 更新当前会话的数据 - 使用最新的 currentSession* 数据
         const updatedSession = {
           ...sessionsToSave[currentSessionIndex],
           messages: state.messages || [],
@@ -137,8 +137,17 @@ export function forceSaveState(state: any): void {
           updatedAt: new Date().toISOString(),
         }
 
-        sessionsToSave = [...sessionsToSave]
         sessionsToSave[currentSessionIndex] = updatedSession
+
+        console.log('💾 更新会话数据:', {
+          sessionId: updatedSession.id,
+          messagesCount: updatedSession.messages.length,
+          structuresCount: updatedSession.structures.length,
+          phononImagesCount: updatedSession.phononImages.length,
+          filesCount: updatedSession.files.length,
+        })
+      } else {
+        console.warn('⚠️ 当前会话不在 sessions 数组中:', state.currentSession.id)
       }
     }
 
