@@ -360,6 +360,30 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener('resize', () => {});
+
+      // 清理场景中的所有对象
+      if (atomGroupRef.current) {
+        disposeObject(atomGroupRef.current);
+      }
+      if (sceneRef.current) {
+        sceneRef.current.traverse((child) => {
+          if (child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.LineSegments || child instanceof THREE.Sprite) {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach((m) => {
+                  if (m.map) m.map.dispose();
+                  m.dispose();
+                });
+              } else {
+                if (child.material.map) child.material.map.dispose();
+                child.material.dispose();
+              }
+            }
+          }
+        });
+      }
+
       if (controlsRef.current) {
         controlsRef.current.dispose();
       }
@@ -643,6 +667,34 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     return latticeGroup;
   };
 
+  // 清理 Three.js 对象的辅助函数
+  const disposeObject = (obj: THREE.Object3D) => {
+    if (!obj) return;
+
+    // 递归清理子对象
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.LineSegments || child instanceof THREE.Sprite) {
+        // 清理几何体
+        if (child.geometry) {
+          child.geometry.dispose();
+        }
+
+        // 清理材质
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach((material) => {
+              if (material.map) material.map.dispose();
+              material.dispose();
+            });
+          } else {
+            if (child.material.map) child.material.map.dispose();
+            child.material.dispose();
+          }
+        }
+      }
+    });
+  };
+
   // 更新结构
   useEffect(() => {
     if (!sceneRef.current) {
@@ -658,8 +710,9 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     console.log('Updating structure with', displayStructure.atoms.length, 'atoms');
     const scene = sceneRef.current;
 
-    // 移除旧的原子组
+    // 移除并清理旧的原子组
     if (atomGroupRef.current) {
+      disposeObject(atomGroupRef.current);
       scene.remove(atomGroupRef.current);
     }
 
