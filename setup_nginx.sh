@@ -10,7 +10,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
-
+bash setup_nginx.sh
 # 日志函数
 log() {
     echo -e "${BLUE}[INFO]${NC} $1"
