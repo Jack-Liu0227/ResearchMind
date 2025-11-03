@@ -45,24 +45,47 @@ log_config() {
 }
 
 # ----------------------------- Cleanup handling ------------------------------
+# Store tail PIDs for cleanup
+TAIL_PIDS=()
+
 cleanup() {
     log_warning "Stopping all managed processes..."
 
+    # Kill tail processes first
+    for tail_pid in "${TAIL_PIDS[@]}"; do
+        if [ -n "$tail_pid" ] && kill -0 "$tail_pid" 2>/dev/null; then
+            kill "$tail_pid" 2>/dev/null || true
+        fi
+    done
+
+    # Kill all service processes
     if [ -f .service_pids ]; then
         while read -r pid; do
             if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                log_info "Killing PID $pid"
+                log_info "Stopping PID $pid"
                 kill "$pid" 2>/dev/null || true
+                sleep 0.5
+                # Force kill if still running
+                if kill -0 "$pid" 2>/dev/null; then
+                    log_warning "Force killing PID $pid"
+                    kill -9 "$pid" 2>/dev/null || true
+                fi
             fi
         done < .service_pids
         rm -f .service_pids
     fi
 
+    # Additional cleanup for any remaining processes
+    pkill -f "uv run python main.py" 2>/dev/null || true
+    pkill -f "uv run python.*server.py" 2>/dev/null || true
+    pkill -f "npm run dev" 2>/dev/null || true
+    pkill -f "node.*vite" 2>/dev/null || true
+
     log_success "All services stopped."
     exit 0
 }
 
-trap cleanup SIGINT SIGTERM
+trap cleanup SIGINT SIGTERM EXIT
 
 # ------------------------------- Load .env file ------------------------------
 load_config() {
@@ -267,9 +290,11 @@ prompt_log_view() {
     sleep 2
 
     # 使用 tail -f 同时监控两个文件，并用 sed 添加颜色标记
-    (tail -f logs/backend.log | sed "s/^/$(echo -e '\033[0;32m')[后端] /" & \
-     tail -f logs/frontend.log | sed "s/^/$(echo -e '\033[0;34m')[前端] /" & \
-     wait)
+    # 保存 tail 进程的 PID 以便在 cleanup 时终止
+    tail -f logs/backend.log | sed "s/^/$(echo -e '\033[0;32m')[后端] /" &
+    TAIL_PIDS+=($!)
+    tail -f logs/frontend.log | sed "s/^/$(echo -e '\033[0;34m')[前端] /" &
+    TAIL_PIDS+=($!)
 }
 
 # -----------------------------------------------------------------------------
@@ -300,7 +325,7 @@ start_frontend
 print_summary
 prompt_log_view
 
-while true; do
-    sleep 1
-done
+# Wait for any process to exit (including tail processes)
+# This allows Ctrl+C to trigger the cleanup trap
+wait
 
