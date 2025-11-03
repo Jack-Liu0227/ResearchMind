@@ -914,7 +914,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
       {/* Three.js 容器 */}
       {isTooLarge ? (
-        <div className="w-full h-full flex items-center justify-center bg-gray-50" style={{ minHeight: '500px' }}>
+        <div className="w-full h-full flex items-center justify-center bg-gray-50">
           <div className="text-center p-8 max-w-md">
             <div className="text-6xl mb-4">⚠️</div>
             <h3 className="text-xl font-semibold text-gray-800 mb-2">
@@ -934,7 +934,6 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
         <div
           ref={containerRef}
           className="w-full h-full"
-          style={{ minHeight: '500px' }}
         />
       )}
     </div>

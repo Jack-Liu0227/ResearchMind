@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Atom, ChevronDown, ChevronUp, X, Download } from 'lucide-react'
+import { Atom, ChevronDown, ChevronUp, X, Download, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { CrystalStructure } from '../types'
 import toast from 'react-hot-toast'
@@ -16,6 +16,7 @@ const StructureList: React.FC = () => {
     currentSessionStructures,
     currentStructure,
     setCurrentStructure,
+    removeFromCurrentSessionStructures,
     clearCurrentSessionStructures
   } = useAppStore()
   const [isExpanded, setIsExpanded] = useState(true)
@@ -89,6 +90,10 @@ const StructureList: React.FC = () => {
                 index={index}
                 isSelected={currentStructure?.id === structure.id}
                 onClick={() => handleStructureClick(structure, index)}
+                onDelete={() => {
+                  removeFromCurrentSessionStructures(structure.id)
+                  toast.success(`已删除结构: ${structure.formula}`)
+                }}
               />
             ))}
           </div>
@@ -103,13 +108,15 @@ interface StructureListItemProps {
   index: number
   isSelected: boolean
   onClick: () => void
+  onDelete: () => void
 }
 
 const StructureListItem: React.FC<StructureListItemProps> = ({
   structure,
   index,
   isSelected,
-  onClick
+  onClick,
+  onDelete
 }) => {
   // 下载 CIF 文件
   const downloadCIF = (e: React.MouseEvent) => {
@@ -217,8 +224,8 @@ const StructureListItem: React.FC<StructureListItemProps> = ({
           </div>
         </div>
 
-        {/* 下载按钮和选中指示器 */}
-        <div className="flex-shrink-0 ml-3 flex items-center space-x-2">
+        {/* 操作按钮和选中指示器 */}
+        <div className="flex-shrink-0 ml-3 flex items-center space-x-1">
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -228,6 +235,17 @@ const StructureListItem: React.FC<StructureListItemProps> = ({
             title="下载 CIF 文件"
           >
             <Download className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-2 hover:bg-red-100 rounded-lg text-red-600 hover:shadow-sm"
+            title="删除此结构"
+          >
+            <Trash2 className="w-4 h-4" />
           </button>
 
           {/* 选中指示器 */}

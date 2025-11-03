@@ -66,6 +66,7 @@ interface AppState {
   clearStructureList: () => void
   setCurrentSessionStructures: (structures: CrystalStructure[]) => void
   addToCurrentSessionStructures: (structure: CrystalStructure) => void
+  removeFromCurrentSessionStructures: (structureId: string) => void
   clearCurrentSessionStructures: () => void
   setCurrentSessionFiles: (files: SessionFile[]) => void
   addToCurrentSessionFiles: (file: SessionFile) => void
@@ -305,6 +306,24 @@ export const useAppStore = create<AppState>()(
         const updatedStructures = [...currentSessionStructures, structure]
         set({ currentSessionStructures: updatedStructures })
 
+        get().setCurrentSessionStructures(updatedStructures)
+        setTimeout(() => forceSaveState(get()), 100)
+      },
+
+      removeFromCurrentSessionStructures: (structureId) => {
+        const { currentSessionStructures, currentStructure } = get()
+        const updatedStructures = currentSessionStructures.filter(s => s.id !== structureId)
+
+        // If the removed structure was the current one, set current to the last remaining structure
+        let newCurrentStructure = currentStructure
+        if (currentStructure?.id === structureId) {
+          newCurrentStructure = updatedStructures.length > 0 ? updatedStructures[updatedStructures.length - 1] : null
+        }
+
+        set({
+          currentSessionStructures: updatedStructures,
+          currentStructure: newCurrentStructure
+        })
         get().setCurrentSessionStructures(updatedStructures)
         setTimeout(() => forceSaveState(get()), 100)
       },

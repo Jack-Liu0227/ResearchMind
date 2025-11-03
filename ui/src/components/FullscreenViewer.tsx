@@ -10,7 +10,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react'
 import { CrystalStructure } from '../types'
-import { PhononImage } from '../store/useAppStore'
+import { PhononImage, useAppStore } from '../store/useAppStore'
 import StructureViewerThreeJS from './StructureViewerThreeJS'
 import toast from 'react-hot-toast'
 
@@ -32,6 +32,8 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
   currentImageIndex = 0
 }) => {
   const [imageIndex, setImageIndex] = useState(currentImageIndex)
+  const { currentSessionStructures, setCurrentStructure } = useAppStore()
+  const [showStructureList, setShowStructureList] = useState(true)
 
   // 同步外部传入的 currentImageIndex
   useEffect(() => {
@@ -199,60 +201,118 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
       </div>
 
       {/* 内容区域 */}
-      <div className="flex-1 relative flex items-center justify-center">
-        {type === 'structure' && structure && (
-          <div className="w-full h-full">
-            <StructureViewerThreeJS structure={structure} />
+      <div className="flex-1 relative flex">
+        {/* 左侧结构列表 (仅在结构模式下显示) */}
+        {type === 'structure' && showStructureList && currentSessionStructures.length > 0 && (
+          <div className="w-80 bg-gray-900 bg-opacity-90 overflow-y-auto border-r border-gray-700">
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-semibold">结构列表 ({currentSessionStructures.length})</h3>
+                <button
+                  onClick={() => setShowStructureList(false)}
+                  className="text-gray-400 hover:text-white"
+                  title="隐藏列表"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="space-y-2">
+                {currentSessionStructures.map((s, idx) => (
+                  <button
+                    key={s.id || idx}
+                    onClick={() => {
+                      setCurrentStructure(s)
+                      toast.success(`已切换到: ${s.formula}`)
+                    }}
+                    className={`w-full text-left p-3 rounded-lg transition-colors ${
+                      structure?.id === s.id
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                  >
+                    <div className="font-semibold">{s.formula}</div>
+                    <div className="text-xs mt-1 opacity-75">
+                      {s.spaceGroup && `空间群: ${s.spaceGroup}`}
+                      {s.source?.database && ` | ${s.source.database}`}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
-        {type === 'image' && currentImage && (
-          <>
-            {/* 图片 */}
-            <img
-              src={currentImage.url}
-              alt={currentImage.filename || currentImage.name || currentImage.type}
-              className="max-w-full max-h-full object-contain"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement
-                console.error(`图片加载失败: ${currentImage.url}`)
-                target.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
-                  <svg width="400" height="300" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="400" height="300" fill="#1f2937"/>
-                    <text x="200" y="150" font-family="Arial" font-size="14" fill="#9ca3af" text-anchor="middle">图片加载失败</text>
-                  </svg>
-                `)
-              }}
-            />
-
-            {/* 左右切换按钮 */}
-            {images.length > 1 && (
-              <>
-                {/* 上一张 */}
-                <button
-                  onClick={handlePrevImage}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-3 rounded-full"
-                  title="上一张 (←)"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
-
-                {/* 下一张 */}
-                <button
-                  onClick={handleNextImage}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-3 rounded-full"
-                  title="下一张 (→)"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              </>
-            )}
-          </>
+        {/* 显示列表按钮 (当列表隐藏时) */}
+        {type === 'structure' && !showStructureList && currentSessionStructures.length > 0 && (
+          <button
+            onClick={() => setShowStructureList(true)}
+            className="absolute left-4 top-1/2 -translate-y-1/2 bg-gray-900 bg-opacity-90 hover:bg-opacity-100 text-white p-3 rounded-r-lg z-10"
+            title="显示结构列表"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
         )}
+
+        {/* 主内容区 */}
+        <div className="flex-1 flex items-center justify-center">
+          {type === 'structure' && structure && (
+            <div className="w-full h-full">
+              <StructureViewerThreeJS structure={structure} />
+            </div>
+          )}
+
+          {type === 'image' && currentImage && (
+            <>
+              {/* 图片 */}
+              <img
+                src={currentImage.url}
+                alt={currentImage.filename || currentImage.name || currentImage.type}
+                className="max-w-full max-h-full object-contain"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement
+                  console.error(`图片加载失败: ${currentImage.url}`)
+                  target.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+                    <svg width="400" height="300" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="400" height="300" fill="#1f2937"/>
+                      <text x="200" y="150" font-family="Arial" font-size="14" fill="#9ca3af" text-anchor="middle">图片加载失败</text>
+                    </svg>
+                  `)
+                }}
+              />
+
+              {/* 左右切换按钮 */}
+              {images.length > 1 && (
+                <>
+                  {/* 上一张 */}
+                  <button
+                    onClick={handlePrevImage}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-3 rounded-full"
+                    title="上一张 (←)"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+
+                  {/* 下一张 */}
+                  <button
+                    onClick={handleNextImage}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-3 rounded-full"
+                    title="下一张 (→)"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* 底部信息栏 */}

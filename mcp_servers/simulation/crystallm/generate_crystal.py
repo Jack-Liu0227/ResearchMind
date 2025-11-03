@@ -478,11 +478,31 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
         try:
             from pymatgen.core import Structure
             from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-            
+
             struct = Structure.from_str(cif_content, fmt="cif")
-            
+
+            # 使用 SpacegroupAnalyzer 获取标准化结构
+            try:
+                sga = SpacegroupAnalyzer(struct, symprec=0.1, angle_tolerance=5.0)
+                primitive_structure = sga.get_primitive_standard_structure()
+                conventional_structure = sga.get_conventional_standard_structure()
+                space_group = sga.get_space_group_symbol()
+                space_group_number = sga.get_space_group_number()
+                crystal_system = sga.get_crystal_system()
+
+                # 使用原胞作为显示结构
+                display_struct = primitive_structure
+                logger.info(f"✅ Analyzed structure: {composition}")
+                logger.info(f"   Primitive: {len(primitive_structure)} sites")
+                logger.info(f"   Conventional: {len(conventional_structure)} sites")
+            except Exception as sga_error:
+                logger.warning(f"⚠️ SpacegroupAnalyzer failed: {sga_error}, using original structure")
+                display_struct = struct
+                space_group_number = None
+                crystal_system = "triclinic"
+
             # 提取晶格参数
-            lattice = struct.lattice
+            lattice = display_struct.lattice
             lattice_params = {
                 "a": round(lattice.a, 6),
                 "b": round(lattice.b, 6),
@@ -491,25 +511,15 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                 "beta": round(lattice.beta, 6),
                 "gamma": round(lattice.gamma, 6)
             }
-            
+
             # 提取原子位置（使用笛卡尔坐标）
             atoms = []
-            for site in struct:
+            for site in display_struct:
                 atoms.append({
                     "element": site.species_string,
                     "position": [round(x, 6) for x in site.coords.tolist()],  # 使用笛卡尔坐标
                     "occupancy": 1.0
                 })
-            
-            # 获取空间群信息
-            try:
-                sga = SpacegroupAnalyzer(struct)
-                space_group = sga.get_space_group_symbol()
-                space_group_number = sga.get_space_group_number()
-                crystal_system = sga.get_crystal_system()
-            except:
-                space_group_number = None
-                crystal_system = None
             
             return {
                 "id": structure_id,
@@ -525,8 +535,8 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                 "latticeParameters": lattice_params,
                 "atoms": atoms,
                 "properties": {
-                    "density": float(struct.density),
-                    "volume": float(struct.lattice.volume),
+                    "density": float(display_struct.density),
+                    "volume": float(display_struct.lattice.volume),
                     "numAtoms": len(atoms),
                     "spaceGroupNumber": space_group_number,
                     "crystalSystem": crystal_system
