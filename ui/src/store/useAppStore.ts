@@ -364,10 +364,12 @@ export const useAppStore = create<AppState>()(
         const filtered = currentSessionFiles.filter((item) => item.id !== file.id)
         const updated = [...filtered, file].slice(-MAX_SESSION_FILES)
         get().setCurrentSessionFiles(updated)
+        setTimeout(() => forceSaveState(get()), 100)
       },
 
       clearCurrentSessionFiles: () => {
         get().setCurrentSessionFiles([])
+        setTimeout(() => forceSaveState(get()), 100)
       },
 
       setPhononImages: (images) => set({ phononImages: images }),
@@ -394,10 +396,12 @@ export const useAppStore = create<AppState>()(
         const { currentSessionPhononImages } = get()
         const updated = [...currentSessionPhononImages, image]
         get().setCurrentSessionPhononImages(updated)
+        setTimeout(() => forceSaveState(get()), 100)
       },
 
       clearCurrentSessionPhononImages: () => {
         get().setCurrentSessionPhononImages([])
+        setTimeout(() => forceSaveState(get()), 100)
       },
 
       setShowPhononVisualization: (show) => set({ showPhononVisualization: show }),
@@ -532,8 +536,13 @@ export const useAppStore = create<AppState>()(
       onRehydrateStorage: () => (state) => {
         if (!state) return
 
+        console.log('🔄 恢复存储数据...')
+        console.log('📊 会话数:', state.sessions?.length || 0)
+        console.log('📊 当前会话:', state.currentSession?.id || 'null')
+
         if (state.sessions) {
           if (!validateSessionData(state.sessions)) {
+            console.warn('⚠️ 会话数据验证失败，清空数据')
             state.sessions = []
             state.currentSession = null
             state.messages = []
@@ -547,8 +556,14 @@ export const useAppStore = create<AppState>()(
           state.sessions = fixRestoredSessions(state.sessions)
 
           if (state.currentSession) {
+            // 有当前会话，尝试恢复
             const restored = state.sessions.find((s) => s.id === state.currentSession?.id)
             if (restored) {
+              console.log('✅ 恢复当前会话:', restored.id)
+              console.log('📊 结构数:', restored.structures?.length || 0)
+              console.log('📊 文件数:', restored.files?.length || 0)
+              console.log('📊 图片数:', restored.phononImages?.length || 0)
+
               state.currentSession = restored
               state.messages = restored.messages || []
               state.currentStructure = restored.structures?.slice(-1)[0] ?? null
@@ -556,6 +571,7 @@ export const useAppStore = create<AppState>()(
               state.currentSessionFiles = restored.files || []
               state.currentSessionPhononImages = restored.phononImages || []
             } else {
+              console.warn('⚠️ 当前会话不存在，清空当前会话数据')
               state.currentSession = null
               state.messages = []
               state.currentStructure = null
@@ -563,7 +579,23 @@ export const useAppStore = create<AppState>()(
               state.currentSessionFiles = []
               state.currentSessionPhononImages = []
             }
+          } else if (state.sessions.length > 0) {
+            // 没有当前会话，但有会话列表，恢复最后一个会话
+            const lastSession = state.sessions[state.sessions.length - 1]
+            console.log('🔄 没有当前会话，恢复最后一个会话:', lastSession.id)
+            console.log('📊 结构数:', lastSession.structures?.length || 0)
+            console.log('📊 文件数:', lastSession.files?.length || 0)
+            console.log('📊 图片数:', lastSession.phononImages?.length || 0)
+
+            state.currentSession = lastSession
+            state.messages = lastSession.messages || []
+            state.currentStructure = lastSession.structures?.slice(-1)[0] ?? null
+            state.currentSessionStructures = lastSession.structures || []
+            state.currentSessionFiles = lastSession.files || []
+            state.currentSessionPhononImages = lastSession.phononImages || []
           } else {
+            // 没有任何会话
+            console.log('ℹ️ 没有任何会话')
             state.messages = []
             state.currentStructure = null
             state.currentSessionStructures = []
@@ -571,6 +603,7 @@ export const useAppStore = create<AppState>()(
             state.currentSessionPhononImages = []
           }
         } else {
+          console.log('ℹ️ 没有存储的会话数据')
           state.sessions = []
           state.currentSession = null
           state.messages = []
