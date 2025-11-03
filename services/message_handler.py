@@ -7,7 +7,7 @@ Handles WebSocket messages from clients, including chat messages, file uploads, 
 import json
 import logging
 from datetime import datetime
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 
 from .config import agent_config
 from .data_processor import DataProcessor
