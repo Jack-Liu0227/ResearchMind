@@ -1,0 +1,59 @@
+data_Na4Cl4
+_symmetry_space_group_name_H-M I4_1/amd
+_cell_length_a 3.8460
+_cell_length_b 3.8460
+_cell_length_c 14.5273
+_cell_angle_alpha 90.0000
+_cell_angle_beta 90.0000
+_cell_angle_gamma 90.0000
+_symmetry_Int_Tables_number 141
+_chemical_formula_structural NaCl
+_chemical_formula_sum 'Na4 Cl4'
+_cell_volume 215.0789
+_cell_formula_units_Z 4
+loop_
+ _symmetry_equiv_pos_site_id
+ _symmetry_equiv_pos_as_xyz
+  1  'x-1/2, y, -z-1/4'
+  2  '-y-1/2, x+1/2, -z-1/2'
+  3  '-x, y, z'
+  4  'y+1/2, -x, z+3/4'
+  5  'x, -y+1/2, -z+1/4'
+  6  '-y, x+1/2, z+1/4'
+  7  '-x+1/2, -y+1/2, z+1/2'
+  8  'x, y, z'
+  9  'y+1/2, x+1/2, -z+1/2'
+  10  '-x+1/2, y, -z+3/4'
+  11  'x, -y+1.000, z'
+  12  'y+1/2, x+1.000, z+3/4'
+  13  '-y, -x, -z'
+  14  '-x, -y+1/2, -z+1/4'
+  15  'y, -x, -z'
+  16  '-y-1/2, -x, z-1/4'
+  17  'x-1/2, -y+1/2, z-1/2'
+  18  'y, x+1/2, z+1/4'
+  19  'x+1/2, y+1/2, z+1/2'
+  20  '-y+1/2, x+1.000, z+3/4'
+  21  '-x+1.000, -y+1.000, z+1.000'
+  22  'y+1.000, -x+1/2, z+1.250'
+  23  'x+1/2, -y+1.000, -z+3/4'
+  24  'y+1.000, x+1.000, -z+1.000'
+  25  '-x+1.000, y+1/2, -z+1.250'
+  26  '-y+1/2, -x+1/2, -z+1/2'
+  27  '-x+1/2, -y+1.000, -z+3/4'
+  28  'y+1/2, -x+1/2, -z+1/2'
+  29  'x, y+1/2, -z+1/4'
+  30  '-y, x+1.000, -z'
+  31  '-x+1/2, y+1/2, z+1/2'
+  32  '-y, -x+1/2, z+1/4'
+loop_
+_atom_site_type_symbol
+_atom_site_label
+_atom_site_symmetry_multiplicity
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+Na Na0 4 0.0000 0.0000 0.5000 1
+Cl Cl1 4 0.0000 0.0000 0.0000 1
+

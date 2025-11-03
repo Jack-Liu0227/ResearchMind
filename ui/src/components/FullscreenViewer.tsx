@@ -34,6 +34,8 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
   const [imageIndex, setImageIndex] = useState(currentImageIndex)
   const { currentSessionStructures, setCurrentStructure } = useAppStore()
   const [showStructureList, setShowStructureList] = useState(true)
+  const [touchStart, setTouchStart] = useState<number | null>(null)
+  const [touchEnd, setTouchEnd] = useState<number | null>(null)
 
   // 同步外部传入的 currentImageIndex
   useEffect(() => {
@@ -127,6 +129,34 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
     if (images.length === 0) return
     setImageIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1))
   }, [images.length])
+
+  // 触摸滑动处理
+  const minSwipeDistance = 50 // 最小滑动距离（像素）
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null)
+    setTouchStart(e.targetTouches[0].clientX)
+  }
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX)
+  }
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return
+
+    const distance = touchStart - touchEnd
+    const isLeftSwipe = distance > minSwipeDistance
+    const isRightSwipe = distance < -minSwipeDistance
+
+    if (type === 'image' && images.length > 1) {
+      if (isLeftSwipe) {
+        handleNextImage()
+      } else if (isRightSwipe) {
+        handlePrevImage()
+      }
+    }
+  }
 
   if (!isOpen) return null
 
@@ -258,7 +288,12 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
         )}
 
         {/* 主内容区 */}
-        <div className="flex-1 flex items-center justify-center">
+        <div
+          className="flex-1 flex items-center justify-center"
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+        >
           {type === 'structure' && structure && (
             <div className="w-full h-full">
               <StructureViewerThreeJS structure={structure} />
@@ -271,7 +306,7 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
               <img
                 src={currentImage.url}
                 alt={currentImage.filename || currentImage.name || currentImage.type}
-                className="max-w-full max-h-full object-contain"
+                className="max-w-full max-h-full object-contain select-none"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement
                   console.error(`图片加载失败: ${currentImage.url}`)
@@ -282,6 +317,7 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
                     </svg>
                   `)
                 }}
+                draggable={false}
               />
 
               {/* 左右切换按钮 */}

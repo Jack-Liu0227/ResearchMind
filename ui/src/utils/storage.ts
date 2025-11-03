@@ -118,9 +118,33 @@ export function repairStorage(): void {
  */
 export function forceSaveState(state: any): void {
   try {
+    // 在保存前，确保当前会话的数据已同步到 sessions 数组中
+    let sessionsToSave = state.sessions || []
+
+    if (state.currentSession) {
+      const currentSessionIndex = sessionsToSave.findIndex(
+        (s: any) => s.id === state.currentSession.id
+      )
+
+      if (currentSessionIndex !== -1) {
+        // 更新当前会话的数据
+        const updatedSession = {
+          ...sessionsToSave[currentSessionIndex],
+          messages: state.messages || [],
+          structures: state.currentSessionStructures || [],
+          phononImages: state.currentSessionPhononImages || [],
+          files: state.currentSessionFiles || [],
+          updatedAt: new Date().toISOString(),
+        }
+
+        sessionsToSave = [...sessionsToSave]
+        sessionsToSave[currentSessionIndex] = updatedSession
+      }
+    }
+
     const dataToSave = {
       state: {
-        sessions: state.sessions || [],
+        sessions: sessionsToSave,
         currentSession: state.currentSession || null,
         messages: state.messages || [],
         settings: state.settings || {},
@@ -140,13 +164,15 @@ export function forceSaveState(state: any): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave))
     console.log(
       '💾 强制保存状态完成 - 会话数:',
-      state.sessions?.length || 0,
+      sessionsToSave.length,
       '消息数:',
       state.messages?.length || 0,
       '结构数:',
       state.currentSessionStructures?.length || 0,
       '文件数:',
-      state.currentSessionFiles?.length || 0
+      state.currentSessionFiles?.length || 0,
+      '声子谱图片数:',
+      state.currentSessionPhononImages?.length || 0
     )
   } catch (error) {
     console.error('强制保存状态时出错:', error)
