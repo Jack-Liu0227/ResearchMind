@@ -87,6 +87,9 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
   const [panMode, setPanMode] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
+  // 使用 ref 而不是 state 来跟踪初始化状态，避免触发重新渲染
+  const isInitializedRef = useRef(false);
+
   // 检查原子数是否超过限制
   const MAX_ATOMS = 50;
   const atomCount = Array.isArray(structure?.atoms) ? structure.atoms.length : 0;
@@ -177,120 +180,196 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
+    // 使用 ResizeObserver 监听容器尺寸变化
+    const initializeScene = () => {
+      console.log('🎬 initializeScene called');
 
-    // 场景
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#383838');
-    sceneRef.current = scene;
-
-    // 计算结构边界以调整相机
-    const bounds = calculateBounds(Array.isArray(displayStructure?.atoms) ? displayStructure.atoms : []);
-    const structureSize = Math.max(bounds.size, 3); // 最小视野为3单位
-    
-    // 正交相机 - 根据容器大小和结构大小智能调整视野
-    const aspect = width / height;
-    const containerSize = Math.min(width, height);
-    
-    // 根据容器大小调整缩放因子，使用更大的视野让结构显示更小
-    let scaleFactor;
-    if (containerSize < 300) {
-      scaleFactor = 4.0; // 非常小的容器 - 结构显示得更小
-    } else if (containerSize < 500) {
-      scaleFactor = 3.0; // 中小容器 - 结构显示得更小
-    } else {
-      scaleFactor = 2.2; // 大容器 - 结构显示得更小
-    }
-    
-    const frustumSize = structureSize * scaleFactor;
-    const camera = new THREE.OrthographicCamera(
-      -frustumSize * aspect / 2,
-      frustumSize * aspect / 2,
-      frustumSize / 2,
-      -frustumSize / 2,
-      0.1,
-      1000
-    );
-    
-    // 将相机放置在结构中心的对角线上，根据容器大小调整距离
-    const cameraDistance = structureSize * (containerSize < 400 ? 2.0 : 1.5);
-    camera.position.set(
-      bounds.center.x + cameraDistance,
-      bounds.center.y + cameraDistance,
-      bounds.center.z + cameraDistance
-    );
-    camera.lookAt(bounds.center);
-    cameraRef.current = camera;
-    
-    // 相机设置完成
-
-    // 渲染器
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    containerRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    // 轨道控制器 - 以结构中心为目标
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.copy(bounds.center); // 设置旋转中心为结构中心
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.minDistance = structureSize * 0.5;
-    controls.maxDistance = structureSize * 3;
-    controls.enablePan = true; // 启用平移
-    controls.update(); // 应用target设置
-    controlsRef.current = controls;
-
-    // 环境光
-    const ambientLight = new THREE.AmbientLight('#ffffff', 2);
-    scene.add(ambientLight);
-
-    // 平行光
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(1, 1, 1).normalize();
-    scene.add(directionalLight);
-
-    // 渲染循环
-    const animate = () => {
-      requestAnimationFrame(animate);
-
-      // 自动旋转 - 使用ref避免闭包问题
-      if (autoRotateRef.current && atomGroupRef.current) {
-        atomGroupRef.current.rotation.y += 0.005;
+      if (!containerRef.current) {
+        console.warn('⚠️ containerRef.current is null');
+        return;
       }
 
-      controls.update();
-      renderer.render(scene, camera);
+      const width = containerRef.current.clientWidth;
+      const height = containerRef.current.clientHeight;
+
+      // 如果容器尺寸为0，说明还没有完成布局，等待下次尺寸变化
+      if (width === 0 || height === 0) {
+        console.warn('⚠️ Container size is 0, waiting for layout...', { width, height });
+        isInitializedRef.current = false;
+        return;
+      }
+
+      // 如果已经初始化过，不要重复初始化
+      if (isInitializedRef.current && rendererRef.current) {
+        console.log('✅ Already initialized, skipping...');
+        return;
+      }
+
+      // 如果有旧的渲染器，先清理
+      if (rendererRef.current) {
+        console.log('🧹 Cleaning up existing renderer...');
+        if (controlsRef.current) {
+          controlsRef.current.dispose();
+        }
+        rendererRef.current.dispose();
+        if (containerRef.current && rendererRef.current.domElement.parentNode === containerRef.current) {
+          containerRef.current.removeChild(rendererRef.current.domElement);
+        }
+      }
+
+      console.log('🚀 Initializing Three.js with container size:', { width, height });
+
+      // 场景
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color('#383838');
+      sceneRef.current = scene;
+
+      // 计算结构边界以调整相机
+      const bounds = calculateBounds(Array.isArray(displayStructure?.atoms) ? displayStructure.atoms : []);
+      const structureSize = Math.max(bounds.size, 3); // 最小视野为3单位
+
+      // 正交相机 - 根据容器大小和结构大小智能调整视野
+      const aspect = width / height;
+      const containerSize = Math.min(width, height);
+
+      // 根据容器大小调整缩放因子，使用更大的视野让结构显示更小
+      let scaleFactor;
+      if (containerSize < 300) {
+        scaleFactor = 4.0; // 非常小的容器 - 结构显示得更小
+      } else if (containerSize < 500) {
+        scaleFactor = 3.0; // 中小容器 - 结构显示得更小
+      } else {
+        scaleFactor = 2.2; // 大容器 - 结构显示得更小
+      }
+
+      const frustumSize = structureSize * scaleFactor;
+      const camera = new THREE.OrthographicCamera(
+        -frustumSize * aspect / 2,
+        frustumSize * aspect / 2,
+        frustumSize / 2,
+        -frustumSize / 2,
+        0.1,
+        1000
+      );
+
+      // 将相机放置在结构中心的对角线上，根据容器大小调整距离
+      const cameraDistance = structureSize * (containerSize < 400 ? 2.0 : 1.5);
+      camera.position.set(
+        bounds.center.x + cameraDistance,
+        bounds.center.y + cameraDistance,
+        bounds.center.z + cameraDistance
+      );
+      camera.lookAt(bounds.center);
+      cameraRef.current = camera;
+
+      // 相机设置完成
+
+      // 渲染器
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      containerRef.current.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
+
+      // 轨道控制器 - 以结构中心为目标
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.copy(bounds.center); // 设置旋转中心为结构中心
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.minDistance = structureSize * 0.5;
+      controls.maxDistance = structureSize * 3;
+      controls.enablePan = true; // 启用平移
+      controls.update(); // 应用target设置
+      controlsRef.current = controls;
+
+      // 环境光
+      const ambientLight = new THREE.AmbientLight('#ffffff', 2);
+      scene.add(ambientLight);
+
+      // 平行光
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+      directionalLight.position.set(1, 1, 1).normalize();
+      scene.add(directionalLight);
+
+      // 渲染循环
+      const animate = () => {
+        requestAnimationFrame(animate);
+
+        // 自动旋转 - 使用ref避免闭包问题
+        if (autoRotateRef.current && atomGroupRef.current) {
+          atomGroupRef.current.rotation.y += 0.005;
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+      };
+      animate();
+
+      // 窗口大小调整
+      const handleResize = () => {
+        if (!containerRef.current) return;
+        const newWidth = containerRef.current.clientWidth;
+        const newHeight = containerRef.current.clientHeight;
+
+        // 检查尺寸是否有效
+        if (newWidth === 0 || newHeight === 0) return;
+
+        const newAspect = newWidth / newHeight;
+
+        camera.left = -frustumSize * newAspect / 2;
+        camera.right = frustumSize * newAspect / 2;
+        camera.top = frustumSize / 2;
+        camera.bottom = -frustumSize / 2;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(newWidth, newHeight);
+      };
+      window.addEventListener('resize', handleResize);
+
+      // 标记为已初始化
+      isInitializedRef.current = true;
+      console.log('Three.js initialization complete');
     };
-    animate();
 
-    // 窗口大小调整
-    const handleResize = () => {
-      if (!containerRef.current) return;
-      const newWidth = containerRef.current.clientWidth;
-      const newHeight = containerRef.current.clientHeight;
-      const newAspect = newWidth / newHeight;
+    // 使用 ResizeObserver 监听容器尺寸变化
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        console.log('📏 Container resized:', { width, height, isInitialized: isInitializedRef.current });
 
-      camera.left = -frustumSize * newAspect / 2;
-      camera.right = frustumSize * newAspect / 2;
-      camera.top = frustumSize / 2;
-      camera.bottom = -frustumSize / 2;
-      camera.updateProjectionMatrix();
+        // 如果尺寸有效且未初始化，则初始化场景
+        if (width > 0 && height > 0 && !isInitializedRef.current) {
+          console.log('🚀 Triggering initialization from ResizeObserver');
+          initializeScene();
+        } else if (width === 0 || height === 0) {
+          console.warn('⚠️ Container has zero size, cannot initialize');
+        } else if (isInitializedRef.current) {
+          console.log('✅ Already initialized, skipping');
+        }
+      }
+    });
 
-      renderer.setSize(newWidth, newHeight);
-    };
-    window.addEventListener('resize', handleResize);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    // 立即尝试初始化（如果容器已经有尺寸）
+    initializeScene();
 
     // 清理
     return () => {
-      window.removeEventListener('resize', handleResize);
-      controls.dispose();
-      renderer.dispose();
-      if (containerRef.current && renderer.domElement) {
-        containerRef.current.removeChild(renderer.domElement);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', () => {});
+      if (controlsRef.current) {
+        controlsRef.current.dispose();
       }
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+        if (containerRef.current && rendererRef.current.domElement.parentNode === containerRef.current) {
+          containerRef.current.removeChild(rendererRef.current.domElement);
+        }
+      }
+      isInitializedRef.current = false;
     };
   }, []);
 
@@ -566,8 +645,17 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
   // 更新结构
   useEffect(() => {
-    if (!sceneRef.current) return;
+    if (!sceneRef.current) {
+      console.warn('Scene not initialized yet, skipping structure update');
+      return;
+    }
 
+    if (!displayStructure || !Array.isArray(displayStructure.atoms) || displayStructure.atoms.length === 0) {
+      console.warn('displayStructure is not ready or has no atoms, skipping structure update');
+      return;
+    }
+
+    console.log('Updating structure with', displayStructure.atoms.length, 'atoms');
     const scene = sceneRef.current;
 
     // 移除旧的原子组
@@ -602,6 +690,8 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
     scene.add(structureGroup);
     atomGroupRef.current = structureGroup;
+
+    console.log('Structure update complete');
 
   }, [displayStructure, showUnitCell, showBonds, showAxisLabels]);
 

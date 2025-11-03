@@ -202,9 +202,13 @@ const RightPanel: React.FC<RightPanelProps> = ({
   const structureCount = currentSessionStructures.length
   const displayedStructure = currentStructure || currentSessionStructures.slice(-1)[0] || null
 
+  if (!isVisible) {
+    return null;
+  }
+
   return (
-    <div className={`flex-1 overflow-y-auto bg-gray-50 ${className}`} style={{ display: isVisible ? 'block' : 'none' }}>
-      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
+    <div className={`h-full flex flex-col bg-gray-50 ${className}`}>
+      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50 flex-shrink-0">
         <h2 className="text-lg font-semibold text-gray-800">结构与数据</h2>
         {onToggle && (
           <button
@@ -219,7 +223,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
         )}
       </div>
 
-      <div className="flex border-b border-gray-200">
+      <div className="flex border-b border-gray-200 flex-shrink-0">
         <button
           onClick={() => setActiveTab('structures')}
           className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
@@ -252,7 +256,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
         </button>
       </div>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         {activeTab === 'structures' && (
           <StructuresTab
             structures={currentSessionStructures}
@@ -297,9 +301,31 @@ const StructuresTab: React.FC<StructuresTabProps> = ({
   currentStructure,
   onFullscreen
 }) => {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const viewerContainerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (containerRef.current) {
+      console.log('📦 StructuresTab container size:', {
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight,
+        offsetHeight: containerRef.current.offsetHeight,
+        scrollHeight: containerRef.current.scrollHeight
+      });
+    }
+    if (viewerContainerRef.current) {
+      console.log('🎨 Viewer container size:', {
+        width: viewerContainerRef.current.clientWidth,
+        height: viewerContainerRef.current.clientHeight,
+        offsetHeight: viewerContainerRef.current.offsetHeight,
+        scrollHeight: viewerContainerRef.current.scrollHeight
+      });
+    }
+  }, [currentStructure]);
+
   return (
-    <div className="flex-1 flex flex-col structures-panel h-full">
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden max-h-[40%]">
+    <div ref={containerRef} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', padding: '1rem', gap: '0.75rem' }}>
+      <div style={{ flexShrink: 0, maxHeight: '40%' }} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 bg-gray-100 border-b border-gray-200">
           <div className="flex items-center space-x-2">
             <h3 className="text-sm font-semibold text-gray-800">结构列表</h3>
@@ -317,9 +343,11 @@ const StructuresTab: React.FC<StructuresTabProps> = ({
         <StructureList />
       </div>
 
-      <div className="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mt-3 min-h-0">
+      <div ref={viewerContainerRef} style={{ flex: 1, minHeight: '300px', display: 'flex', flexDirection: 'column' }} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
         {currentStructure ? (
-          <StructureViewerThreeJS structure={currentStructure} />
+          <div style={{ width: '100%', height: '100%', flex: 1 }}>
+            <StructureViewerThreeJS structure={currentStructure} />
+          </div>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-center text-gray-500 py-12">
             <ImageIcon className="w-10 h-10 mb-3 text-gray-300" />
