@@ -298,8 +298,8 @@ const StructuresTab: React.FC<StructuresTabProps> = ({
   onFullscreen
 }) => {
   return (
-    <div className="flex-1 flex flex-col structures-panel">
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+    <div className="flex-1 flex flex-col structures-panel h-full">
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden max-h-[40%]">
         <div className="flex items-center justify-between px-4 py-3 bg-gray-100 border-b border-gray-200">
           <div className="flex items-center space-x-2">
             <h3 className="text-sm font-semibold text-gray-800">结构列表</h3>
@@ -317,7 +317,7 @@ const StructuresTab: React.FC<StructuresTabProps> = ({
         <StructureList />
       </div>
 
-      <div className="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mt-3">
+      <div className="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mt-3 min-h-0">
         {currentStructure ? (
           <StructureViewerThreeJS structure={currentStructure} />
         ) : (

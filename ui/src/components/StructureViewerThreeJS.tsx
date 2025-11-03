@@ -645,7 +645,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
   }, [panMode]);
 
   return (
-    <div className="w-full h-full min-h-[500px] relative bg-gray-800">
+    <div className="w-full h-full relative bg-gray-800">
       {/* 紧凑的控制面板 - 横向布局 */}
       <div className="absolute top-4 right-4 z-10 bg-white rounded-lg shadow-lg px-2 py-1.5">
         <div className="flex items-center space-x-1">

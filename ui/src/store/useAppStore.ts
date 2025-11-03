@@ -290,7 +290,13 @@ export const useAppStore = create<AppState>()(
       clearStructureList: () => set({ structureList: [] }),
 
       setCurrentSessionStructures: (structures) => {
+        const { currentStructure } = get()
         set({ currentSessionStructures: structures })
+
+        // 如果当前没有选中的结构，自动选中第一个
+        if (!currentStructure && structures.length > 0) {
+          set({ currentStructure: structures[0] })
+        }
 
         const { currentSession, sessions } = get()
         if (currentSession) {
@@ -302,9 +308,14 @@ export const useAppStore = create<AppState>()(
       },
 
       addToCurrentSessionStructures: (structure) => {
-        const { currentSessionStructures } = get()
+        const { currentSessionStructures, currentStructure } = get()
         const updatedStructures = [...currentSessionStructures, structure]
         set({ currentSessionStructures: updatedStructures })
+
+        // 如果当前没有选中的结构，自动选中第一个
+        if (!currentStructure && updatedStructures.length > 0) {
+          set({ currentStructure: updatedStructures[0] })
+        }
 
         get().setCurrentSessionStructures(updatedStructures)
         setTimeout(() => forceSaveState(get()), 100)
