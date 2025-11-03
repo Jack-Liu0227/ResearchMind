@@ -38,6 +38,7 @@ class AgentCoordinator:
         self.runners: Dict[str, Runner] = {}
         self.adk_sessions: Dict[str, Any] = {}
         self.session_message_counts: Dict[str, int] = {}  # 跟踪每个会话的消息数量
+        self.current_tool_calls: Dict[str, List[Dict[str, Any]]] = {}  # 跟踪当前消息的工具调用
     
     async def process_chat_message(
         self,
@@ -351,11 +352,20 @@ class AgentCoordinator:
                         if hasattr(part, 'text') and part.text:
                             text_content = part.text
                             if text_content.strip():
+                                # 获取当前会话的tool calls
+                                session_key = f"{client_id}:{session_id or 'default'}"
+                                tool_calls = self.current_tool_calls.get(session_key, [])
+
                                 await MessageHandler.send_agent_response(
                                     websocket=websocket,
                                     agent_id=agent_id,
-                                    content=text_content
+                                    content=text_content,
+                                    tool_calls=tool_calls if tool_calls else None
                                 )
+
+                                # 清除已发送的tool calls记录
+                                if session_key in self.current_tool_calls:
+                                    self.current_tool_calls[session_key] = []
 
             # Handle tool calls
             if hasattr(event, 'tool_calls') and event.tool_calls:
@@ -364,6 +374,26 @@ class AgentCoordinator:
                     if hasattr(tool_call, 'name'):
                         # 发送工具调用状态到前端
                         tool_name = tool_call.name
+
+                        # 提取工具调用参数
+                        tool_input = {}
+                        if hasattr(tool_call, 'args'):
+                            tool_input = tool_call.args if isinstance(tool_call.args, dict) else {}
+                        elif hasattr(tool_call, 'input'):
+                            tool_input = tool_call.input if isinstance(tool_call.input, dict) else {}
+
+                        # 记录工具调用信息
+                        session_key = f"{client_id}:{session_id or 'default'}"
+                        if session_key not in self.current_tool_calls:
+                            self.current_tool_calls[session_key] = []
+
+                        tool_call_record = {
+                            "name": tool_name,
+                            "input": tool_input,
+                            "timestamp": datetime.now().isoformat(),
+                            "status": "pending"
+                        }
+                        self.current_tool_calls[session_key].append(tool_call_record)
 
                         # 根据工具名称生成更友好的提示信息
                         tool_message = self._get_tool_friendly_message(tool_name)
@@ -524,6 +554,16 @@ class AgentCoordinator:
                             websocket=websocket,
                             session_id=session_id  # Pass session_id
                         )
+
+                        # 更新工具调用记录的输出
+                        session_key = f"{client_id}:{session_id or 'default'}"
+                        if session_key in self.current_tool_calls and self.current_tool_calls[session_key]:
+                            # 找到最后一个pending状态的tool call并更新
+                            for tool_call_record in reversed(self.current_tool_calls[session_key]):
+                                if tool_call_record.get("status") == "pending":
+                                    tool_call_record["output"] = result_data
+                                    tool_call_record["status"] = "success"
+                                    break
 
                         # 工具结果处理完成后，发送thinking状态
                         await MessageHandler.send_message(websocket, "status", {

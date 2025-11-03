@@ -9,6 +9,16 @@ export interface Agent {
   avatar?: string
 }
 
+// Tool Call 类型定义
+export interface ToolCall {
+  name: string
+  input: Record<string, any>
+  output?: any
+  timestamp?: string
+  status?: 'pending' | 'success' | 'error'
+  error?: string
+}
+
 // 消息类型定义
 export interface Message {
   id: string
@@ -18,6 +28,7 @@ export interface Message {
   agentId?: string
   agentName?: string
   type?: 'text' | 'structure' | 'analysis' | 'error'
+  toolCalls?: ToolCall[]  // 工具调用记录
   metadata?: {
     structureData?: CrystalStructure
     analysisData?: AnalysisResult

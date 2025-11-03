@@ -319,7 +319,8 @@ class MessageHandler:
         websocket: Any,
         agent_id: str,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None
     ):
         """
         Send agent response to client
@@ -329,13 +330,13 @@ class MessageHandler:
             agent_id: Agent ID
             content: Response content
             metadata: Optional metadata
+            tool_calls: Optional list of tool call records
         """
         # Get agent config
         from .config import agent_config
         agent_cfg = agent_config.AGENTS.get(agent_id, {})
 
-        # Send as "message" type to match frontend expectations
-        await MessageHandler.send_message(websocket, "message", {
+        message_data = {
             "content": content,
             "role": "assistant",
             "agentId": agent_id,
@@ -343,7 +344,14 @@ class MessageHandler:
             "type": "text",
             "metadata": metadata or {},
             "timestamp": datetime.now().isoformat()
-        })
+        }
+
+        # Add tool calls if provided
+        if tool_calls:
+            message_data["toolCalls"] = tool_calls
+
+        # Send as "message" type to match frontend expectations
+        await MessageHandler.send_message(websocket, "message", message_data)
         logger.info(f"📤 Sent agent response from {agent_id}: {content[:100]}...")
     
     @staticmethod
