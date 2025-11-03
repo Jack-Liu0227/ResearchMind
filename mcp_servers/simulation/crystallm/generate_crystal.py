@@ -10,7 +10,10 @@ from pymatgen.io.cif import CifWriter
 import pandas as pd
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
+import structlog
 # from CrystaLLM.bin import make_prompt_file, sample, postprocess
+
+logger = structlog.get_logger(__name__)
 
 class CrystalStructureGenerator:
     def __init__(self, composition, params=None, progress_callback: Optional[Callable[[str, float], None]] = None):
@@ -498,6 +501,7 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
             except Exception as sga_error:
                 logger.warning(f"⚠️ SpacegroupAnalyzer failed: {sga_error}, using original structure")
                 display_struct = struct
+                # Keep the space_group from CIF parsing above
                 space_group_number = None
                 crystal_system = "triclinic"
 
