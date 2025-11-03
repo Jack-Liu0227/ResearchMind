@@ -32,7 +32,11 @@ MODEL = os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')
 # Create the main coordinator agent
 research_coordinator = LlmAgent(
     name="research_coordinator",
-    model=LiteLlm(model=MODEL),
+    model=LiteLlm(
+        model=MODEL,
+        api_key=os.getenv('OPENAI_API_KEY'),
+        api_base=os.getenv('OPENAI_BASE_URL')
+    ),
     description=(
         "Coordinating materials science research by analyzing user queries, "
         "delegating to specialized sub-agents (literature, database, simulation), "

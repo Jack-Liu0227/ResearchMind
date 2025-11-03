@@ -32,7 +32,11 @@ toolset = MCPToolset(
 # 创建 root agent（参考 database_agent 和 simulation_agent 的设计）
 root_agent = Agent(
     name="deep_research_agent",
-    model=LiteLlm(model=os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')),
+    model=LiteLlm(
+        model=os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash'),
+        api_key=os.getenv('OPENAI_API_KEY'),
+        api_base=os.getenv('OPENAI_BASE_URL')
+    ),
     instruction=get_deep_research_instruction(),
     tools=[toolset]
 )

@@ -26,7 +26,11 @@ toolset = MCPToolset(
 # Create root agent for simulation operations
 root_agent = Agent(
     name="simulation_agent",
-    model=LiteLlm(model=os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')),
+    model=LiteLlm(
+        model=os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash'),
+        api_key=os.getenv('OPENAI_API_KEY'),
+        api_base=os.getenv('OPENAI_BASE_URL')
+    ),
     instruction=SIMULATION_AGENT_INSTRUCTION,  # Use modular prompt
     tools=[toolset]
 )

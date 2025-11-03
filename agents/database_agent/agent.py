@@ -26,7 +26,11 @@ toolset = MCPToolset(
 # Create root agent for database operations
 root_agent = Agent(
     name="database_agent",
-    model=LiteLlm(model=os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')),
+    model=LiteLlm(
+        model=os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash'),
+        api_key=os.getenv('OPENAI_API_KEY'),
+        api_base=os.getenv('OPENAI_BASE_URL')
+    ),
     instruction=DATABASE_AGENT_INSTRUCTION,
     tools=[toolset]
 )
