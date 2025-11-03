@@ -16,6 +16,12 @@ export interface PhononImage {
   timestamp?: string | number
 }
 
+export interface BillingData {
+  session_total_tokens: number
+  session_total_photons: number
+  requests_count: number
+}
+
 interface AppState {
   // Agents
   agents: Agent[]
@@ -48,6 +54,9 @@ interface AppState {
   // Loading indicator
   isLoading: boolean
   loadingMessage: string
+
+  // Billing data
+  billingData: BillingData | null
 
   // Actions
   setAgents: (agents: Agent[]) => void
@@ -87,6 +96,9 @@ interface AppState {
 
   setIsLoading: (loading: boolean) => void
   setLoadingMessage: (message: string) => void
+
+  setBillingData: (data: BillingData | null) => void
+  updateBillingData: (data: Partial<BillingData>) => void
 
   createSession: (title: string, agentId: string) => ChatSession
   deleteSession: (sessionId: string) => void
@@ -175,6 +187,8 @@ export const useAppStore = create<AppState>()(
 
       isLoading: false,
       loadingMessage: '智能体正在思考...',
+
+      billingData: null,
 
       setAgents: (agents) => set({ agents }),
       setCurrentAgent: (agent) => set({ currentAgent: agent }),
@@ -413,6 +427,20 @@ export const useAppStore = create<AppState>()(
 
       setIsLoading: (loading) => set({ isLoading: loading }),
       setLoadingMessage: (message) => set({ loadingMessage: message }),
+
+      setBillingData: (data) => set({ billingData: data }),
+      updateBillingData: (data) => {
+        const current = get().billingData
+        set({
+          billingData: current
+            ? { ...current, ...data }
+            : {
+                session_total_tokens: data.session_total_tokens || 0,
+                session_total_photons: data.session_total_photons || 0,
+                requests_count: data.requests_count || 0,
+              },
+        })
+      },
 
       createSession: (title, agentId) => {
         const newSession: ChatSession = {

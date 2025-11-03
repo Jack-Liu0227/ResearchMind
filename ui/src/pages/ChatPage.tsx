@@ -34,7 +34,8 @@ const ChatPage: React.FC = () => {
     setCurrentSessionPhononImages,
     addToCurrentSessionPhononImages,
     setShowPhononVisualization,
-    sessions
+    sessions,
+    updateBillingData
   } = useAppStore()
 
   const pendingFileMetadataRef = useRef<any[]>([])
@@ -355,6 +356,12 @@ const ChatPage: React.FC = () => {
         if (message.data.status === 'complete') {
           setIsLoading(false)
           setLoadingMessage('')
+
+          // 更新计费数据
+          if (message.data.billing) {
+            updateBillingData(message.data.billing)
+          }
+
           toast.success('✅ 处理完成', {
             id: 'agent-processing-toast',
             duration: 3000, // 显示3秒后消失

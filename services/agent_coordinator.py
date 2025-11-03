@@ -15,6 +15,7 @@ from google.genai import types
 from .config import agent_config
 from .data_processor import DataProcessor
 from .message_handler import MessageHandler
+from .photon_billing import get_billing_service
 
 logger = logging.getLogger(__name__)
 
@@ -131,10 +132,19 @@ class AgentCoordinator:
 
             logger.info(f"✅ Agent {agent_id} completed - processed {event_count} events")
 
-            # 发送完成状态
+            # 获取会话的计费统计
+            billing_service = get_billing_service()
+            session_usage = billing_service.get_session_usage(session_id or client_id)
+
+            # 发送完成状态（包含计费信息）
             await MessageHandler.send_message(websocket, "status", {
                 "status": "complete",
-                "message": "处理完成"
+                "message": "处理完成",
+                "billing": {
+                    "session_total_tokens": session_usage.get('total_tokens', 0),
+                    "session_total_photons": session_usage.get('total_photons', 0.0),
+                    "requests_count": session_usage.get('requests_count', 0)
+                }
             })
 
             logger.info(f"✅ Agent {agent_id} completed")

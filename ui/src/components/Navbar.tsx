@@ -2,13 +2,15 @@ import React from 'react'
 import { Menu, Settings, Wifi, WifiOff, Bot, Database } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { Link } from 'react-router-dom'
+import BillingIndicator from './BillingIndicator'
 
 const Navbar: React.FC = () => {
   const {
     sidebarOpen,
     setSidebarOpen,
     connected,
-    currentAgent
+    currentAgent,
+    billingData
   } = useAppStore()
 
   return (
@@ -43,6 +45,11 @@ const Navbar: React.FC = () => {
 
       {/* 右侧状态和控制 */}
       <div className="flex items-center space-x-2">
+        {/* 计费指示器 */}
+        <BillingIndicator billingData={billingData || undefined} />
+
+        {billingData && <div className="h-6 w-px bg-gray-300" />}
+
         {/* 连接状态 */}
         <div className="flex items-center space-x-1">
           {connected ? (
