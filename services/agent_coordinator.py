@@ -127,7 +127,7 @@ class AgentCoordinator:
                 event_count += 1
                 logger.info(f"🔍 [Event {event_count}] Type: {type(event).__name__}")
                 logger.info(f"🔍 [Event {event_count}] Attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
-                await self._handle_agent_event(event, agent_id, websocket, session_id)
+                await self._handle_agent_event(event, agent_id, websocket, client_id, session_id)
 
             logger.info(f"✅ Agent {agent_id} completed - processed {event_count} events")
 
@@ -336,6 +336,7 @@ class AgentCoordinator:
         event: Any,
         agent_id: str,
         websocket: Any,
+        client_id: str,
         session_id: Optional[str] = None
     ) -> None:
         """Handle agent event"""
