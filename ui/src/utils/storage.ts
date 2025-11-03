@@ -120,6 +120,7 @@ export function forceSaveState(state: any): void {
   try {
     // 在保存前，确保当前会话的数据已同步到 sessions 数组中
     let sessionsToSave = [...(state.sessions || [])]
+    let updatedCurrentSession = state.currentSession
 
     if (state.currentSession) {
       const currentSessionIndex = sessionsToSave.findIndex(
@@ -138,6 +139,7 @@ export function forceSaveState(state: any): void {
         }
 
         sessionsToSave[currentSessionIndex] = updatedSession
+        updatedCurrentSession = updatedSession  // 使用更新后的会话对象
 
         console.log('💾 更新会话数据:', {
           sessionId: updatedSession.id,
@@ -154,7 +156,7 @@ export function forceSaveState(state: any): void {
     const dataToSave = {
       state: {
         sessions: sessionsToSave,
-        currentSession: state.currentSession || null,
+        currentSession: updatedCurrentSession || null,
         messages: state.messages || [],
         settings: state.settings || {},
         // 持久化结构数据
