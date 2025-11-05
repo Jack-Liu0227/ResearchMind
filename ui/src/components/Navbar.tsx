@@ -1,8 +1,10 @@
-import React from 'react'
-import { Menu, Settings, Wifi, WifiOff, Bot, Database } from 'lucide-react'
+import React, { useState } from 'react'
+import { Menu, Settings, Wifi, WifiOff, Bot, Database, BarChart3 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { Link } from 'react-router-dom'
 import BillingIndicator from './BillingIndicator'
+import BohriumAuthButton from './BohriumAuthButton'
+import BillingStatsPanel from './BillingStatsPanel'
 
 const Navbar: React.FC = () => {
   const {
@@ -12,6 +14,8 @@ const Navbar: React.FC = () => {
     currentAgent,
     billingData
   } = useAppStore()
+
+  const [showBillingStats, setShowBillingStats] = useState(false)
 
   return (
     <nav className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4">
@@ -45,10 +49,27 @@ const Navbar: React.FC = () => {
 
       {/* 右侧状态和控制 */}
       <div className="flex items-center space-x-2">
+        {/* Bohrium OAuth 登录按钮 */}
+        <BohriumAuthButton />
+
+        {/* 分隔线 */}
+        <div className="h-6 w-px bg-gray-300" />
+
         {/* 计费指示器 */}
         <BillingIndicator billingData={billingData || undefined} />
 
         {billingData && <div className="h-6 w-px bg-gray-300" />}
+
+        {/* 计费统计按钮 */}
+        <button
+          onClick={() => setShowBillingStats(true)}
+          className="p-2 hover:bg-gray-100 rounded-md transition-colors"
+          title="查看详细计费统计"
+        >
+          <BarChart3 className="w-5 h-5 text-purple-600" />
+        </button>
+
+        <div className="h-6 w-px bg-gray-300" />
 
         {/* 连接状态 */}
         <div className="flex items-center space-x-1">
@@ -82,6 +103,12 @@ const Navbar: React.FC = () => {
           <Settings className="w-5 h-5" />
         </Link>
       </div>
+
+      {/* 计费统计面板 */}
+      <BillingStatsPanel
+        isOpen={showBillingStats}
+        onClose={() => setShowBillingStats(false)}
+      />
     </nav>
   )
 }

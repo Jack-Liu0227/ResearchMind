@@ -15,6 +15,7 @@ import { CrystalStructure } from '../types'
 import { CsvViewer, MarkdownViewer } from './FileViewer'
 import { API_CONFIG } from '../constants'
 import { resolveFileUrl } from '../utils/apiClient'
+import MessageBillingBadge from './MessageBillingBadge'
 
 /**
  * Tool Calls 折叠显示组件
@@ -799,6 +800,20 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
               )
             })()}
           </div>
+
+          {/* 计费信息徽章 */}
+          {(() => {
+            const shouldShow = !isUser && message.billing && (message.billing.tokens || 0) > 0
+            console.log('💎 [MessageBillingBadge] 消息:', message.id, '是否显示:', shouldShow, 'billing:', message.billing)
+            return shouldShow ? (
+              <MessageBillingBadge
+                tokens={message.billing.tokens}
+                photons={message.billing.photons}
+                modelName={message.billing.model_name}
+                compact={true}
+              />
+            ) : null
+          })()}
 
           {/* 操作按钮 */}
           {!isUser && (

@@ -67,7 +67,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       wsRef.current.onmessage = (event) => {
         try {
           const message: WebSocketMessage = JSON.parse(event.data)
-          
+
           // 处理消息
           if (message.type === 'message' && message.data) {
             const newMessage = {
@@ -79,10 +79,17 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
               agentName: message.data.agentName,
               type: message.data.type || 'text',
               metadata: message.data.metadata,
+              // 提取计费数据（如果存在）
+              billing: message.data.billing ? {
+                tokens: message.data.billing.tokens,
+                photons: message.data.billing.photons,
+                model_name: message.data.billing.model_name
+              } : undefined,
             }
+            console.log('💎 [useWebSocket] 消息中的计费数据:', newMessage.billing)
             addMessage(newMessage)
           }
-          
+
           onMessage?.(message)
         } catch (error) {
           console.error('Failed to parse WebSocket message:', error)

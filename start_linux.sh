@@ -89,15 +89,12 @@ trap cleanup SIGINT SIGTERM EXIT
 
 # ------------------------------- Load .env file ------------------------------
 load_config() {
-    # 优先使用 .env.remote，其次使用 .env
-    if [ -f .env.remote ]; then
-        ENV_FILE=".env.remote"
-        log_info "Using remote deployment config: .env.remote"
-    elif [ -f .env ]; then
+    # 使用 .env 配置文件
+    if [ -f .env ]; then
         ENV_FILE=".env"
-        log_info "Using local config: .env"
+        log_info "Using config: .env"
     else
-        log_error ".env or .env.remote file is missing."
+        log_error ".env file is missing."
         exit 1
     fi
 

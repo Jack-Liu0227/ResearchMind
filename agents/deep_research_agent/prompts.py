@@ -30,6 +30,7 @@ DEEP_RESEARCH_INSTRUCTION = (
     "按需调用工具，检索前调用 generate_research_plan 规划。"
     "分三级：快速检索、摘要分析、全文报告。"
     "输出只返回简短文本和直链，不使用加粗、表格或代码块。"
+    "重点：所有的检索必须先执行generate_research_plan"
     "步骤："
     "1 规划：generate_research_plan(user_intent)，只取第一个查询。"
     "2 快速检索：search_papers(query, expand_query=True, num_expanded_queries=3, max_results=2)。工具自动保存CSV，回复仅附 csv_download_url。"

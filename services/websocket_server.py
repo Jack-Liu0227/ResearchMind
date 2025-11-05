@@ -66,7 +66,7 @@ class WebSocketServer:
     async def handle_client(self, websocket, path):
         """
         Handle client connection
-        
+
         Args:
             websocket: WebSocket connection
             path: Connection path
@@ -77,7 +77,7 @@ class WebSocketServer:
             "connected_at": datetime.now().isoformat(),
             "path": path
         }
-        
+
         logger.info(f"✅ Client connected: {client_id}")
         logger.info(f"📊 Total clients: {len(self.connected_clients)}")
         
@@ -88,7 +88,7 @@ class WebSocketServer:
                 "message": "Connected to ResearchMind",
                 "timestamp": datetime.now().isoformat()
             })
-            
+
             # Send agents list
             await self.message_handler.send_agent_list(websocket)
             

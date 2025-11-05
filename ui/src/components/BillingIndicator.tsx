@@ -1,15 +1,18 @@
 /**
  * 光子计费指示器组件
- * 
+ *
  * 实时显示当前会话的 token 消耗和光子数
  */
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 
 interface BillingData {
   session_total_tokens: number
   session_total_photons: number
   requests_count: number
+  current_tokens?: number  // 本次对话的 tokens
+  current_photons?: number  // 本次对话的光子
+  model_name?: string  // 使用的模型
 }
 
 interface BillingIndicatorProps {
@@ -28,21 +31,40 @@ export const BillingIndicator: React.FC<BillingIndicatorProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(false)
   const [animateUpdate, setAnimateUpdate] = useState(false)
+  const [lastUpdate, setLastUpdate] = useState<{tokens: number, photons: number} | null>(null)
+  const prevDataRef = useRef<BillingData | null>(null)
 
-  // 当计费数据更新时触发动画
+  // 当计费数据更新时触发动画并计算增量
   useEffect(() => {
+    console.log('💎 [BillingIndicator] 收到计费数据:', billingData)
     if (billingData && billingData.session_total_tokens > 0) {
-      setAnimateUpdate(true)
-      const timer = setTimeout(() => setAnimateUpdate(false), 500)
-      return () => clearTimeout(timer)
+      // 计算本次增量
+      if (prevDataRef.current) {
+        const deltaTokens = billingData.session_total_tokens - prevDataRef.current.session_total_tokens
+        const deltaPhotons = billingData.session_total_photons - prevDataRef.current.session_total_photons
+
+        if (deltaTokens > 0) {
+          console.log('💎 [BillingIndicator] 增量更新:', { deltaTokens, deltaPhotons })
+          setLastUpdate({ tokens: deltaTokens, photons: deltaPhotons })
+          setAnimateUpdate(true)
+          const timer = setTimeout(() => setAnimateUpdate(false), 500)
+          return () => clearTimeout(timer)
+        }
+      }
+
+      prevDataRef.current = billingData
     }
   }, [billingData?.session_total_tokens, billingData?.session_total_photons])
 
   if (!billingData || billingData.session_total_tokens === 0) {
+    console.log('💎 [BillingIndicator] 不显示 - billingData:', billingData)
     return null
   }
 
-  const { session_total_tokens, session_total_photons, requests_count } = billingData
+  const { session_total_tokens, session_total_photons, requests_count, model_name } = billingData
+  const tokensPerPhoton = 3000  // 从环境变量读取，默认 3000
+
+  console.log('💎 [BillingIndicator] 渲染计费指示器:', { session_total_tokens, session_total_photons })
 
   return (
     <div className={`billing-indicator ${className}`}>
@@ -85,6 +107,28 @@ export const BillingIndicator: React.FC<BillingIndicatorProps> = ({
             <h4>💎 光子计费详情</h4>
           </div>
           <div className="billing-details-content">
+            {/* 本次对话 */}
+            {lastUpdate && lastUpdate.tokens > 0 && (
+              <>
+                <div className="billing-section-title">本次对话</div>
+                <div className="billing-detail-row">
+                  <span className="billing-detail-label">Tokens:</span>
+                  <span className="billing-detail-value current">
+                    +{lastUpdate.tokens.toLocaleString()}
+                  </span>
+                </div>
+                <div className="billing-detail-row">
+                  <span className="billing-detail-label">光子:</span>
+                  <span className="billing-detail-value current">
+                    +{lastUpdate.photons.toFixed(4)}
+                  </span>
+                </div>
+                <div className="billing-divider" />
+              </>
+            )}
+
+            {/* 会话累计 */}
+            <div className="billing-section-title">会话累计</div>
             <div className="billing-detail-row">
               <span className="billing-detail-label">累计 Tokens:</span>
               <span className="billing-detail-value">{session_total_tokens.toLocaleString()}</span>
@@ -103,8 +147,20 @@ export const BillingIndicator: React.FC<BillingIndicatorProps> = ({
                 {requests_count > 0 ? (session_total_tokens / requests_count).toFixed(0) : 0} tokens
               </span>
             </div>
+
+            {/* 模型信息 */}
+            {model_name && (
+              <>
+                <div className="billing-divider" />
+                <div className="billing-detail-row">
+                  <span className="billing-detail-label">使用模型:</span>
+                  <span className="billing-detail-value model">{model_name}</span>
+                </div>
+              </>
+            )}
+
             <div className="billing-detail-info">
-              <small>💡 收费标准: 3000 tokens = 1 光子</small>
+              <small>💡 收费标准: {tokensPerPhoton.toLocaleString()} tokens = 1 光子</small>
             </div>
           </div>
         </div>
@@ -267,6 +323,38 @@ export const BillingIndicator: React.FC<BillingIndicatorProps> = ({
         .billing-detail-value.highlight {
           color: #667eea;
           font-size: 16px;
+        }
+
+        .billing-detail-value.current {
+          color: #10b981;
+          font-weight: 700;
+        }
+
+        .billing-detail-value.model {
+          color: #6366f1;
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .billing-section-title {
+          font-size: 11px;
+          font-weight: 600;
+          color: #9ca3af;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-top: 8px;
+          margin-bottom: 8px;
+        }
+
+        .billing-section-title:first-child {
+          margin-top: 0;
+        }
+
+        .billing-divider {
+          height: 1px;
+          background: linear-gradient(to right, transparent, #e5e7eb, transparent);
+          margin: 12px 0;
         }
 
         .billing-detail-info {

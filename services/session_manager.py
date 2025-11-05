@@ -3,6 +3,11 @@ Session Manager
 
 Manages chat sessions, data isolation, and persistence.
 Ensures data (structures, images, messages) are isolated per session.
+
+集成 Bohrium 计费功能：
+- 每个会话独立追踪 token 使用和光子消耗
+- 支持用户自定义 AccessKey（优先）或使用开发者默认 AK
+- 会话结束时可选择性扣费
 """
 
 import os
@@ -10,6 +15,7 @@ import json
 import logging
 import shutil
 import time
+import threading
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -19,17 +25,20 @@ logger = logging.getLogger(__name__)
 
 class SessionManager:
     """Manage chat sessions and data isolation"""
-    
+
     # Base directories
     BASE_DATA_DIR = Path("session_data")
     STRUCTURES_DIR = BASE_DATA_DIR / "structures"
     IMAGES_DIR = BASE_DATA_DIR / "images"
     METADATA_DIR = BASE_DATA_DIR / "metadata"
-    
+
     # Session registry
     _sessions: Dict[str, Dict[str, Any]] = {}
     _session_registry_file = BASE_DATA_DIR / "session_registry.json"
     _initialized: bool = False
+
+    # 线程安全锁，保护会话数据
+    _sessions_lock = threading.RLock()
     
     @classmethod
     def initialize(cls):
@@ -76,26 +85,28 @@ class SessionManager:
     @classmethod
     def _load_session_registry(cls):
         """Load session registry from file"""
-        if cls._session_registry_file.exists():
-            try:
-                with open(cls._session_registry_file, 'r', encoding='utf-8') as f:
-                    cls._sessions = json.load(f)
-                logger.info(f"📖 Loaded {len(cls._sessions)} sessions from registry")
-            except Exception as e:
-                logger.error(f"Failed to load session registry: {e}")
+        with cls._sessions_lock:
+            if cls._session_registry_file.exists():
+                try:
+                    with open(cls._session_registry_file, 'r', encoding='utf-8') as f:
+                        cls._sessions = json.load(f)
+                    logger.info(f"📖 Loaded {len(cls._sessions)} sessions from registry")
+                except Exception as e:
+                    logger.error(f"Failed to load session registry: {e}")
+                    cls._sessions = {}
+            else:
                 cls._sessions = {}
-        else:
-            cls._sessions = {}
-    
+
     @classmethod
     def _save_session_registry(cls):
         """Save session registry to file"""
-        try:
-            with open(cls._session_registry_file, 'w', encoding='utf-8') as f:
-                json.dump(cls._sessions, f, indent=2, ensure_ascii=False)
-            logger.debug(f"💾 Saved session registry ({len(cls._sessions)} sessions)")
-        except Exception as e:
-            logger.error(f"Failed to save session registry: {e}")
+        with cls._sessions_lock:
+            try:
+                with open(cls._session_registry_file, 'w', encoding='utf-8') as f:
+                    json.dump(cls._sessions, f, indent=2, ensure_ascii=False)
+                logger.debug(f"💾 Saved session registry ({len(cls._sessions)} sessions)")
+            except Exception as e:
+                logger.error(f"Failed to save session registry: {e}")
     
     @classmethod
     def create_session(
@@ -107,55 +118,66 @@ class SessionManager:
     ) -> Dict[str, Any]:
         """
         Create a new session
-        
+
         Args:
             session_id: Unique session ID
             client_id: Client ID
             agent_id: Agent ID (optional)
             title: Session title (optional)
-        
+
         Returns:
             Session metadata
         """
-        if session_id in cls._sessions:
-            logger.warning(f"Session {session_id} already exists")
-            return cls._sessions[session_id]
-        
-        # Create session metadata
-        session_data = {
-            "session_id": session_id,
-            "client_id": client_id,
-            "agent_id": agent_id,
-            "title": title or f"Session {session_id[:8]}",
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-            "message_count": 0,
-            "structure_count": 0,
-            "image_count": 0
-        }
-        
-        # Create session directories
-        session_structures_dir = cls.STRUCTURES_DIR / session_id
-        session_images_dir = cls.IMAGES_DIR / session_id
-        session_metadata_file = cls.METADATA_DIR / f"{session_id}.json"
+        with cls._sessions_lock:
+            if session_id in cls._sessions:
+                logger.warning(f"Session {session_id} already exists")
+                return cls._sessions[session_id]
 
-        session_structures_dir.mkdir(parents=True, exist_ok=True)
-        session_images_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Save session metadata
-        try:
-            with open(session_metadata_file, 'w', encoding='utf-8') as f:
-                json.dump(session_data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Failed to save session metadata: {e}")
-        
-        # Register session
-        cls._sessions[session_id] = session_data
-        cls._save_session_registry()
-        
-        logger.info(f"🆕 Created session: {session_id} (client: {client_id}, agent: {agent_id})")
-        
-        return session_data
+            # Create session metadata
+            session_data = {
+                "session_id": session_id,
+                "client_id": client_id,
+                "agent_id": agent_id,
+                "title": title or f"Session {session_id[:8]}",
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "message_count": 0,
+                "structure_count": 0,
+                "image_count": 0,
+                # Bohrium 计费相关
+                "billing": {
+                    "total_tokens": 0,
+                    "total_photons": 0.0,
+                    "requests_count": 0,
+                    "charged": False,  # 是否已扣费
+                    "charge_result": None,  # 扣费结果
+                    "user_access_key": None,  # 用户自定义 AK（可选）
+                    "user_sku_id": None  # 用户自定义 SKU ID（可选）
+                }
+            }
+
+            # Create session directories
+            session_structures_dir = cls.STRUCTURES_DIR / session_id
+            session_images_dir = cls.IMAGES_DIR / session_id
+            session_metadata_file = cls.METADATA_DIR / f"{session_id}.json"
+
+            session_structures_dir.mkdir(parents=True, exist_ok=True)
+            session_images_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save session metadata
+            try:
+                with open(session_metadata_file, 'w', encoding='utf-8') as f:
+                    json.dump(session_data, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                logger.error(f"Failed to save session metadata: {e}")
+
+            # Register session
+            cls._sessions[session_id] = session_data
+            cls._save_session_registry()
+
+            logger.info(f"🆕 Created session: {session_id} (client: {client_id}, agent: {agent_id})")
+
+            return session_data
     
     @classmethod
     def get_session(cls, session_id: str) -> Optional[Dict[str, Any]]:
@@ -174,60 +196,62 @@ class SessionManager:
     def update_session(cls, session_id: str, updates: Dict[str, Any]):
         """
         Update session metadata
-        
+
         Args:
             session_id: Session ID
             updates: Fields to update
         """
-        if session_id not in cls._sessions:
-            logger.warning(f"Session {session_id} not found")
-            return
-        
-        cls._sessions[session_id].update(updates)
-        cls._sessions[session_id]["updated_at"] = datetime.now().isoformat()
-        
-        # Save to file
-        session_metadata_file = cls.METADATA_DIR / f"{session_id}.json"
-        try:
-            with open(session_metadata_file, 'w', encoding='utf-8') as f:
-                json.dump(cls._sessions[session_id], f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Failed to update session metadata: {e}")
-        
-        cls._save_session_registry()
-    
+        with cls._sessions_lock:
+            if session_id not in cls._sessions:
+                logger.warning(f"Session {session_id} not found")
+                return
+
+            cls._sessions[session_id].update(updates)
+            cls._sessions[session_id]["updated_at"] = datetime.now().isoformat()
+
+            # Save to file
+            session_metadata_file = cls.METADATA_DIR / f"{session_id}.json"
+            try:
+                with open(session_metadata_file, 'w', encoding='utf-8') as f:
+                    json.dump(cls._sessions[session_id], f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                logger.error(f"Failed to update session metadata: {e}")
+
+            cls._save_session_registry()
+
     @classmethod
     def delete_session(cls, session_id: str):
         """
         Delete a session and all its data
-        
+
         Args:
             session_id: Session ID
         """
-        if session_id not in cls._sessions:
-            logger.warning(f"Session {session_id} not found")
-            return
-        
-        # Delete session directories
-        session_structures_dir = cls.STRUCTURES_DIR / session_id
-        session_images_dir = cls.IMAGES_DIR / session_id
-        session_metadata_file = cls.METADATA_DIR / f"{session_id}.json"
-        
-        try:
-            if session_structures_dir.exists():
-                shutil.rmtree(session_structures_dir)
-            if session_images_dir.exists():
-                shutil.rmtree(session_images_dir)
-            if session_metadata_file.exists():
-                session_metadata_file.unlink()
-        except Exception as e:
-            logger.error(f"Failed to delete session files: {e}")
-        
-        # Remove from registry
-        del cls._sessions[session_id]
-        cls._save_session_registry()
-        
-        logger.info(f"🗑️ Deleted session: {session_id}")
+        with cls._sessions_lock:
+            if session_id not in cls._sessions:
+                logger.warning(f"Session {session_id} not found")
+                return
+
+            # Delete session directories
+            session_structures_dir = cls.STRUCTURES_DIR / session_id
+            session_images_dir = cls.IMAGES_DIR / session_id
+            session_metadata_file = cls.METADATA_DIR / f"{session_id}.json"
+
+            try:
+                if session_structures_dir.exists():
+                    shutil.rmtree(session_structures_dir)
+                if session_images_dir.exists():
+                    shutil.rmtree(session_images_dir)
+                if session_metadata_file.exists():
+                    session_metadata_file.unlink()
+            except Exception as e:
+                logger.error(f"Failed to delete session files: {e}")
+
+            # Remove from registry
+            del cls._sessions[session_id]
+            cls._save_session_registry()
+
+            logger.info(f"🗑️ Deleted session: {session_id}")
     
     @classmethod
     def get_session_structures_dir(cls, session_id: str) -> Path:
@@ -287,6 +311,164 @@ class SessionManager:
         if session_id in cls._sessions:
             cls._sessions[session_id]["image_count"] = cls._sessions[session_id].get("image_count", 0) + 1
             cls.update_session(session_id, {})
+
+    # ==========================================
+    # Bohrium 计费相关方法
+    # ==========================================
+
+    @classmethod
+    def set_user_billing_config(cls, session_id: str, access_key: str, sku_id: str):
+        """
+        设置会话的用户计费配置
+
+        Args:
+            session_id: 会话 ID
+            access_key: 用户的 Bohrium AccessKey
+            sku_id: 用户的 SKU ID
+        """
+        with cls._sessions_lock:
+            if session_id not in cls._sessions:
+                logger.warning(f"Session {session_id} not found")
+                return
+
+            cls._sessions[session_id]["billing"]["user_access_key"] = access_key
+            cls._sessions[session_id]["billing"]["user_sku_id"] = sku_id
+            cls.update_session(session_id, {})
+
+            logger.info(f"💳 设置会话 {session_id[:8]}... 的用户计费配置 (AK: {access_key[:8]}...)")
+
+        # 同时更新隔离的计费上下文
+        try:
+            from .user_billing_config import get_billing_context_manager
+            context_manager = get_billing_context_manager()
+            context = context_manager.get_or_create_context(session_id, session_id)
+            context.set_billing_config(access_key, sku_id)
+        except Exception as e:
+            logger.debug(f"未能更新隔离计费上下文: {e}")
+
+    @classmethod
+    def update_billing_usage(cls, session_id: str, tokens: int, photons: float):
+        """
+        更新会话的计费使用情况
+
+        Args:
+            session_id: 会话 ID
+            tokens: 本次使用的 tokens
+            photons: 本次消耗的光子数
+        """
+        with cls._sessions_lock:
+            if session_id not in cls._sessions:
+                logger.warning(f"Session {session_id} not found")
+                return
+
+            billing = cls._sessions[session_id]["billing"]
+            billing["total_tokens"] += tokens
+            billing["total_photons"] += photons
+            billing["requests_count"] += 1
+
+            cls.update_session(session_id, {})
+
+            logger.debug(f"📊 会话 {session_id[:8]}... 计费更新: +{tokens} tokens, +{photons:.4f} 光子 (累计: {billing['total_tokens']} tokens, {billing['total_photons']:.4f} 光子)")
+
+    @classmethod
+    def get_billing_summary(cls, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取会话的计费摘要
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            计费摘要或 None
+        """
+        with cls._sessions_lock:
+            if session_id not in cls._sessions:
+                return None
+
+            billing = cls._sessions[session_id]["billing"]
+            return {
+                "session_id": session_id,
+                "total_tokens": billing["total_tokens"],
+                "total_photons": billing["total_photons"],
+                "requests_count": billing["requests_count"],
+                "avg_tokens_per_request": billing["total_tokens"] / billing["requests_count"] if billing["requests_count"] > 0 else 0,
+                "charged": billing["charged"],
+                "has_user_config": billing["user_access_key"] is not None,
+                "billing_source": "用户账户" if billing["user_access_key"] else "开发者账户"
+            }
+
+    @classmethod
+    def charge_session(cls, session_id: str) -> Dict[str, Any]:
+        """
+        对会话进行实际扣费（调用 Bohrium API）
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            扣费结果
+        """
+        with cls._sessions_lock:
+            if session_id not in cls._sessions:
+                return {
+                    "success": False,
+                    "message": "会话不存在"
+                }
+
+            billing = cls._sessions[session_id]["billing"]
+
+            # 检查是否已扣费
+            if billing["charged"]:
+                logger.warning(f"⚠️ 会话 {session_id[:8]}... 已经扣费，跳过")
+                return {
+                    "success": False,
+                    "message": "会话已扣费",
+                    "previous_result": billing["charge_result"]
+                }
+
+            # 检查是否有消耗
+            if billing["total_photons"] <= 0:
+                logger.info(f"ℹ️ 会话 {session_id[:8]}... 无光子消耗，跳过扣费")
+                return {
+                    "success": True,
+                    "message": "无需扣费",
+                    "photons": 0
+                }
+
+        # 调用计费服务（在锁外执行，避免长时间持有锁）
+        try:
+            from .photon_billing import get_billing_service
+            billing_service = get_billing_service()
+
+            # 使用用户 AK 或开发者默认 AK
+            result = billing_service.charge_photons(
+                photons=billing["total_photons"],
+                session_id=session_id,
+                user_access_key=billing["user_access_key"],
+                user_sku_id=billing["user_sku_id"]
+            )
+
+            # 记录扣费结果（需要重新获取锁）
+            with cls._sessions_lock:
+                if session_id in cls._sessions:
+                    billing = cls._sessions[session_id]["billing"]
+                    billing["charged"] = result.get("success", False)
+                    billing["charge_result"] = result
+                    cls.update_session(session_id, {})
+
+            if result.get("success"):
+                logger.info(f"✅ 会话 {session_id[:8]}... 扣费成功: {billing['total_photons']:.4f} 光子")
+            else:
+                logger.error(f"❌ 会话 {session_id[:8]}... 扣费失败: {result.get('message')}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ 会话 {session_id[:8]}... 扣费异常: {e}", exc_info=True)
+            return {
+                "success": False,
+                "message": f"扣费异常: {str(e)}"
+            }
 
 
 # Initialize on module import

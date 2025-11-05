@@ -20,6 +20,9 @@ export interface BillingData {
   session_total_tokens: number
   session_total_photons: number
   requests_count: number
+  current_tokens?: number  // 本次对话的 tokens
+  current_photons?: number  // 本次对话的光子
+  model_name?: string  // 使用的模型
 }
 
 interface AppState {

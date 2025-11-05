@@ -72,7 +72,7 @@ class ServiceStatusResponse(BaseModel):
 
 class HTTPServer:
     """HTTP API server for ResearchMind"""
-    
+
     def __init__(self):
         """Initialize HTTP server"""
         self.app = FastAPI(
@@ -80,16 +80,19 @@ class HTTPServer:
             description="HTTP API for ResearchMind crystal structure analysis",
             version="1.0.0"
         )
-        
+
         # Configuration constants
         self.MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB per file
         self.MAX_FILES_COUNT = 50  # Maximum number of files in batch upload
-        
+
         # Setup routes
         self._setup_routes()
 
         # Setup upload endpoints
         self._setup_upload_endpoints()
+
+        # Setup billing and auth routes
+        self._setup_billing_routes()
 
         # Setup static files
         StaticFileService.setup_static_files(self.app)
@@ -515,6 +518,16 @@ class HTTPServer:
     def get_app(self) -> FastAPI:
         """Get FastAPI application instance"""
         return self.app
+
+    def _setup_billing_routes(self):
+        """Setup billing and OAuth authentication routes"""
+        try:
+            from services.billing_api import router as billing_router, auth_router
+            self.app.include_router(billing_router)
+            self.app.include_router(auth_router)
+            logger.info("✅ Billing and OAuth routes registered")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to register billing routes: {e}")
 
     def _setup_upload_endpoints(self):
         """Setup file upload endpoints"""

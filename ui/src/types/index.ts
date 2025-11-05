@@ -29,6 +29,11 @@ export interface Message {
   agentName?: string
   type?: 'text' | 'structure' | 'analysis' | 'error'
   toolCalls?: ToolCall[]  // 工具调用记录
+  billing?: {  // 计费信息
+    tokens?: number  // 本次对话的 tokens
+    photons?: number  // 本次对话的光子
+    model_name?: string  // 使用的模型
+  }
   metadata?: {
     structureData?: CrystalStructure
     analysisData?: AnalysisResult

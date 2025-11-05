@@ -29,6 +29,10 @@ class MessageHandler:
             "upload_structures": self.handle_upload_structures,  # Multiple files
             "chat_with_attachments": self.handle_chat_with_attachments,
             "ping": self.handle_ping,
+            # Bohrium 计费相关
+            "charge_session": self.handle_charge_session,
+            "get_billing_summary": self.handle_get_billing_summary,
+            "set_user_billing_config": self.handle_set_user_billing_config,
         }
     
     async def handle_message(
@@ -320,7 +324,8 @@ class MessageHandler:
         agent_id: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
-        tool_calls: Optional[List[Dict[str, Any]]] = None
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        billing: Optional[Dict[str, Any]] = None
     ):
         """
         Send agent response to client
@@ -331,6 +336,7 @@ class MessageHandler:
             content: Response content
             metadata: Optional metadata
             tool_calls: Optional list of tool call records
+            billing: Optional billing data (tokens, photons, model_name)
         """
         # Get agent config
         from .config import agent_config
@@ -346,6 +352,11 @@ class MessageHandler:
             "timestamp": datetime.now().isoformat()
         }
 
+        # Add billing data if provided
+        if billing:
+            message_data["billing"] = billing
+            logger.debug(f"💎 [消息计费] 附加计费数据: tokens={billing.get('tokens')}, photons={billing.get('photons')}")
+
         # Add tool calls if provided
         if tool_calls:
             message_data["toolCalls"] = tool_calls
@@ -354,11 +365,152 @@ class MessageHandler:
         await MessageHandler.send_message(websocket, "message", message_data)
         logger.info(f"📤 Sent agent response from {agent_id}: {content[:100]}...")
     
+    async def handle_charge_session(
+        self,
+        client_id: str,
+        websocket: Any,
+        data: dict,
+        agent_coordinator: "AgentCoordinator"
+    ) -> None:
+        """
+        处理会话扣费请求
+
+        Args:
+            client_id: 客户端 ID
+            websocket: WebSocket 连接
+            data: 消息数据，包含 sessionId
+            agent_coordinator: Agent 协调器
+        """
+        session_id = data.get("sessionId")
+
+        if not session_id:
+            await self.send_error(websocket, "缺少 sessionId 参数")
+            return
+
+        logger.info(f"💳 [Client:{client_id}] 请求对会话 {session_id[:8]}... 进行扣费")
+
+        try:
+            from .session_manager import SessionManager
+
+            # 执行扣费
+            result = SessionManager.charge_session(session_id)
+
+            # 发送结果
+            await self.send_message(websocket, "charge_result", {
+                "sessionId": session_id,
+                "success": result.get("success", False),
+                "message": result.get("message", ""),
+                "photons": result.get("photons", 0),
+                "bizNo": result.get("bizNo"),
+                "timestamp": datetime.now().isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"❌ 扣费失败: {e}", exc_info=True)
+            await self.send_error(websocket, f"扣费失败: {str(e)}")
+
+    async def handle_get_billing_summary(
+        self,
+        client_id: str,
+        websocket: Any,
+        data: dict,
+        agent_coordinator: "AgentCoordinator"
+    ) -> None:
+        """
+        获取会话的计费摘要
+
+        Args:
+            client_id: 客户端 ID
+            websocket: WebSocket 连接
+            data: 消息数据，包含 sessionId
+            agent_coordinator: Agent 协调器
+        """
+        session_id = data.get("sessionId")
+
+        if not session_id:
+            await self.send_error(websocket, "缺少 sessionId 参数")
+            return
+
+        try:
+            from .session_manager import SessionManager
+
+            # 获取计费摘要
+            summary = SessionManager.get_billing_summary(session_id)
+
+            if summary:
+                await self.send_message(websocket, "billing_summary", summary)
+            else:
+                await self.send_error(websocket, "会话不存在")
+
+        except Exception as e:
+            logger.error(f"❌ 获取计费摘要失败: {e}", exc_info=True)
+            await self.send_error(websocket, f"获取计费摘要失败: {str(e)}")
+
+    async def handle_set_user_billing_config(
+        self,
+        client_id: str,
+        websocket: Any,
+        data: dict,
+        agent_coordinator: "AgentCoordinator"
+    ) -> None:
+        """
+        设置用户的计费配置（从 Cookie 中获取）
+
+        Args:
+            client_id: 客户端 ID
+            websocket: WebSocket 连接
+            data: 消息数据，包含 sessionId, accessKey, skuId, clientName
+            agent_coordinator: Agent 协调器
+        """
+        session_id = data.get("sessionId")
+        access_key = data.get("accessKey") or data.get("appAccessKey")  # 支持两种命名
+        sku_id = data.get("skuId")
+        client_name = data.get("clientName", "ResearchMind")  # 默认值
+
+        if not session_id or not access_key or not sku_id:
+            await self.send_error(websocket, "缺少必要参数: sessionId, accessKey, skuId")
+            return
+
+        logger.info(
+            f"💳 [Client:{client_id}] 设置会话 {session_id[:8]}... 的用户计费配置 "
+            f"(AK: {access_key[:8]}...{access_key[-4:]}, Client: {client_name})"
+        )
+
+        try:
+            from .session_manager import SessionManager
+            from .user_billing_config import get_config_manager
+
+            # 设置会话的用户配置（临时）
+            SessionManager.set_user_billing_config(session_id, access_key, sku_id)
+
+            # 保存到用户配置文件（持久化）
+            config_manager = get_config_manager()
+            config_manager.save_user_config(
+                user_id=session_id,
+                access_key=access_key,
+                sku_id=sku_id,
+                client_name=client_name
+            )
+
+            # 发送成功消息
+            await self.send_message(websocket, "config_updated", {
+                "sessionId": session_id,
+                "success": True,
+                "message": "用户计费配置已更新",
+                "source": "来自用户 Cookie",
+                "clientName": client_name,
+                "timestamp": datetime.now().isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"❌ 设置用户配置失败: {e}", exc_info=True)
+            await self.send_error(websocket, f"设置用户配置失败: {str(e)}")
+
     @staticmethod
     async def send_agent_thinking(websocket: Any, agent_id: str, thinking: str):
         """
         Send agent thinking status to client
-        
+
         Args:
             websocket: WebSocket connection
             agent_id: Agent ID

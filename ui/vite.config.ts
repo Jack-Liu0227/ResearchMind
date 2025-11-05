@@ -66,9 +66,7 @@ export default defineConfig({
   optimizeDeps: {
     include: ['react', 'react-dom', 'react-router-dom'],
     // 强制预构建所有依赖，避免运行时优化导致的内容长度问题
-    force: false,
-    // 禁用依赖发现
-    disabled: false,
+    force: false
   },
   // 添加此配置以解决内容长度不匹配问题
   preview: {

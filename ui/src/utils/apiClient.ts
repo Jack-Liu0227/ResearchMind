@@ -329,3 +329,139 @@ export async function checkAPIHealthSafe(): Promise<boolean> {
   }
 }
 
+/**
+ * 计费统计相关接口
+ */
+
+export interface BillingStats {
+  conversation_id?: string
+  user_id?: string
+  total_tokens: number
+  total_photons: number
+  request_count: number
+  charged?: boolean
+  has_user_config?: boolean
+  billing_source?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface UserBillingStats {
+  user_id: string
+  total_conversations: number
+  total_tokens: number
+  total_photons: number
+  total_requests: number
+  conversations: BillingStats[]
+}
+
+export interface GlobalBillingStats {
+  total_tokens: number
+  total_photons: number
+  total_requests: number
+  total_sessions: number
+  start_time: string
+  current_time: string
+  billing_config: {
+    tokens_per_photon: number
+    billing_enabled: boolean
+    precision: number
+  }
+}
+
+/**
+ * 获取指定对话的计费统计
+ */
+export async function getConversationBillingStats(conversationId: string): Promise<BillingStats | null> {
+  try {
+    const response = await fetch(buildApiUrl(`billing/stats/conversation/${conversationId}`))
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch conversation billing stats: ${response.statusText}`)
+    }
+
+    const result = await response.json()
+
+    if (result.success && result.data) {
+      return result.data
+    }
+
+    return null
+  } catch (error) {
+    console.error('❌ 获取对话计费统计失败:', error)
+    return null
+  }
+}
+
+/**
+ * 获取指定用户的总计费统计
+ */
+export async function getUserBillingStats(userId: string): Promise<UserBillingStats | null> {
+  try {
+    const response = await fetch(buildApiUrl(`billing/stats/user/${userId}`))
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch user billing stats: ${response.statusText}`)
+    }
+
+    const result = await response.json()
+
+    if (result.success && result.data) {
+      return result.data
+    }
+
+    return null
+  } catch (error) {
+    console.error('❌ 获取用户计费统计失败:', error)
+    return null
+  }
+}
+
+/**
+ * 获取全局计费统计
+ */
+export async function getGlobalBillingStats(): Promise<GlobalBillingStats | null> {
+  try {
+    const response = await fetch(buildApiUrl('billing/stats/global'))
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch global billing stats: ${response.statusText}`)
+    }
+
+    const result = await response.json()
+
+    if (result.success && result.data) {
+      return result.data
+    }
+
+    return null
+  } catch (error) {
+    console.error('❌ 获取全局计费统计失败:', error)
+    return null
+  }
+}
+
+/**
+ * 列出指定用户的所有对话及其计费信息
+ */
+export async function listUserConversations(userId: string): Promise<BillingStats[]> {
+  try {
+    const response = await fetch(buildApiUrl(`billing/conversations/user/${userId}`))
+
+    if (!response.ok) {
+      throw new Error(`Failed to list user conversations: ${response.statusText}`)
+    }
+
+    const result = await response.json()
+
+    if (result.success && result.conversations) {
+      return result.conversations
+    }
+
+    return []
+  } catch (error) {
+    console.error('❌ 列出用户对话失败:', error)
+    return []
+  }
+}
+
