@@ -155,10 +155,18 @@ class AgentCoordinator:
                         actual_session_id = f"upload_{timestamp}_{unique_id}"
                         logger.info(f"📝 Generated session_id for file upload: {actual_session_id}")
 
-                    # 创建临时上传目录 - 使用 MCP server 的 papers 目录
-                    # 确保与 mcp_servers/paper_search/modules/shared/session_folder_manager.py 中的路径一致
-                    mcp_papers_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
-                    upload_dir = mcp_papers_dir / actual_session_id / "uploads"
+                    # 根据 agent 类型选择不同的上传目录
+                    if agent_id == 'deep_research_agent':
+                        # 文献研究 agent 使用 papers 目录
+                        base_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
+                    elif agent_id == 'simulation_agent':
+                        # 模拟 agent 使用 simulation/cif 目录
+                        base_dir = Path(__file__).parent.parent / "mcp_servers" / "simulation" / "cif"
+                    else:
+                        # 默认使用 papers 目录
+                        base_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
+
+                    upload_dir = base_dir / actual_session_id / "uploads"
                     upload_dir.mkdir(parents=True, exist_ok=True)
 
                     saved_files = []
