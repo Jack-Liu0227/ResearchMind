@@ -135,9 +135,11 @@ class AgentCoordinator:
             parts = [types.Part(text=content)]
             # Attach optional file/text parts (e.g., CIF content) so agents can parse them
             if attachments:
-                # 对于 deep_research_agent 和 simulation_agent，如果有文件附件（包含 encoding 字段），
-                # 则先保存到临时目录，然后传递文件路径（而不是内容）给 LLM
-                if agent_id in ['deep_research_agent', 'simulation_agent'] and any(att.get('encoding') for att in attachments):
+                # 对于 deep_research_agent 和 simulation_agent，保存文件到磁盘
+                # 支持两种格式：
+                # 1. base64 编码的文件（encoding='base64'）
+                # 2. 纯文本文件（如 CIF 文件，直接包含 content 字符串）
+                if agent_id in ['deep_research_agent', 'simulation_agent']:
                     import json
                     import base64
                     from pathlib import Path
@@ -161,11 +163,11 @@ class AgentCoordinator:
 
                     saved_files = []
                     for att in attachments:
-                        if att.get('encoding') == 'base64':
-                            filename = att.get('filename', 'document.pdf')
-                            content_b64 = att.get('content', '')
+                        filename = att.get('filename', 'document.txt')
 
-                            # 解码并保存文件到磁盘
+                        # 处理 base64 编码的文件
+                        if att.get('encoding') == 'base64':
+                            content_b64 = att.get('content', '')
                             try:
                                 file_bytes = base64.b64decode(content_b64)
                                 file_path = upload_dir / filename
@@ -177,17 +179,36 @@ class AgentCoordinator:
                                     'size': len(file_bytes),
                                     'mime_type': att.get('mime_type', 'application/octet-stream')
                                 })
-                                logger.info(f"💾 Saved uploaded file: {filename} ({len(file_bytes)} bytes) -> {file_path}")
+                                logger.info(f"💾 Saved base64 file: {filename} ({len(file_bytes)} bytes) -> {file_path}")
                             except Exception as e:
-                                logger.error(f"❌ Failed to save file {filename}: {e}")
+                                logger.error(f"❌ Failed to save base64 file {filename}: {e}")
                                 continue
+
+                        # 处理纯文本文件（如 CIF 文件）
+                        else:
+                            text_content = att.get('content', '')
+                            if text_content:
+                                try:
+                                    file_path = upload_dir / filename
+                                    file_path.write_text(text_content, encoding='utf-8')
+
+                                    saved_files.append({
+                                        'filename': filename,
+                                        'path': str(file_path),
+                                        'size': len(text_content.encode('utf-8')),
+                                        'mime_type': att.get('mime_type', 'text/plain')
+                                    })
+                                    logger.info(f"💾 Saved text file: {filename} ({len(text_content)} chars) -> {file_path}")
+                                except Exception as e:
+                                    logger.error(f"❌ Failed to save text file {filename}: {e}")
+                                    continue
 
                     if saved_files:
                         # 只传递文件元数据（不包含内容），引导 agent 使用工具
                         file_info = f"\n\n用户上传了 {len(saved_files)} 个文件：\n"
                         for f in saved_files:
-                            size_mb = f['size'] / (1024 * 1024)
-                            file_info += f"- {f['filename']} ({size_mb:.2f}MB, {f['mime_type']})\n"
+                            size_kb = f['size'] / 1024
+                            file_info += f"- {f['filename']} ({size_kb:.2f}KB, {f['mime_type']})\n"
                         file_info += f"\n文件已保存到：{upload_dir}\n"
 
                         # 根据 agent 类型提供不同的工具调用提示
