@@ -84,6 +84,12 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
                             'saved_path': local_file,
                             'filename': local_file.split('/')[-1] if '/' in local_file else local_file.split('\\')[-1]
                         }
+                elif key == 'FullText':
+                    # 恢复完整文本（用于报告生成）
+                    full_text = paper.pop('FullText')
+                    if full_text and isinstance(full_text, str) and full_text.strip():
+                        paper['full_text'] = full_text
+                        paper['content'] = full_text  # 同时设置 content 字段以兼容旧代码
 
         logger.info(f"Successfully read {len(papers)} papers from CSV: {csv_file_path}")
         return papers
@@ -355,10 +361,11 @@ def save_papers_to_csv(
     output_dir: str = None,
     session_id: str = None,
     topic: str = None,
-    file_prefix: str = 'papers'
+    file_prefix: str = 'papers',
+    append_mode: bool = True
 ) -> Dict[str, Any]:
     """
-    生成论文信息的CSV内容并保存到文件
+    生成论文信息的CSV内容并保存到文件（支持追加模式）
 
     Args:
         papers: 论文列表，每篇论文包含：
@@ -371,11 +378,15 @@ def save_papers_to_csv(
             - source: 来源
             - categories: 分类（可选）
             - score: 相关性评分（可选）
+            - full_text: 完整文本（可选，用于报告生成）
         output_path: 输出文件路径（可选）
         output_dir: 输出目录（可选）
         session_id: 会话ID（用于确定保存位置）
         topic: 主题（用于确定保存位置）
         file_prefix: 文件名前缀（默认: 'papers'，可以是 'summary_papers', 'report_papers' 等）
+        append_mode: 是否启用追加模式（默认: True）
+                    - True: 合并到现有 CSV 文件，去重后保存
+                    - False: 创建新的带时间戳的 CSV 文件
 
     Returns:
         包含CSV数据和文件路径的字典
@@ -441,17 +452,24 @@ def save_papers_to_csv(
                 upload_metadata = paper.get('upload_metadata', {})
                 local_file = upload_metadata.get('saved_path', '') or paper.get('local_file', '')
 
+            # 提取完整文本（用于报告生成）
+            full_text = paper.get('full_text', '') or paper.get('content', '')
+            # 清理换行符和多余空格
+            if full_text:
+                full_text = ' '.join(full_text.split())
+
             # 构建行数据
             row = {
                 'ID': paper_id,
                 'Title': title,
                 'Authors': authors_str,
                 'Abstract': abstract,
+                'FullText': full_text,  # 新增：完整文本（用于报告生成）
                 'URL': download_url,
                 'Published': paper.get('published', ''),
                 'Source': paper.get('source', 'unknown'),
                 'Categories': categories_str,
-                'LocalFile': local_file,  # 新增：本地文件路径（用于上传文件）
+                'LocalFile': local_file,  # 本地文件路径（用于上传文件）
             }
 
             # 添加可选字段
@@ -474,6 +492,9 @@ def save_papers_to_csv(
 
         # 保存到文件
         saved_file_path = None
+        papers_added = len(papers)
+        total_papers = len(papers)
+
         if session_id or output_dir:
             try:
                 from ..shared.session_folder_manager import get_session_folder
@@ -493,8 +514,44 @@ def save_papers_to_csv(
                 if output_path:
                     saved_file_path = output_path
                 else:
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.csv')
+                    # 追加模式：使用固定文件名 all_papers.csv
+                    # 非追加模式：使用带时间戳的文件名
+                    if append_mode:
+                        saved_file_path = os.path.join(save_dir, 'all_papers.csv')
+                    else:
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.csv')
+
+                # 追加模式：合并现有数据
+                if append_mode and os.path.exists(saved_file_path):
+                    logger.info(f"追加模式：读取现有CSV文件: {saved_file_path}")
+                    try:
+                        # 读取现有CSV
+                        existing_df = pd.read_csv(saved_file_path, encoding='utf-8-sig')
+                        logger.info(f"现有CSV包含 {len(existing_df)} 篇论文")
+
+                        # 合并新旧数据
+                        combined_df = pd.concat([existing_df, df], ignore_index=True)
+
+                        # 去重：基于 ID 列，保留最后出现的（最新的）
+                        if 'ID' in combined_df.columns:
+                            before_dedup = len(combined_df)
+                            combined_df = combined_df.drop_duplicates(subset=['ID'], keep='last')
+                            after_dedup = len(combined_df)
+                            duplicates_removed = before_dedup - after_dedup
+                            logger.info(f"去重：移除 {duplicates_removed} 篇重复论文")
+
+                        # 更新统计信息
+                        total_papers = len(combined_df)
+                        papers_added = total_papers - len(existing_df) + duplicates_removed
+
+                        # 使用合并后的数据
+                        df = combined_df
+                        csv_content = df.to_csv(index=False, encoding='utf-8-sig')
+
+                        logger.info(f"合并后共 {total_papers} 篇论文（新增 {papers_added} 篇）")
+                    except Exception as e:
+                        logger.warning(f"读取现有CSV失败，将创建新文件: {e}")
 
                 # 保存文件
                 with open(saved_file_path, 'w', encoding='utf-8-sig') as f:
@@ -506,13 +563,23 @@ def save_papers_to_csv(
 
         logger.info(f"成功生成 {len(papers)} 篇论文的CSV数据")
 
+        # 构建返回消息
+        if append_mode and papers_added < len(papers):
+            message = f'已追加 {papers_added} 篇论文到 CSV，当前共 {total_papers} 篇'
+        else:
+            message = f'成功生成 {total_papers} 篇论文的CSV数据'
+
+        if saved_file_path:
+            message += f'，已保存到 {saved_file_path}'
+
         return {
             'status': 'success',
-            'total_papers': len(papers),
+            'total_papers': total_papers,
+            'papers_added': papers_added,
             'csv_content': csv_content,
             'columns': list(df.columns),
             'file_path': saved_file_path,
-            'message': f'成功生成 {len(papers)} 篇论文的CSV数据' + (f'，已保存到 {saved_file_path}' if saved_file_path else '')
+            'message': message
         }
 
     except Exception as e:

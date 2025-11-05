@@ -97,6 +97,7 @@ def ingest_uploaded_documents(
         session_id=session_id,
         topic=topic or "uploaded_documents",
         file_prefix=file_prefix,
+        append_mode=True,  # 启用追加模式，合并到 all_papers.csv
     )
 
     return {

@@ -455,22 +455,34 @@ async def search_papers(
     final_papers = list(unique_papers.values())
     logger.info(f"Total papers after deduplication: {len(final_papers)}")
 
-    # 自动保存检索结果到 CSV 文件
+    # 自动保存检索结果到 CSV 文件（追加模式）
     from modules.paper_manager.export_tools import save_papers_to_csv as save_csv_impl
     csv_result = save_csv_impl(
         papers=final_papers,
         session_id=session_id,
         topic=query,
-        file_prefix='search_results'
+        file_prefix='search_results',
+        append_mode=True  # 启用追加模式，合并到 all_papers.csv
     )
 
     # 构建返回结果（最小化 token 使用，只返回关键信息）
     # Agent 通过 CSV 文件获取完整论文信息，无需在响应中返回完整列表
+    papers_added = csv_result.get('papers_added', len(final_papers))
+    total_papers = csv_result.get('total_papers', len(final_papers))
+
+    # 构建消息
+    if papers_added < len(final_papers):
+        message = f'Found {len(final_papers)} papers, added {papers_added} new papers. Total {total_papers} papers in CSV.'
+    else:
+        message = f'Found {len(final_papers)} unique papers. CSV file contains full details.'
+
     final_result = {
         'status': 'success',
         'sources_used': sources or ['arxiv', 'tavily_academic', 'tavily'],
         'total_results': len(final_papers),
-        'message': f'Found {len(final_papers)} unique papers. CSV file contains full details.'
+        'papers_added': papers_added,
+        'total_papers_in_csv': total_papers,
+        'message': message
     }
 
     # 添加 CSV 文件下载URL（最重要的返回信息）
@@ -548,11 +560,22 @@ async def ingest_uploaded_papers(
 
     # 构建返回结果（最小化 token 使用，只返回关键信息）
     # Agent 通过 CSV 文件获取完整论文信息，无需在响应中返回完整列表
+    papers_added = csv_result.get('papers_added', len(papers))
+    total_papers = csv_result.get('total_papers', len(papers))
+
+    # 构建消息
+    if papers_added < len(papers):
+        message = f'Processed {len(papers)} files, added {papers_added} new papers. Total {total_papers} papers in CSV.'
+    else:
+        message = f'Successfully processed {len(papers)} uploaded document(s). CSV file contains full details.'
+
     final_result: Dict[str, Any] = {
         'status': 'success',
         'total_results': len(papers),
+        'papers_added': papers_added,
+        'total_papers_in_csv': total_papers,
         'sources_used': ['upload'],
-        'message': f'Successfully processed {len(papers)} uploaded document(s). CSV file contains full details.'
+        'message': message
     }
 
     # 添加 CSV 文件下载URL（最重要的返回信息）
