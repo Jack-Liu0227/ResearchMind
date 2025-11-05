@@ -246,18 +246,18 @@ async def analyze_simulation_results(
 # MatterSim-based tools
 @app.tool
 async def calculate_energy_from_cif(
-    cif_content: str,
-    cif_filename: str = "material.cif",
+    session_id: str,
+    cif_filename: str,
     device: str = "cuda"
 ) -> Dict[str, Any]:
     """
     Calculate energy properties from CIF file using MatterSim.
 
-    ⚠️ 建议：为获得更准确的能量属性，建议先调用 relax_structure() 进行结构弛豫，然后使用弛豫后的 CIF 结构。
+    ⚠️ 建议：为获得更准确的能量属性，建议先调用 relax_structure() 进行结构弛豫，然后使用弛豫后的 CIF 文件。
 
     Args:
-        cif_content: CIF file content (base64 encoded or plain text) - 建议使用弛豫后的结构
-        cif_filename: Original filename
+        session_id: Session ID (required) - identifies which session's CIF file to use
+        cif_filename: CIF filename in the session directory (建议使用弛豫后的文件)
         device: Computing device ('cuda' or 'cpu')
 
     Returns:
@@ -268,6 +268,13 @@ async def calculate_energy_from_cif(
         - decomposition_energy: Energy above hull (eV/atom)
         - forces: Atomic forces (eV/Å)
         - stress: Stress tensor (GPa)
+
+    Example:
+        # After relaxation:
+        result = await calculate_energy_from_cif(
+            session_id="abc123",
+            cif_filename="relaxed_structure_20251105_220000.cif"
+        )
     """
     if not MATTERSIM_AVAILABLE:
         return {
@@ -275,13 +282,43 @@ async def calculate_energy_from_cif(
             "error": "MatterSim not available. Please install mattersim package."
         }
 
+    # Read CIF file from session directory
+    try:
+        from pathlib import Path
+        simulation_cif_dir = Path(__file__).parent / "cif"
+
+        # Try relax directory first (relaxed files)
+        relax_dir = simulation_cif_dir / session_id / "relax"
+        cif_path = relax_dir / cif_filename
+
+        if not cif_path.exists():
+            # Try uploads directory (original files)
+            upload_dir = simulation_cif_dir / session_id / "uploads"
+            cif_path = upload_dir / cif_filename
+
+        if not cif_path.exists():
+            return {
+                "success": False,
+                "error": f"CIF file not found: {cif_filename}. Please ensure the file exists in session {session_id}."
+            }
+
+        cif_content = cif_path.read_text(encoding='utf-8')
+        logger.info(f"📂 Read CIF file for energy calculation: {cif_path}")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to read CIF file: {e}")
+        return {
+            "success": False,
+            "error": f"Failed to read CIF file: {str(e)}"
+        }
+
     return calculate_energy_from_cif_impl(cif_content, cif_filename, device)
 
 
 @app.tool
 async def relax_structure(
-    cif_content: str,
-    cif_filename: str = "material.cif",
+    session_id: str,
+    cif_filename: str,
     device: str = "cuda",
     optimizer: str = "BFGS",
     filter_type: str = "ExpCellFilter",
@@ -292,11 +329,14 @@ async def relax_structure(
     """
     Perform structure relaxation using MatterSim.
 
-    ⚠️ 重要：生成结构后必须先调用此工具进行结构弛豫，然后再进行声子谱计算或能量属性计算。
+    ⚠️ 重要：
+    1. 用户必须先上传 CIF 文件到 session
+    2. 生成结构后必须先调用此工具进行结构弛豫
+    3. 然后再进行声子谱计算或能量属性计算
 
     Args:
-        cif_content: CIF file content (base64 encoded or plain text)
-        cif_filename: Original filename
+        session_id: Session ID (required) - identifies which session's CIF file to use
+        cif_filename: CIF filename in the session's upload directory (e.g., "structure.cif")
         device: Computing device ('cuda' or 'cpu')
         optimizer: Optimization method ('BFGS', 'FIRE', 'LBFGS')
         filter_type: Filter to apply to the cell ('ExpCellFilter', 'FrechetCellFilter', None)
@@ -307,11 +347,21 @@ async def relax_structure(
     Returns:
         Dict with relaxed structure and relaxation results:
         - success: Whether relaxation succeeded
-        - relaxed_cif: Relaxed structure in CIF format (use this for subsequent calculations)
+        - relaxed_cif_file: Path to saved relaxed CIF file
+        - relaxed_cif_url: URL to access the relaxed CIF file
+        - relaxed_cif_filename: Filename of the relaxed CIF
         - initial_energy: Initial energy before relaxation
         - final_energy: Final energy after relaxation
         - energy_change: Energy change during relaxation
         - structure_changes: Structural changes (volume, lattice parameters)
+
+    Example:
+        # User uploads structure.cif via web interface, then:
+        result = await relax_structure(
+            session_id="abc123",
+            cif_filename="structure.cif",
+            optimizer="BFGS"
+        )
     """
     if not MATTERSIM_AVAILABLE:
         return {
@@ -319,17 +369,82 @@ async def relax_structure(
             "error": "MatterSim not available. Please install mattersim package."
         }
 
+    # Read CIF file from session directory
+    try:
+        from pathlib import Path
+        simulation_cif_dir = Path(__file__).parent / "cif"
+        upload_dir = simulation_cif_dir / session_id / "uploads"
+        cif_path = upload_dir / cif_filename
+
+        if not cif_path.exists():
+            return {
+                "success": False,
+                "error": f"CIF file not found: {cif_filename}. Please ensure the file has been uploaded to session {session_id}."
+            }
+
+        cif_content = cif_path.read_text(encoding='utf-8')
+        logger.info(f"📂 Read CIF file from session: {cif_path}")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to read CIF file: {e}")
+        return {
+            "success": False,
+            "error": f"Failed to read CIF file: {str(e)}"
+        }
+
     result = relax_structure_impl(
         cif_content, cif_filename, device, optimizer, filter_type,
         constrain_symmetry, max_steps, fmax
     )
 
-    # If relaxation succeeded, convert relaxed structure to frontend format
+    # If relaxation succeeded, save the relaxed CIF to session directory
     if result.get("success") and result.get("relaxed_cif_content"):
         try:
+            from pathlib import Path
+            from datetime import datetime
+
+            # Determine save directory - use simulation/cif directory for consistency
+            simulation_cif_dir = Path(__file__).parent / "cif"
+
+            if session_id:
+                # Save to session-specific relax directory
+                # This matches the read path in calculate_phonon and calculate_energy_from_cif
+                structures_dir = simulation_cif_dir / session_id / "relax"
+                structures_dir.mkdir(parents=True, exist_ok=True)
+                url_prefix = f"/structures/{session_id}/relax"
+                logger.info(f"📁 Using session relax directory: {structures_dir}")
+            else:
+                # Use global directory (backward compatibility)
+                structures_dir = Path(__file__).parent / "relaxed_structures"
+                structures_dir.mkdir(exist_ok=True)
+                url_prefix = "/structures/relaxed"
+                logger.info(f"📁 Using global structures directory: {structures_dir}")
+
+            # Generate filename for relaxed structure
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base_name = Path(cif_filename).stem
+            relaxed_filename = f"relaxed_{base_name}_{timestamp}.cif"
+            relaxed_file_path = structures_dir / relaxed_filename
+
+            # Save relaxed CIF to file
+            with open(relaxed_file_path, 'w', encoding='utf-8') as f:
+                f.write(result["relaxed_cif_content"])
+
+            logger.info(f"💾 Saved relaxed CIF to: {relaxed_file_path}")
+
+            # Update result with file path and URL
+            result["relaxed_cif_file"] = str(relaxed_file_path)
+            result["relaxed_cif_url"] = f"{url_prefix}/{relaxed_filename}"
+            result["relaxed_cif_filename"] = relaxed_filename
+
+            logger.info(f"✅ Relaxed structure saved and ready for phonon/thermal calculations")
+            logger.info(f"   📄 Filename: {relaxed_filename}")
+            logger.info(f"   📂 Path: {relaxed_file_path}")
+            logger.info(f"   🔗 URL: {result['relaxed_cif_url']}")
+
+            # Convert relaxed structure to frontend format for visualization
             from modules.cif_tools import convert_cif_to_frontend_structure
 
-            # Convert relaxed CIF to frontend structure
             frontend_structure = convert_cif_to_frontend_structure(
                 result["relaxed_cif_content"],
                 result.get("composition", "Unknown"),
@@ -357,75 +472,85 @@ async def relax_structure(
 
                 # Add to result
                 result["frontend_structures"] = [frontend_structure]
-                logger.info(f"Relaxed structure converted to frontend format: {frontend_structure.get('formula')}")
+                logger.info(f"✅ Relaxed structure converted to frontend format: {frontend_structure.get('formula')}")
+
+            # Remove the large CIF content from result to avoid JSON issues
+            # Keep only base64 version for backward compatibility if needed
+            if "relaxed_cif_content" in result:
+                del result["relaxed_cif_content"]
+
         except Exception as e:
-            logger.warning(f"WARNING: Failed to convert relaxed structure to frontend format: {e}")
+            logger.warning(f"⚠️ Failed to save/convert relaxed structure: {e}")
+            # Don't fail the entire operation, just log the warning
 
     return result
 
 
 @app.tool
 async def calculate_phonon(
-    cif_content: str,
-    cif_filename: str = "material.cif",
+    session_id: str,
+    cif_filename: str,
     device: str = "cuda",
     supercell_matrix: Optional[List[int]] = None,
     amplitude: float = 0.01,
-    find_prim: bool = False,
-    session_id: str = None
+    find_prim: bool = False
 ) -> Dict[str, Any]:
     """
     Calculate phonon dispersion using MatterSim.
 
-    Results are returned as base64-encoded images for direct display in frontend.
-    No local files are saved - all temporary files are automatically cleaned up.
+    Results are saved as image files and returned with URLs for frontend display.
 
-    ⚠️ 重要：计算声子谱前必须先调用 relax_structure() 进行结构弛豫，然后使用弛豫后的 CIF 结构。
+    ⚠️ 重要工作流程：
+    1. 用户上传原始 CIF 文件
+    2. 调用 relax_structure() 进行结构弛豫
+    3. 使用弛豫后的 CIF 文件名调用此函数计算声子谱
 
-    正确的工作流程：
+    正确的调用顺序：
 
     步骤 1 - 结构弛豫：
     ```python
     relax_result = await relax_structure(
-        cif_content=original_cif_content,  # 原始 CIF 文件
-        optimizer="BFGS",
-        max_steps=500
+        session_id="abc123",
+        cif_filename="structure.cif",  # 原始上传的文件
+        optimizer="BFGS"
     )
     ```
 
-    步骤 2 - 计算声子谱（使用弛豫后的 CIF）：
+    步骤 2 - 计算声子谱（使用弛豫后的文件）：
     ```python
     if relax_result["success"]:
         phonon_result = await calculate_phonon(
-            cif_content=relax_result["relaxed_cif_content"],  # ⚠️ 使用 relaxed_cif_content
-            # 或者使用 base64 编码版本：
-            # cif_content=relax_result["relaxed_cif_base64"],
+            session_id="abc123",
+            cif_filename=relax_result["relaxed_cif_filename"],  # ⚠️ 使用弛豫后的文件名
             supercell_matrix=[4, 4, 4]
         )
     ```
 
     Args:
-        cif_content: CIF file content (base64 encoded or plain text)
-                    ⚠️ 必须使用 relax_structure() 返回的 relaxed_cif_content 或 relaxed_cif_base64
-        cif_filename: Original filename
+        session_id: Session ID (required) - identifies which session's CIF file to use
+        cif_filename: CIF filename in the session directory (e.g., "relaxed_structure_20251105_220000.cif")
+                     ⚠️ 应该使用 relax_structure() 返回的 relaxed_cif_filename
         device: Computing device ('cuda' or 'cpu')
         supercell_matrix: Supercell matrix for phonon calculation (default: [4, 4, 4])
         amplitude: Displacement amplitude for phonon calculation (default: 0.01 Å)
         find_prim: Whether to find primitive cell before calculation
-        session_id: Session ID for data isolation (optional)
 
     Returns:
         Dict with phonon calculation results:
         - success: Whether calculation succeeded
         - has_imaginary_modes: Whether structure has imaginary phonon modes (unstable)
         - stability_status: "STABLE" or "UNSTABLE"
-        - phonon_band_plot_base64: Base64-encoded phonon band structure plot (PNG)
-        - phonon_band_plot_available: Whether band plot is available
-        - phonon_dos_plot_base64: Base64-encoded phonon DOS plot (PNG)
-        - phonon_dos_plot_available: Whether DOS plot is available
+        - images: List of image objects with URLs for frontend display
         - phonon_frequencies: Phonon frequency data
         - composition: Chemical composition
         - n_atoms: Number of atoms
+
+    Example:
+        result = await calculate_phonon(
+            session_id="abc123",
+            cif_filename="relaxed_C_20251105_220000.cif",
+            supercell_matrix=[4, 4, 4]
+        )
     """
     if not MATTERSIM_AVAILABLE:
         return {
@@ -433,84 +558,90 @@ async def calculate_phonon(
             "error": "MatterSim not available. Please install mattersim package."
         }
 
+    # Read CIF file from session directory
+    # Try both relax directory (for relaxed files) and uploads directory (for original files)
+    try:
+        from pathlib import Path
+        simulation_cif_dir = Path(__file__).parent / "cif"
+
+        # Try relax directory first (relaxed files)
+        relax_dir = simulation_cif_dir / session_id / "relax"
+        cif_path = relax_dir / cif_filename
+
+        if not cif_path.exists():
+            # Try uploads directory (original files)
+            upload_dir = simulation_cif_dir / session_id / "uploads"
+            cif_path = upload_dir / cif_filename
+
+        if not cif_path.exists():
+            return {
+                "success": False,
+                "error": f"CIF file not found: {cif_filename}. Please ensure the file exists in session {session_id}. "
+                        f"For phonon calculations, you should use the relaxed CIF file from relax_structure()."
+            }
+
+        cif_content = cif_path.read_text(encoding='utf-8')
+        logger.info(f"📂 Read CIF file for phonon calculation: {cif_path}")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to read CIF file: {e}")
+        return {
+            "success": False,
+            "error": f"Failed to read CIF file: {str(e)}"
+        }
+
+    # 确定图片保存目录（在调用 impl 之前）
+    from pathlib import Path
+    # 统一使用 mcp_servers/simulation/phonon_results 目录
+    phonon_dir = Path(__file__).parent / "phonon_results"
+    phonon_dir.mkdir(parents=True, exist_ok=True)
+    url_prefix = f"/images/phonon_results"
+    logger.info(f"📁 Target phonon directory: {phonon_dir}")
+
+    # 调用实现函数，传入目标目录以避免重复保存
     result = calculate_phonon_impl(
         cif_content, cif_filename, device, supercell_matrix,
-        amplitude, find_prim
+        amplitude, find_prim, output_dir=str(phonon_dir)
     )
 
-    # 如果计算成功，将图片路径转换为前端格式（持久化存储方案）
+    # 如果计算成功，构建前端格式的图片列表
     if result.get("success"):
-        from pathlib import Path
-        import shutil
         images = []
-
-        # 确定保存目录
-        if SESSION_MANAGER_AVAILABLE and session_id:
-            # 使用会话目录
-            phonon_dir = SessionManager.get_session_phonon_dir(session_id)
-            # 使用相对路径，前端会自动解析为完整 URL
-            url_prefix = f"/images/{session_id}/phonon_results"
-            logger.info(f"📁 Using session phonon directory: {phonon_dir}")
-        else:
-            # 使用全局目录（向后兼容）
-            phonon_dir = Path(__file__).parent / "phonon_results"
-            # 使用相对路径，前端会自动解析为完整 URL
-            url_prefix = f"/images/phonon_results"
-            logger.info(f"📁 Using global phonon directory: {phonon_dir}")
-
-        phonon_dir.mkdir(parents=True, exist_ok=True)
 
         # 处理声子色散图
         if result.get("phonon_band_plot_path") and result.get("phonon_band_plot_available"):
-            src_path = Path(result["phonon_band_plot_path"])
-            filename = src_path.name
-            dest_path = phonon_dir / filename
-
-            # 复制文件到会话目录 (如果不是同一个文件)
-            if src_path.resolve() != dest_path.resolve():
-                shutil.copy2(src_path, dest_path)
-                logger.info(f"📋 Copied phonon band plot to: {dest_path}")
-            else:
-                logger.info(f"📋 Phonon band plot already in target directory: {dest_path}")
+            band_path = Path(result["phonon_band_plot_path"])
+            filename = band_path.name
 
             images.append({
                 "name": "phonon_dispersion.png",
-                "path": str(dest_path),  # 会话目录中的路径
+                "path": str(band_path),
                 "type": "phonon_dispersion",
                 "url": f"{url_prefix}/{filename}",
                 "filename": filename,
-                "available": True  # 文件已保存,直接标记为可用
+                "available": True
             })
+            logger.info(f"📊 Phonon band plot: {filename}")
 
         # 处理声子态密度图
         if result.get("phonon_dos_plot_path") and result.get("phonon_dos_plot_available"):
-            src_path = Path(result["phonon_dos_plot_path"])
-            filename = src_path.name
-            dest_path = phonon_dir / filename
-
-            # 复制文件到会话目录 (如果不是同一个文件)
-            if src_path.resolve() != dest_path.resolve():
-                shutil.copy2(src_path, dest_path)
-                logger.info(f"📋 Copied phonon DOS plot to: {dest_path}")
-            else:
-                logger.info(f"📋 Phonon DOS plot already in target directory: {dest_path}")
+            dos_path = Path(result["phonon_dos_plot_path"])
+            filename = dos_path.name
 
             images.append({
                 "name": "phonon_dos.png",
-                "path": str(dest_path),  # 会话目录中的路径
+                "path": str(dos_path),
                 "type": "phonon_dos",
                 "url": f"{url_prefix}/{filename}",
                 "filename": filename,
-                "available": True  # 文件已保存,直接标记为可用
+                "available": True
             })
+            logger.info(f"📊 Phonon DOS plot: {filename}")
 
         # 添加图片数据到结果中
         if images:
             result["images"] = images
-            if SESSION_MANAGER_AVAILABLE and session_id:
-                logger.info(f"Phonon calculation completed, saved {len(images)} images to session {session_id}")
-            else:
-                logger.info(f"Phonon calculation completed, saved {len(images)} images to global directory")
+            logger.info(f"✅ Phonon calculation completed with {len(images)} images")
 
     return result
 

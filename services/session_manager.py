@@ -255,19 +255,29 @@ class SessionManager:
     
     @classmethod
     def get_session_structures_dir(cls, session_id: str) -> Path:
-        """Get structures directory for a session"""
-        return cls.STRUCTURES_DIR / session_id
-    
+        """
+        Get structures directory for a session.
+        Creates the directory if it doesn't exist.
+        """
+        structures_dir = cls.STRUCTURES_DIR / session_id
+        structures_dir.mkdir(parents=True, exist_ok=True)
+        return structures_dir
+
     @classmethod
     def get_session_images_dir(cls, session_id: str) -> Path:
-        """Get images directory for a session"""
-        return cls.IMAGES_DIR / session_id
+        """
+        Get images directory for a session.
+        Creates the directory if it doesn't exist.
+        """
+        images_dir = cls.IMAGES_DIR / session_id
+        images_dir.mkdir(parents=True, exist_ok=True)
+        return images_dir
     
     @classmethod
     def get_session_phonon_dir(cls, session_id: str) -> Path:
         """Get phonon results directory for a session"""
         phonon_dir = cls.get_session_images_dir(session_id) / "phonon_results"
-        phonon_dir.mkdir(exist_ok=True)
+        phonon_dir.mkdir(parents=True, exist_ok=True)  # ⭐ 添加 parents=True
         return phonon_dir
     
     @classmethod

@@ -115,6 +115,44 @@ class StaticFileService:
         else:
             logger.warning(f"⚠️ Generated structures directory not found: {structures_dir}")
 
+        # Relaxed structures directory (global) - mount fourth (specific)
+        relaxed_structures_dir = server_config.RELAXED_STRUCTURES_DIR
+        if os.path.exists(relaxed_structures_dir):
+            app.mount(
+                "/api/structures/relaxed",
+                StaticFiles(directory=relaxed_structures_dir),
+                name="relaxed_structures"
+            )
+            logger.info(f"✅ Static files: /api/structures/relaxed -> {relaxed_structures_dir}")
+        else:
+            logger.warning(f"⚠️ Relaxed structures directory not found: {relaxed_structures_dir}")
+
+        # Simulation CIF structures directory (会话隔离的弛豫结构文件) - mount before general structures
+        # This serves files from mcp_servers/simulation/cif/{session_id}/structures/
+        simulation_cif_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "simulation", "cif")
+        if os.path.exists(simulation_cif_dir):
+            app.mount(
+                "/api/structures",
+                StaticFiles(directory=simulation_cif_dir),
+                name="simulation_structures"
+            )
+            logger.info(f"✅ Static files: /api/structures -> {simulation_cif_dir}")
+        else:
+            logger.warning(f"⚠️ Simulation CIF directory not found: {simulation_cif_dir}")
+
+        # Session structures directory (会话隔离的结构文件 - 备用) - mount as fallback
+        # This is kept for backward compatibility
+        session_structures_dir = SessionManager.STRUCTURES_DIR
+        if session_structures_dir.exists():
+            app.mount(
+                "/api/structures/session",
+                StaticFiles(directory=str(session_structures_dir)),
+                name="session_structures_fallback"
+            )
+            logger.info(f"✅ Static files: /api/structures/session -> {session_structures_dir}")
+        else:
+            logger.warning(f"⚠️ Session structures directory not found: {session_structures_dir}")
+
         # Session images directory (会话隔离的图片) - mount last (least specific, catch-all)
         session_images_dir = SessionManager.IMAGES_DIR
         if session_images_dir.exists():
