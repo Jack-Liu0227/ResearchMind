@@ -532,12 +532,27 @@ async def ingest_uploaded_papers(
     # 从磁盘读取上传的文件
     from pathlib import Path
     import base64
+    from modules.shared.session_folder_manager import get_session_folder
 
-    upload_dir = Path("papers") / session_id / "uploads"
-    if not upload_dir.exists():
+    # 使用 session_folder_manager 获取正确的路径
+    session_folder = Path(get_session_folder(session_id, topic))
+    upload_dir = session_folder / "uploads"
+
+    logger.info(f"🔍 Looking for uploaded files in: {upload_dir}")
+    logger.info(f"🔍 Absolute path: {upload_dir.absolute()}")
+    logger.info(f"🔍 Directory exists: {upload_dir.exists()}")
+
+    if upload_dir.exists():
+        logger.info(f"🔍 Directory contents: {list(upload_dir.iterdir())}")
+    else:
+        # 列出 session folder 下的所有子目录，帮助调试
+        if session_folder.exists():
+            subdirs = [d.name for d in session_folder.iterdir() if d.is_dir()]
+            logger.info(f"🔍 Available directories in session folder: {subdirs}")
+
         return sanitize_tool_response({
             'status': 'error',
-            'error': f'Upload directory not found: {upload_dir}'
+            'error': f'Upload directory not found: {upload_dir}. Please check session_id is correct.'
         })
 
     # 读取所有文件

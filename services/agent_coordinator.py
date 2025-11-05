@@ -143,8 +143,21 @@ class AgentCoordinator:
                     import os
                     from pathlib import Path
 
-                    # 创建临时上传目录
-                    upload_dir = Path("papers") / session_id / "uploads"
+                    # 确保 session_id 存在（如果为 None，使用 session_key 的一部分）
+                    actual_session_id = session_id
+                    if not actual_session_id:
+                        # 从 session_key 中提取或生成 session_id
+                        import uuid
+                        from datetime import datetime
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        unique_id = str(uuid.uuid4())[:8]
+                        actual_session_id = f"upload_{timestamp}_{unique_id}"
+                        logger.info(f"📝 Generated session_id for file upload: {actual_session_id}")
+
+                    # 创建临时上传目录 - 使用 MCP server 的 papers 目录
+                    # 确保与 mcp_servers/paper_search/modules/shared/session_folder_manager.py 中的路径一致
+                    mcp_papers_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
+                    upload_dir = mcp_papers_dir / actual_session_id / "uploads"
                     upload_dir.mkdir(parents=True, exist_ok=True)
 
                     saved_files = []
@@ -177,7 +190,8 @@ class AgentCoordinator:
                             size_mb = f['size'] / (1024 * 1024)
                             file_info += f"- {f['filename']} ({size_mb:.2f}MB, {f['mime_type']})\n"
                         file_info += f"\n文件已保存到：{upload_dir}\n"
-                        file_info += f"请使用 ingest_uploaded_papers 工具处理这些文件，session_id 为：{session_id}"
+                        file_info += f"\n⚠️ 请立即调用工具：ingest_uploaded_papers(session_id=\"{actual_session_id}\")"
+                        file_info += f"\n注意：session_id 必须使用引号中的值：\"{actual_session_id}\""
                         parts.append(types.Part(text=file_info))
                 else:
                     # 其他 agent 或纯文本附件：直接附加文本内容

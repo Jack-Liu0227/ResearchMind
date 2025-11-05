@@ -9,6 +9,7 @@ import json
 import uuid
 from datetime import datetime
 from typing import Dict, Optional
+from pathlib import Path
 import structlog
 
 logger = structlog.get_logger()
@@ -16,8 +17,11 @@ logger = structlog.get_logger()
 # 会话文件夹映射文件
 # Ensure saved files live under the mounted static directory so downloads work.
 # StaticFileService mounts mcp_servers/paper_search as /api/download (and /download for compatibility).
-SESSION_MAPPING_FILE = "./mcp_servers/paper_search/session_folders.json"
-PAPER_DIR = "./mcp_servers/paper_search/papers"
+# Note: Use absolute paths based on this module's location to ensure consistency
+# regardless of where the server is started from
+_MODULE_DIR = Path(__file__).parent.parent.parent  # mcp_servers/paper_search/
+SESSION_MAPPING_FILE = str(_MODULE_DIR / "session_folders.json")
+PAPER_DIR = str(_MODULE_DIR / "papers")
 
 
 class SessionFolderManager:

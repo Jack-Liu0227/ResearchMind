@@ -309,7 +309,7 @@ def save_report_to_file(
         saved_file_path = None
         if session_id or output_dir:
             try:
-                from ..shared.session_folder_manager import get_session_folder
+                from ..shared.session_folder_manager import get_session_folder, PAPER_DIR
 
                 # 确定保存目录
                 if session_id and topic:
@@ -317,7 +317,8 @@ def save_report_to_file(
                 elif output_dir:
                     save_dir = output_dir
                 else:
-                    save_dir = os.path.join(os.getcwd(), 'papers')
+                    # 使用 MCP server 的 papers 目录作为后备
+                    save_dir = PAPER_DIR
 
                 # 确保目录存在
                 os.makedirs(save_dir, exist_ok=True)
@@ -497,7 +498,7 @@ def save_papers_to_csv(
 
         if session_id or output_dir:
             try:
-                from ..shared.session_folder_manager import get_session_folder
+                from ..shared.session_folder_manager import get_session_folder, PAPER_DIR
 
                 # 确定保存目录
                 if session_id and topic:
@@ -505,7 +506,8 @@ def save_papers_to_csv(
                 elif output_dir:
                     save_dir = output_dir
                 else:
-                    save_dir = os.path.join(os.getcwd(), 'papers')
+                    # 使用 MCP server 的 papers 目录作为后备
+                    save_dir = PAPER_DIR
 
                 # 确保目录存在
                 os.makedirs(save_dir, exist_ok=True)
@@ -704,7 +706,7 @@ def save_analysis_results_to_csv(
         saved_file_path = None
         if session_id or output_dir:
             try:
-                from ..shared.session_folder_manager import get_session_folder
+                from ..shared.session_folder_manager import get_session_folder, PAPER_DIR
 
                 # 确定保存目录
                 if session_id and topic:
@@ -712,7 +714,8 @@ def save_analysis_results_to_csv(
                 elif output_dir:
                     save_dir = output_dir
                 else:
-                    save_dir = os.path.join(os.getcwd(), 'papers')
+                    # 使用 MCP server 的 papers 目录作为后备
+                    save_dir = PAPER_DIR
 
                 # 确保目录存在
                 os.makedirs(save_dir, exist_ok=True)
@@ -850,7 +853,7 @@ def save_report_papers_to_csv(
         saved_file_path = None
         if session_id or output_dir:
             try:
-                from ..shared.session_folder_manager import get_session_folder
+                from ..shared.session_folder_manager import get_session_folder, PAPER_DIR
 
                 # 确定保存目录
                 if session_id and topic:
@@ -858,7 +861,8 @@ def save_report_papers_to_csv(
                 elif output_dir:
                     save_dir = output_dir
                 else:
-                    save_dir = os.path.join(os.getcwd(), 'papers')
+                    # 使用 MCP server 的 papers 目录作为后备
+                    save_dir = PAPER_DIR
 
                 # 确保目录存在
                 os.makedirs(save_dir, exist_ok=True)
