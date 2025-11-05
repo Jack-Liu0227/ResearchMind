@@ -135,12 +135,11 @@ class AgentCoordinator:
             parts = [types.Part(text=content)]
             # Attach optional file/text parts (e.g., CIF content) so agents can parse them
             if attachments:
-                # 对于 deep_research_agent，如果有文件附件（包含 encoding 字段），
+                # 对于 deep_research_agent 和 simulation_agent，如果有文件附件（包含 encoding 字段），
                 # 则先保存到临时目录，然后传递文件路径（而不是内容）给 LLM
-                if agent_id == 'deep_research_agent' and any(att.get('encoding') for att in attachments):
+                if agent_id in ['deep_research_agent', 'simulation_agent'] and any(att.get('encoding') for att in attachments):
                     import json
                     import base64
-                    import os
                     from pathlib import Path
 
                     # 确保 session_id 存在（如果为 None，使用 session_key 的一部分）
@@ -190,8 +189,18 @@ class AgentCoordinator:
                             size_mb = f['size'] / (1024 * 1024)
                             file_info += f"- {f['filename']} ({size_mb:.2f}MB, {f['mime_type']})\n"
                         file_info += f"\n文件已保存到：{upload_dir}\n"
-                        file_info += f"\n⚠️ 请立即调用工具：ingest_uploaded_papers(session_id=\"{actual_session_id}\")"
-                        file_info += f"\n注意：session_id 必须使用引号中的值：\"{actual_session_id}\""
+
+                        # 根据 agent 类型提供不同的工具调用提示
+                        if agent_id == 'deep_research_agent':
+                            file_info += f"\n⚠️ 请立即调用工具：ingest_uploaded_papers(session_id=\"{actual_session_id}\")"
+                            file_info += f"\n注意：session_id 必须使用引号中的值：\"{actual_session_id}\""
+                        elif agent_id == 'simulation_agent':
+                            # 检查是否有 CIF 文件
+                            cif_files = [f for f in saved_files if f['filename'].lower().endswith('.cif')]
+                            if cif_files:
+                                file_info += f"\n⚠️ 检测到 CIF 文件，请调用工具：extract_and_validate_cif(session_id=\"{actual_session_id}\")"
+                                file_info += f"\n注意：session_id 必须使用引号中的值：\"{actual_session_id}\""
+
                         parts.append(types.Part(text=file_info))
                 else:
                     # 其他 agent 或纯文本附件：直接附加文本内容

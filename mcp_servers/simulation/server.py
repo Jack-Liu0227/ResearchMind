@@ -91,7 +91,7 @@ except ImportError as e:
     MATTERSIM_IMPORT_ERROR = str(e)
 
 # Import CIF tools
-from cif_tools import extract_and_validate_cif_impl, calculate_kappa_from_cif_impl
+from cif_tools import calculate_kappa_from_cif_impl
 
 # Import CrystaLLM generator
 sys.path.insert(0, str(Path(__file__).parent / "crystallm"))
@@ -548,28 +548,132 @@ async def health_check() -> Dict[str, Any]:
 # CIF Tools
 @app.tool
 async def extract_and_validate_cif(
-    message_parts: List[Dict[str, Any]]
+    session_id: str,
+    filename: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Extract CIF file from user message and validate its content.
+    Extract and validate CIF file from uploaded files.
 
-    This tool extracts CIF files from uploaded message parts and validates
-    that the content is a valid CIF file format.
+    **IMPORTANT**: User must upload CIF files first via the web interface.
+    Files are automatically saved to the session's upload directory.
+    This tool reads and validates those saved files.
 
     Args:
-        message_parts: List of message parts from user message
-                      Expected structure: [{"resource": {"name": "...", "blob": {"data": "..."}}}]
+        session_id: Session ID (required) - identifies which session's uploads to read
+        filename: Optional specific filename to validate. If not provided, will process all .cif files in the upload directory.
 
     Returns:
         Dict containing:
         - success: bool - Whether extraction and validation succeeded
-        - cif_content: str - Extracted CIF content (decoded if base64)
-        - cif_filename: str - Original filename
+        - cif_content: str - Extracted CIF content
+        - cif_filename: str - Filename
+        - file_path: str - Path to the saved CIF file
         - is_valid: bool - Whether CIF format is valid
         - validation_details: Dict - Details about validation
         - error: str - Error message if failed
+
+    Example:
+        # User uploads a file via web interface, then you call:
+        result = await extract_and_validate_cif(session_id="abc123", filename="structure.cif")
     """
-    return extract_and_validate_cif_impl(message_parts=message_parts)
+    try:
+        from pathlib import Path
+
+        # Build upload directory path (same as paper uploads)
+        mcp_papers_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
+        upload_dir = mcp_papers_dir / session_id / "uploads"
+
+        if not upload_dir.exists():
+            return {
+                "success": False,
+                "error": f"未找到会话 {session_id} 的上传目录。请先上传 CIF 文件。",
+                "is_valid": False
+            }
+
+        # Find CIF files
+        if filename:
+            cif_files = [upload_dir / filename]
+            if not cif_files[0].exists():
+                return {
+                    "success": False,
+                    "error": f"未找到文件 {filename}。请确保文件已上传。",
+                    "is_valid": False
+                }
+        else:
+            cif_files = list(upload_dir.glob("*.cif"))
+            if not cif_files:
+                return {
+                    "success": False,
+                    "error": f"上传目录中未找到 CIF 文件。请上传 .cif 文件。",
+                    "is_valid": False
+                }
+
+        # Read and validate the first CIF file
+        cif_file = cif_files[0]
+        cif_content = cif_file.read_text(encoding='utf-8')
+        cif_filename = cif_file.name
+
+        logger.info(f"📂 Reading CIF file: {cif_file}")
+
+        # Validate CIF content using existing implementation
+        # We'll create a simple validation here
+        validation_result = _validate_cif_content(cif_content, cif_filename)
+        validation_result["file_path"] = str(cif_file)
+        validation_result["session_id"] = session_id
+
+        return validation_result
+
+    except Exception as e:
+        logger.error(f"❌ Error extracting CIF: {e}")
+        return {
+            "success": False,
+            "error": f"读取 CIF 文件失败: {str(e)}",
+            "is_valid": False
+        }
+
+
+def _validate_cif_content(cif_content: str, filename: str) -> Dict[str, Any]:
+    """
+    Validate CIF file content.
+
+    Args:
+        cif_content: CIF file content
+        filename: Filename
+
+    Returns:
+        Validation result dict
+    """
+    try:
+        # Basic validation: check for required CIF tags
+        required_tags = ['_cell_length_a', '_cell_length_b', '_cell_length_c']
+        has_required = all(tag in cif_content for tag in required_tags)
+
+        # Check for data_ block
+        has_data_block = cif_content.strip().startswith('data_')
+
+        validation_details = {
+            "has_data_block": has_data_block,
+            "has_cell_parameters": has_required,
+            "file_size": len(cif_content),
+            "line_count": len(cif_content.split('\n'))
+        }
+
+        is_valid = has_data_block and has_required
+
+        return {
+            "success": True,
+            "cif_content": cif_content,
+            "cif_filename": filename,
+            "is_valid": is_valid,
+            "validation_details": validation_details,
+            "warning": None if is_valid else "CIF 文件可能缺少必要的标签或格式不正确"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"验证失败: {str(e)}",
+            "is_valid": False
+        }
 
 
 @app.tool
