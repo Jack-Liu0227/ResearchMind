@@ -631,78 +631,81 @@ async def extract_and_validate_cif(
 
 def _validate_cif_content(cif_content: str, filename: str) -> Dict[str, Any]:
     """
-    Validate CIF file content using ASE.
+    Perform minimal validation of CIF file content.
 
-    Uses ASE to read the CIF file, which is more tolerant of various CIF formats
-    (standard and non-standard) compared to strict CIF parsers.
+    Philosophy: Only check for obvious errors (empty file, corrupted encoding).
+    Let MatterSim/ASE handle detailed structure validation during actual calculations.
+    This avoids false rejections of valid but non-standard CIF formats.
 
     Args:
         cif_content: CIF file content
         filename: Filename
 
     Returns:
-        Validation result dict with structure information
+        Validation result dict - always returns success=True unless file is obviously broken
     """
     try:
-        from ase.io import read
-        from io import StringIO
+        # Basic sanity checks only
 
-        # Try to read CIF using ASE (supports various CIF formats)
-        try:
-            atoms = read(StringIO(cif_content), format='cif')
-
-            # Extract structure information
-            num_atoms = len(atoms)
-            chemical_formula = atoms.get_chemical_formula()
-            cell_params = atoms.get_cell_lengths_and_angles()
-
+        # Check 1: File must not be empty
+        if not cif_content or len(cif_content.strip()) == 0:
             return {
-                "success": True,
+                "success": False,
                 "cif_filename": filename,
-                "is_valid": True,
-                "file_size_kb": round(len(cif_content) / 1024, 2),
-                "structure_info": {
-                    "num_atoms": num_atoms,
-                    "formula": chemical_formula,
-                    "cell_lengths": [round(x, 4) for x in cell_params[:3]],
-                    "cell_angles": [round(x, 2) for x in cell_params[3:]]
-                },
-                "message": f"✅ CIF 文件有效 - {chemical_formula}, {num_atoms} 个原子"
+                "is_valid": False,
+                "error": "CIF 文件为空"
             }
 
-        except Exception as ase_error:
-            # If ASE fails, fall back to basic validation
-            logger.warning(f"⚠️ ASE failed to read CIF, trying basic validation: {ase_error}")
+        # Check 2: File must contain some text (not binary garbage)
+        if not cif_content.isprintable() and not any(c in cif_content for c in ['\n', '\r', '\t']):
+            return {
+                "success": False,
+                "cif_filename": filename,
+                "is_valid": False,
+                "error": "CIF 文件包含无效字符（可能是二进制文件）"
+            }
 
-            # Basic validation: check for required CIF tags
-            required_tags = ['_cell_length_a', '_cell_length_b', '_cell_length_c']
-            has_required = all(tag in cif_content for tag in required_tags)
-            has_data_block = cif_content.strip().startswith('data_')
+        # Optional: Try to extract basic info for user feedback (but don't fail if this doesn't work)
+        structure_info = None
+        try:
+            from ase.io import read
+            from io import StringIO
+            atoms = read(StringIO(cif_content), format='cif')
 
-            if has_data_block and has_required:
-                return {
-                    "success": True,
-                    "cif_filename": filename,
-                    "is_valid": True,
-                    "file_size_kb": round(len(cif_content) / 1024, 2),
-                    "warning": "⚠️ ASE 无法解析，但基本格式检查通过。可能需要手动检查文件格式。",
-                    "ase_error": str(ase_error)
-                }
-            else:
-                return {
-                    "success": False,
-                    "cif_filename": filename,
-                    "is_valid": False,
-                    "file_size_kb": round(len(cif_content) / 1024, 2),
-                    "error": f"CIF 格式验证失败: {ase_error}",
-                    "warning": "文件缺少必要的 CIF 标签或格式不正确"
-                }
+            structure_info = {
+                "num_atoms": len(atoms),
+                "formula": atoms.get_chemical_formula(),
+                "cell_lengths": [round(x, 4) for x in atoms.get_cell_lengths_and_angles()[:3]],
+                "cell_angles": [round(x, 2) for x in atoms.get_cell_lengths_and_angles()[3:]]
+            }
+            logger.info(f"✅ CIF preview: {structure_info['formula']}, {structure_info['num_atoms']} atoms")
+        except Exception as e:
+            # Don't fail - just log and continue
+            logger.info(f"ℹ️ Could not extract structure info (will be validated during calculation): {e}")
+
+        # Always return success - let MatterSim validate during calculation
+        result = {
+            "success": True,
+            "cif_filename": filename,
+            "is_valid": True,
+            "file_size_kb": round(len(cif_content) / 1024, 2),
+            "message": f"✅ CIF 文件已读取 ({round(len(cif_content) / 1024, 2)} KB)"
+        }
+
+        if structure_info:
+            result["structure_info"] = structure_info
+            result["message"] = f"✅ CIF 文件已读取 - {structure_info['formula']}, {structure_info['num_atoms']} 个原子"
+
+        return result
 
     except Exception as e:
+        # Only fail on catastrophic errors (file system issues, etc.)
+        logger.error(f"❌ Unexpected error reading CIF file: {e}")
         return {
             "success": False,
-            "error": f"验证失败: {str(e)}",
-            "is_valid": False
+            "cif_filename": filename,
+            "is_valid": False,
+            "error": f"读取文件时发生错误: {str(e)}"
         }
 
 
