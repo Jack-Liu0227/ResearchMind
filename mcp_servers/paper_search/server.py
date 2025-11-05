@@ -464,32 +464,21 @@ async def search_papers(
         file_prefix='search_results'
     )
 
-    # 构建简化版的papers列表(只包含重要信息)
-    simplified_papers = []
-    for paper in final_papers:
-        simplified_papers.append({
-            'title': paper.get('title', 'Unknown'),
-            'url': paper.get('url', ''),
-            'source': paper.get('source', 'unknown'),
-            'published': paper.get('published', ''),
-            'authors': paper.get('authors', [])[:3] if isinstance(paper.get('authors'), list) else []  # 只保留前3个作者
-        })
-
-    # 构建返回结果
+    # 构建返回结果（最小化 token 使用，只返回关键信息）
+    # Agent 通过 CSV 文件获取完整论文信息，无需在响应中返回完整列表
     final_result = {
         'status': 'success',
-        'papers': simplified_papers,  # 简化版papers
         'sources_used': sources or ['arxiv', 'tavily_academic', 'tavily'],
         'total_results': len(final_papers),
-        'message': f'Found {len(final_papers)} unique papers, saved to CSV'
+        'message': f'Found {len(final_papers)} unique papers. CSV file contains full details.'
     }
 
-    # 添加 CSV 文件下载URL
+    # 添加 CSV 文件下载URL（最重要的返回信息）
     if csv_result.get('file_path'):
         # 使用新的 get_download_url 函数生成下载URL
         download_url = get_download_url(csv_result['file_path'])
         final_result['csv_download_url'] = download_url
-        final_result['csv_file_path'] = csv_result['file_path']  # 保留原始路径用于调试
+        final_result['csv_file_path'] = csv_result['file_path']
 
     if expand_query:
         final_result['queries_used'] = queries_to_search
@@ -557,49 +546,23 @@ async def ingest_uploaded_papers(
     papers = ingestion_result.get('papers', [])
     csv_result = ingestion_result.get('csv_result', {})
 
-    simplified_papers = []
-    file_downloads = []
-    for paper in papers:
-        abstract = paper.get('abstract', '')
-        preview = abstract[:200] + '...' if len(abstract) > 200 else abstract
-        simplified_papers.append({
-            'paper_id': paper.get('paper_id'),
-            'title': paper.get('title', 'Uploaded Document'),
-            'source': paper.get('source', 'upload'),
-            'preview': preview,
-            'uploaded_filename': paper.get('upload_metadata', {}).get('filename'),
-        })
-
-        local_path = paper.get('upload_metadata', {}).get('saved_path')
-        if local_path:
-            try:
-                download_url = get_download_url(local_path)
-                file_downloads.append({
-                    'paper_id': paper.get('paper_id'),
-                    'filename': paper.get('upload_metadata', {}).get('filename'),
-                    'download_url': download_url
-                })
-            except Exception as err:
-                logger.warning("Failed to build download URL for uploaded file", error=str(err))
-
+    # 构建返回结果（最小化 token 使用，只返回关键信息）
+    # Agent 通过 CSV 文件获取完整论文信息，无需在响应中返回完整列表
     final_result: Dict[str, Any] = {
         'status': 'success',
-        'session_id': session_id,
-        'topic': topic,
-        'papers': simplified_papers,
         'total_results': len(papers),
         'sources_used': ['upload'],
-        'uploaded_files': file_downloads,
-        'message': f'Processed {len(papers)} uploaded document(s)'
+        'message': f'Successfully processed {len(papers)} uploaded document(s). CSV file contains full details.'
     }
 
+    # 添加 CSV 文件下载URL（最重要的返回信息）
     csv_path = csv_result.get('file_path')
     if csv_path:
         try:
             final_result['csv_download_url'] = get_download_url(csv_path)
+            final_result['csv_file_path'] = csv_path
         except Exception as err:
             logger.warning("Failed to build CSV download URL", error=str(err))
-        final_result['csv_file_path'] = csv_path
 
     return sanitize_tool_response(final_result)
 
