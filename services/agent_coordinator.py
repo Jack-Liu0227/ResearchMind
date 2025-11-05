@@ -136,26 +136,48 @@ class AgentCoordinator:
             # Attach optional file/text parts (e.g., CIF content) so agents can parse them
             if attachments:
                 # 对于 deep_research_agent，如果有文件附件（包含 encoding 字段），
-                # 则格式化为 ingest_uploaded_papers 工具所需的格式
+                # 则先保存到临时目录，然后传递文件路径（而不是内容）给 LLM
                 if agent_id == 'deep_research_agent' and any(att.get('encoding') for att in attachments):
-                    # 构建文件列表用于 ingest_uploaded_papers 工具
                     import json
-                    files_for_ingestion = []
-                    for att in attachments:
-                        if att.get('encoding'):  # 这是文件附件
-                            files_for_ingestion.append({
-                                'filename': att.get('filename', 'document.pdf'),
-                                'content': att.get('content', ''),
-                                'encoding': att.get('encoding', 'base64'),
-                                'mime_type': att.get('mime_type', 'application/octet-stream')
-                            })
+                    import base64
+                    import os
+                    from pathlib import Path
 
-                    if files_for_ingestion:
-                        # 添加提示信息，引导 agent 使用 ingest_uploaded_papers 工具
-                        file_info = f"\n\n用户上传了 {len(files_for_ingestion)} 个文件：\n"
-                        for f in files_for_ingestion:
-                            file_info += f"- {f['filename']} ({f['mime_type']})\n"
-                        file_info += f"\n请使用 ingest_uploaded_papers 工具处理这些文件。文件数据：\n{json.dumps(files_for_ingestion, ensure_ascii=False)}"
+                    # 创建临时上传目录
+                    upload_dir = Path("papers") / session_id / "uploads"
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+
+                    saved_files = []
+                    for att in attachments:
+                        if att.get('encoding') == 'base64':
+                            filename = att.get('filename', 'document.pdf')
+                            content_b64 = att.get('content', '')
+
+                            # 解码并保存文件到磁盘
+                            try:
+                                file_bytes = base64.b64decode(content_b64)
+                                file_path = upload_dir / filename
+                                file_path.write_bytes(file_bytes)
+
+                                saved_files.append({
+                                    'filename': filename,
+                                    'path': str(file_path),
+                                    'size': len(file_bytes),
+                                    'mime_type': att.get('mime_type', 'application/octet-stream')
+                                })
+                                logger.info(f"💾 Saved uploaded file: {filename} ({len(file_bytes)} bytes) -> {file_path}")
+                            except Exception as e:
+                                logger.error(f"❌ Failed to save file {filename}: {e}")
+                                continue
+
+                    if saved_files:
+                        # 只传递文件元数据（不包含内容），引导 agent 使用工具
+                        file_info = f"\n\n用户上传了 {len(saved_files)} 个文件：\n"
+                        for f in saved_files:
+                            size_mb = f['size'] / (1024 * 1024)
+                            file_info += f"- {f['filename']} ({size_mb:.2f}MB, {f['mime_type']})\n"
+                        file_info += f"\n文件已保存到：{upload_dir}\n"
+                        file_info += f"请使用 ingest_uploaded_papers 工具处理这些文件，session_id 为：{session_id}"
                         parts.append(types.Part(text=file_info))
                 else:
                     # 其他 agent 或纯文本附件：直接附加文本内容
