@@ -74,8 +74,16 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
                     paper['published'] = paper.pop('Published')
                 elif key == 'Source':
                     paper['source'] = paper.pop('Source')
-                elif key == 'URL':
-                    paper['url'] = paper.pop('URL')
+                elif key == 'LocalFile':
+                    # 恢复本地文件路径（用于上传文件）
+                    local_file = paper.pop('LocalFile')
+                    if local_file and isinstance(local_file, str) and local_file.strip():
+                        paper['local_file'] = local_file
+                        # 同时构建 upload_metadata 以兼容旧代码
+                        paper['upload_metadata'] = {
+                            'saved_path': local_file,
+                            'filename': local_file.split('/')[-1] if '/' in local_file else local_file.split('\\')[-1]
+                        }
 
         logger.info(f"Successfully read {len(papers)} papers from CSV: {csv_file_path}")
         return papers
@@ -426,6 +434,13 @@ def save_papers_to_csv(
             if title:
                 title = ' '.join(title.split())
 
+            # 提取本地文件路径（用于上传文件）
+            local_file = ''
+            if paper.get('source') == 'upload':
+                # 优先从 upload_metadata 中获取
+                upload_metadata = paper.get('upload_metadata', {})
+                local_file = upload_metadata.get('saved_path', '') or paper.get('local_file', '')
+
             # 构建行数据
             row = {
                 'ID': paper_id,
@@ -436,6 +451,7 @@ def save_papers_to_csv(
                 'Published': paper.get('published', ''),
                 'Source': paper.get('source', 'unknown'),
                 'Categories': categories_str,
+                'LocalFile': local_file,  # 新增：本地文件路径（用于上传文件）
             }
 
             # 添加可选字段
