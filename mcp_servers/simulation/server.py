@@ -565,11 +565,9 @@ async def extract_and_validate_cif(
     Returns:
         Dict containing:
         - success: bool - Whether extraction and validation succeeded
-        - cif_content: str - Extracted CIF content
         - cif_filename: str - Filename
         - file_path: str - Path to the saved CIF file
         - is_valid: bool - Whether CIF format is valid
-        - validation_details: Dict - Details about validation
         - error: str - Error message if failed
 
     Example:
@@ -579,14 +577,14 @@ async def extract_and_validate_cif(
     try:
         from pathlib import Path
 
-        # Build upload directory path (same as paper uploads)
-        mcp_papers_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
-        upload_dir = mcp_papers_dir / session_id / "uploads"
+        # Build upload directory path - use simulation/cif directory
+        simulation_cif_dir = Path(__file__).parent / "cif"
+        upload_dir = simulation_cif_dir / session_id / "uploads"
 
         if not upload_dir.exists():
             return {
                 "success": False,
-                "error": f"未找到会话 {session_id} 的上传目录。请先上传 CIF 文件。",
+                "error": f"未找到 CIF 文件。",
                 "is_valid": False
             }
 
@@ -616,7 +614,6 @@ async def extract_and_validate_cif(
         logger.info(f"📂 Reading CIF file: {cif_file}")
 
         # Validate CIF content using existing implementation
-        # We'll create a simple validation here
         validation_result = _validate_cif_content(cif_content, cif_filename)
         validation_result["file_path"] = str(cif_file)
         validation_result["session_id"] = session_id
@@ -634,40 +631,73 @@ async def extract_and_validate_cif(
 
 def _validate_cif_content(cif_content: str, filename: str) -> Dict[str, Any]:
     """
-    Validate CIF file content.
+    Validate CIF file content using ASE.
+
+    Uses ASE to read the CIF file, which is more tolerant of various CIF formats
+    (standard and non-standard) compared to strict CIF parsers.
 
     Args:
         cif_content: CIF file content
         filename: Filename
 
     Returns:
-        Validation result dict
+        Validation result dict with structure information
     """
     try:
-        # Basic validation: check for required CIF tags
-        required_tags = ['_cell_length_a', '_cell_length_b', '_cell_length_c']
-        has_required = all(tag in cif_content for tag in required_tags)
+        from ase.io import read
+        from io import StringIO
 
-        # Check for data_ block
-        has_data_block = cif_content.strip().startswith('data_')
+        # Try to read CIF using ASE (supports various CIF formats)
+        try:
+            atoms = read(StringIO(cif_content), format='cif')
 
-        validation_details = {
-            "has_data_block": has_data_block,
-            "has_cell_parameters": has_required,
-            "file_size": len(cif_content),
-            "line_count": len(cif_content.split('\n'))
-        }
+            # Extract structure information
+            num_atoms = len(atoms)
+            chemical_formula = atoms.get_chemical_formula()
+            cell_params = atoms.get_cell_lengths_and_angles()
 
-        is_valid = has_data_block and has_required
+            return {
+                "success": True,
+                "cif_filename": filename,
+                "is_valid": True,
+                "file_size_kb": round(len(cif_content) / 1024, 2),
+                "structure_info": {
+                    "num_atoms": num_atoms,
+                    "formula": chemical_formula,
+                    "cell_lengths": [round(x, 4) for x in cell_params[:3]],
+                    "cell_angles": [round(x, 2) for x in cell_params[3:]]
+                },
+                "message": f"✅ CIF 文件有效 - {chemical_formula}, {num_atoms} 个原子"
+            }
 
-        return {
-            "success": True,
-            "cif_content": cif_content,
-            "cif_filename": filename,
-            "is_valid": is_valid,
-            "validation_details": validation_details,
-            "warning": None if is_valid else "CIF 文件可能缺少必要的标签或格式不正确"
-        }
+        except Exception as ase_error:
+            # If ASE fails, fall back to basic validation
+            logger.warning(f"⚠️ ASE failed to read CIF, trying basic validation: {ase_error}")
+
+            # Basic validation: check for required CIF tags
+            required_tags = ['_cell_length_a', '_cell_length_b', '_cell_length_c']
+            has_required = all(tag in cif_content for tag in required_tags)
+            has_data_block = cif_content.strip().startswith('data_')
+
+            if has_data_block and has_required:
+                return {
+                    "success": True,
+                    "cif_filename": filename,
+                    "is_valid": True,
+                    "file_size_kb": round(len(cif_content) / 1024, 2),
+                    "warning": "⚠️ ASE 无法解析，但基本格式检查通过。可能需要手动检查文件格式。",
+                    "ase_error": str(ase_error)
+                }
+            else:
+                return {
+                    "success": False,
+                    "cif_filename": filename,
+                    "is_valid": False,
+                    "file_size_kb": round(len(cif_content) / 1024, 2),
+                    "error": f"CIF 格式验证失败: {ase_error}",
+                    "warning": "文件缺少必要的 CIF 标签或格式不正确"
+                }
+
     except Exception as e:
         return {
             "success": False,
