@@ -57,9 +57,13 @@ class WebSocketServer:
         async with serve(
             self.handle_client,
             server_config.WEBSOCKET_HOST,
-            server_config.WEBSOCKET_PORT
+            server_config.WEBSOCKET_PORT,
+            max_size=50 * 1024 * 1024,  # 50MB - 支持大文件上传（base64 编码后会增大约 33%）
+            ping_interval=20,  # 每 20 秒发送 ping
+            ping_timeout=60,  # 60 秒内未收到 pong 则断开
         ):
             logger.info("✅ Server started, waiting for connections...")
+            logger.info(f"📦 Max message size: 50MB (supports ~37MB original files after base64 encoding)")
             import asyncio
             await asyncio.Future()  # Keep server running
     
@@ -130,8 +134,17 @@ class WebSocketServer:
                     logger.error(f"❌ Error processing message: {e}", exc_info=True)
                     await self.message_handler.send_error(websocket, f"Error processing message: {str(e)}")
         
-        except websockets.exceptions.ConnectionClosed:
-            logger.info(f"🔌 Client disconnected: {client_id}")
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.info(f"🔌 Client disconnected: {client_id} (code: {e.code}, reason: {e.reason})")
+        except websockets.exceptions.PayloadTooBig as e:
+            logger.error(f"❌ Message too large from client {client_id}: {e}")
+            try:
+                await self.message_handler.send_error(
+                    websocket,
+                    "文件过大，请上传小于 37MB 的文件（base64 编码后不超过 50MB）"
+                )
+            except:
+                pass
         except Exception as e:
             logger.error(f"❌ Client error: {e}", exc_info=True)
         finally:

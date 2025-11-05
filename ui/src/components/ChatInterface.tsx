@@ -155,13 +155,21 @@ const ChatInterface: React.FC = () => {
     if (!fileList || fileList.length === 0) return
 
     const selected: File[] = []
+    const skipped: string[] = []
+
     for (let i = 0; i < fileList.length; i++) {
       const f = fileList[i]
       if (f.size > APP_CONFIG.MAX_FILE_SIZE) {
-        toast.error(`文件大小超过限制，已跳过: ${f.name}`)
+        const sizeMB = (f.size / (1024 * 1024)).toFixed(1)
+        const maxSizeMB = (APP_CONFIG.MAX_FILE_SIZE / (1024 * 1024)).toFixed(0)
+        skipped.push(`${f.name} (${sizeMB}MB > ${maxSizeMB}MB)`)
         continue
       }
       selected.push(f)
+    }
+
+    if (skipped.length > 0) {
+      toast.error(`文件过大已跳过：${skipped.join(', ')}`)
     }
 
     if (selected.length === 0) return
