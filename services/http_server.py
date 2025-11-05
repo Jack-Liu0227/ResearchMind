@@ -293,9 +293,9 @@ class HTTPServer:
             try:
                 logger.info("📥 Received CIF operation request")
 
-                # Parse CIF
+                # Parse CIF - use parse_structures instead of deprecated get_structures
                 parser = CifParser.from_str(request.cif_content)
-                original_structure = parser.get_structures()[0]
+                original_structure = parser.parse_structures(primitive=True)[0]
 
                 logger.info(f"✅ CIF parsed: {original_structure.composition.reduced_formula}")
                 logger.info(f"   Original: {len(original_structure)} atoms")
@@ -384,9 +384,9 @@ class HTTPServer:
             try:
                 logger.info("📥 Received CIF conversion request")
 
-                # Parse CIF
+                # Parse CIF - use parse_structures instead of deprecated get_structures
                 parser = CifParser.from_str(request.cif_content)
-                original_structure = parser.get_structures()[0]
+                original_structure = parser.parse_structures(primitive=True)[0]
 
                 logger.info(f"✅ CIF parsed: {original_structure.composition.reduced_formula}")
                 logger.info(f"   Original: {len(original_structure)} atoms")
