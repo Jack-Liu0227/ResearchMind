@@ -135,12 +135,36 @@ class AgentCoordinator:
             parts = [types.Part(text=content)]
             # Attach optional file/text parts (e.g., CIF content) so agents can parse them
             if attachments:
-                for att in attachments:
-                    fname = att.get('filename') or 'attachment.txt'
-                    text = att.get('content') or ''
-                    # Prefix to help agent tools detect attachment context
-                    att_text = f"[附件: {fname}]\n{text}"
-                    parts.append(types.Part(text=att_text))
+                # 对于 deep_research_agent，如果有文件附件（包含 encoding 字段），
+                # 则格式化为 ingest_uploaded_papers 工具所需的格式
+                if agent_id == 'deep_research_agent' and any(att.get('encoding') for att in attachments):
+                    # 构建文件列表用于 ingest_uploaded_papers 工具
+                    import json
+                    files_for_ingestion = []
+                    for att in attachments:
+                        if att.get('encoding'):  # 这是文件附件
+                            files_for_ingestion.append({
+                                'filename': att.get('filename', 'document.pdf'),
+                                'content': att.get('content', ''),
+                                'encoding': att.get('encoding', 'base64'),
+                                'mime_type': att.get('mime_type', 'application/octet-stream')
+                            })
+
+                    if files_for_ingestion:
+                        # 添加提示信息，引导 agent 使用 ingest_uploaded_papers 工具
+                        file_info = f"\n\n用户上传了 {len(files_for_ingestion)} 个文件：\n"
+                        for f in files_for_ingestion:
+                            file_info += f"- {f['filename']} ({f['mime_type']})\n"
+                        file_info += f"\n请使用 ingest_uploaded_papers 工具处理这些文件。文件数据：\n{json.dumps(files_for_ingestion, ensure_ascii=False)}"
+                        parts.append(types.Part(text=file_info))
+                else:
+                    # 其他 agent 或纯文本附件：直接附加文本内容
+                    for att in attachments:
+                        fname = att.get('filename') or 'attachment.txt'
+                        text = att.get('content') or ''
+                        # Prefix to help agent tools detect attachment context
+                        att_text = f"[附件: {fname}]\n{text}"
+                        parts.append(types.Part(text=att_text))
             user_message = types.Content(role='user', parts=parts)
 
             # 设置线程本地存储的 session 上下文，供 callbacks 使用
