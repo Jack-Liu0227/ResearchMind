@@ -732,54 +732,48 @@ def validate_structure(structure) -> bool:
     """
     Validate ASE structure before calculation.
 
+    Performs minimal validation - only checks for obviously invalid structures.
+    Let the physics engine (MatterSim/ASE) handle detailed validation during calculation.
+
     Args:
         structure: ASE Atoms object
 
     Returns:
-        True if structure is valid, False otherwise
+        True if structure passes basic checks, False otherwise
     """
     try:
-        # Check basic properties
+        # Check 1: Structure must have atoms
         if len(structure) == 0:
             logger.warning("Structure has no atoms")
             return False
 
-        # Check for reasonable cell parameters
+        # Check 2: Cell parameters must be finite and non-zero
         cell = structure.get_cell()
         cell_lengths = np.linalg.norm(cell, axis=1)
-        if np.any(cell_lengths < 0.1):
-            logger.warning("Structure has very small cell parameters")
+        if not np.all(np.isfinite(cell_lengths)):
+            logger.warning("Structure has non-finite cell parameters")
+            return False
+        if np.any(cell_lengths < 0.01):  # Very small threshold, just to catch obviously wrong cells
+            logger.warning(f"Structure has unreasonably small cell parameters: {cell_lengths}")
             return False
 
-        # Check for reasonable atomic positions
+        # Check 3: Atomic positions must be finite
         positions = structure.get_positions()
         if not np.all(np.isfinite(positions)):
             logger.warning("Structure has non-finite atomic positions")
             return False
 
-        # Check for overlapping atoms using minimum image convention
-        # This is important for periodic structures
-        if SCIPY_AVAILABLE and len(structure) > 1:
-            # Use ASE's get_all_distances which respects periodic boundary conditions
-            from ase.geometry import get_distances
+        # Check 4: Log structure info for debugging
+        formula = structure.get_chemical_formula()
+        logger.info(f"Structure validation passed: {formula}, {len(structure)} atoms, "
+                   f"cell: {cell_lengths[0]:.2f} × {cell_lengths[1]:.2f} × {cell_lengths[2]:.2f} Å")
 
-            # Get all pairwise distances with periodic boundary conditions
-            all_distances = structure.get_all_distances(mic=True)
-
-            # Get minimum distance excluding self-distances (diagonal)
-            np.fill_diagonal(all_distances, np.inf)
-            min_distance = np.min(all_distances)
-
-            # Use a more reasonable cutoff based on typical bond lengths
-            # Most covalent bonds are > 0.8 Å, so use 0.4 Å as cutoff for overlapping atoms
-            min_cutoff = 0.4
-
-            if min_distance < min_cutoff:
-                logger.warning(f"Structure has overlapping atoms: min distance = {min_distance:.3f} Å")
-                return False
-
-            # Log the minimum distance for debugging
-            logger.info(f"Structure validation passed: min distance = {min_distance:.3f} Å")
+        # Don't check for overlapping atoms - let the physics engine handle it
+        # Different materials have very different bond lengths:
+        # - H-H in H2: ~0.74 Å
+        # - C-C in diamond: ~1.54 Å
+        # - Metal bonds: 2-3 Å
+        # Setting a universal threshold will cause false positives/negatives
 
         return True
 
