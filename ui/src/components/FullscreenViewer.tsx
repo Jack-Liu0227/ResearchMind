@@ -13,6 +13,7 @@ import { CrystalStructure } from '../types'
 import { PhononImage, useAppStore } from '../store/useAppStore'
 import StructureViewerThreeJS from './StructureViewerThreeJS'
 import toast from 'react-hot-toast'
+import { resolveFileUrl } from '../utils/apiClient'
 
 interface FullscreenViewerProps {
   isOpen: boolean
@@ -41,6 +42,23 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
   useEffect(() => {
     setImageIndex(currentImageIndex)
   }, [currentImageIndex])
+
+  // 获取图片URL（处理相对路径）
+  const getImageUrl = useCallback((image: PhononImage): string => {
+    if (image.base64) {
+      return `data:image/png;base64,${image.base64}`
+    }
+    if (image.url) {
+      return resolveFileUrl(image.url)
+    }
+    if (image.filename) {
+      return resolveFileUrl(`/images/phonon_results/${image.filename}`)
+    }
+    if (image.path) {
+      return resolveFileUrl(`/images/${image.path}`)
+    }
+    return ''
+  }, [])
 
   // ESC 键退出全屏
   useEffect(() => {
@@ -203,7 +221,7 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
           {type === 'image' && currentImage && (
             <button
               onClick={() => downloadImage(
-                currentImage.url || '',
+                getImageUrl(currentImage),
                 currentImage.filename || currentImage.name || `phonon_${imageIndex + 1}.png`
               )}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center space-x-2"
@@ -304,12 +322,13 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
             <>
               {/* 图片 */}
               <img
-                src={currentImage.url}
+                src={getImageUrl(currentImage)}
                 alt={currentImage.filename || currentImage.name || currentImage.type}
                 className="max-w-full max-h-full object-contain select-none"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement
-                  console.error(`图片加载失败: ${currentImage.url}`)
+                  const imageUrl = getImageUrl(currentImage)
+                  console.error(`图片加载失败: ${imageUrl}`, currentImage)
                   target.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
                     <svg width="400" height="300" xmlns="http://www.w3.org/2000/svg">
                       <rect width="400" height="300" fill="#1f2937"/>

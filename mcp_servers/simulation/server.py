@@ -90,8 +90,7 @@ try:
 except ImportError as e:
     MATTERSIM_IMPORT_ERROR = str(e)
 
-# Import file detection and CIF tools
-from file_detector import detect_files_in_message_impl
+# Import CIF tools
 from cif_tools import extract_and_validate_cif_impl, calculate_kappa_from_cif_impl
 
 # Import CrystaLLM generator
@@ -546,88 +545,7 @@ async def health_check() -> Dict[str, Any]:
     }
 
 
-# File Detection and CIF Tools
-@app.tool
-async def detect_file_upload(
-    message_parts: List[Dict[str, Any]]
-) -> Dict[str, Any]:
-    """
-    Detect if user has uploaded any files.
-
-    **IMPORTANT**: This tool should be called FIRST when receiving ANY user message,
-    even if the message appears to be empty or contains only text.
-
-    This tool will:
-    - Detect all uploaded files
-    - Identify CIF files specifically
-    - Provide file information (name, size, type)
-    - Return a summary of detected files
-
-    Args:
-        message_parts: List of message parts from user message
-                      Expected structure: [{"resource": {"name": "...", "blob": {"data": "..."}}}]
-
-    Returns:
-        Dict containing:
-        - has_files: bool - Whether any files were detected
-        - file_count: int - Number of files detected
-        - files: List[Dict] - Information about each file
-        - cif_files: List[Dict] - CIF files specifically
-        - other_files: List[Dict] - Non-CIF files
-        - summary: str - Human-readable summary
-    """
-    return detect_files_in_message_impl(message_parts=message_parts)
-
-
-@app.tool
-async def debug_message_parts(
-    message_parts: Any
-) -> Dict[str, Any]:
-    """
-    Debug tool to inspect the structure of message_parts.
-
-    This tool helps diagnose issues with file detection by showing
-    the actual structure of the data being passed.
-
-    Args:
-        message_parts: Any data to inspect
-
-    Returns:
-        Dict containing detailed structure information
-    """
-    try:
-        result = {
-            "type": type(message_parts).__name__,
-            "is_list": isinstance(message_parts, list),
-            "is_dict": isinstance(message_parts, dict),
-            "is_none": message_parts is None,
-            "is_string": isinstance(message_parts, str),
-            "repr": str(message_parts)[:500],  # First 500 chars
-        }
-
-        if hasattr(message_parts, '__len__'):
-            result["length"] = len(message_parts)
-        else:
-            result["length"] = "N/A"
-
-        if isinstance(message_parts, dict):
-            result["keys"] = list(message_parts.keys())
-
-        if isinstance(message_parts, list) and len(message_parts) > 0:
-            result["first_item_type"] = type(message_parts[0]).__name__
-            result["first_item_repr"] = str(message_parts[0])[:200]
-            if isinstance(message_parts[0], dict):
-                result["first_item_keys"] = list(message_parts[0].keys())
-
-        return result
-
-    except Exception as e:
-        return {
-            "error": str(e),
-            "type": type(message_parts).__name__
-        }
-
-
+# CIF Tools
 @app.tool
 async def extract_and_validate_cif(
     message_parts: List[Dict[str, Any]]
