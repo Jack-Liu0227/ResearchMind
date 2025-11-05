@@ -746,7 +746,8 @@ def validate_structure(structure) -> bool:
 
         # Check for reasonable cell parameters
         cell = structure.get_cell()
-        if np.any(np.linalg.norm(cell, axis=1) < 0.1):
+        cell_lengths = np.linalg.norm(cell, axis=1)
+        if np.any(cell_lengths < 0.1):
             logger.warning("Structure has very small cell parameters")
             return False
 
@@ -756,12 +757,29 @@ def validate_structure(structure) -> bool:
             logger.warning("Structure has non-finite atomic positions")
             return False
 
-        # Check for overlapping atoms (if scipy is available)
+        # Check for overlapping atoms using minimum image convention
+        # This is important for periodic structures
         if SCIPY_AVAILABLE and len(structure) > 1:
-            distances = pdist(positions)
-            if np.any(distances < 0.5):  # Atoms closer than 0.5 Å
-                logger.warning("Structure has overlapping atoms")
+            # Use ASE's get_all_distances which respects periodic boundary conditions
+            from ase.geometry import get_distances
+
+            # Get all pairwise distances with periodic boundary conditions
+            all_distances = structure.get_all_distances(mic=True)
+
+            # Get minimum distance excluding self-distances (diagonal)
+            np.fill_diagonal(all_distances, np.inf)
+            min_distance = np.min(all_distances)
+
+            # Use a more reasonable cutoff based on typical bond lengths
+            # Most covalent bonds are > 0.8 Å, so use 0.4 Å as cutoff for overlapping atoms
+            min_cutoff = 0.4
+
+            if min_distance < min_cutoff:
+                logger.warning(f"Structure has overlapping atoms: min distance = {min_distance:.3f} Å")
                 return False
+
+            # Log the minimum distance for debugging
+            logger.info(f"Structure validation passed: min distance = {min_distance:.3f} Å")
 
         return True
 
