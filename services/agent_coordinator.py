@@ -4,7 +4,9 @@ Agent Coordinator
 Coordinates Google ADK agents and manages their sessions.
 """
 
+import os
 import logging
+import uuid
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -15,6 +17,7 @@ from google.genai import types
 from .config import agent_config
 from .data_processor import DataProcessor
 from .message_handler import MessageHandler
+from .photon_billing import get_billing_service
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,9 @@ class AgentCoordinator:
         self.runners: Dict[str, Runner] = {}
         self.adk_sessions: Dict[str, Any] = {}
         self.session_message_counts: Dict[str, int] = {}  # 跟踪每个会话的消息数量
+        self.current_tool_calls: Dict[str, List[Dict[str, Any]]] = {}  # 跟踪当前消息的工具调用
+        self.message_billing_data: Dict[str, Dict[str, Any]] = {}  # 跟踪每条消息的计费数据 (session_key -> billing_data)
+        self.message_start_billing: Dict[str, Dict[str, Any]] = {}  # 记录消息开始时的计费状态
     
     async def process_chat_message(
         self,
@@ -101,6 +107,27 @@ class AgentCoordinator:
             # 增加消息计数
             self.session_message_counts[session_key] = message_count + 1
 
+            # 记录消息开始时的计费状态（用于计算本条消息的增量）
+            from services.user_billing_config import get_billing_context_manager
+            context_manager = get_billing_context_manager()
+            # 使用 session_id 作为对话 ID
+            conversation_id = session_id or 'unknown'
+            user_id = client_id or 'unknown'
+            context = context_manager.get_or_create_context(conversation_id, user_id)
+            start_snapshot = context.get_snapshot()
+
+            self.message_start_billing[session_key] = {
+                'total_tokens': start_snapshot.get('total_tokens', 0),
+                'total_photons': start_snapshot.get('total_photons', 0.0),
+                'conversation_id': conversation_id,  # 保存 conversation_id 供后续使用
+                'user_id': user_id
+            }
+            logger.info(f"💎 [消息计费] 消息开始时计费状态:")
+            logger.info(f"  session_key={session_key}")
+            logger.info(f"  conversation_id={conversation_id}")
+            logger.info(f"  start_snapshot={start_snapshot}")
+            logger.info(f"  message_start_billing[{session_key}]={self.message_start_billing[session_key]}")
+
             # Run agent
             logger.info(f"🤖 Running agent: {agent_id} (message #{self.session_message_counts[session_key]})")
 
@@ -108,13 +135,116 @@ class AgentCoordinator:
             parts = [types.Part(text=content)]
             # Attach optional file/text parts (e.g., CIF content) so agents can parse them
             if attachments:
-                for att in attachments:
-                    fname = att.get('filename') or 'attachment.txt'
-                    text = att.get('content') or ''
-                    # Prefix to help agent tools detect attachment context
-                    att_text = f"[附件: {fname}]\n{text}"
-                    parts.append(types.Part(text=att_text))
+                # 对于 deep_research_agent 和 simulation_agent，保存文件到磁盘
+                # 支持两种格式：
+                # 1. base64 编码的文件（encoding='base64'）
+                # 2. 纯文本文件（如 CIF 文件，直接包含 content 字符串）
+                if agent_id in ['deep_research_agent', 'simulation_agent']:
+                    import json
+                    import base64
+                    from pathlib import Path
+
+                    # 确保 session_id 存在（如果为 None，使用 session_key 的一部分）
+                    actual_session_id = session_id
+                    if not actual_session_id:
+                        # 从 session_key 中提取或生成 session_id
+                        import uuid
+                        from datetime import datetime
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        unique_id = str(uuid.uuid4())[:8]
+                        actual_session_id = f"upload_{timestamp}_{unique_id}"
+                        logger.info(f"📝 Generated session_id for file upload: {actual_session_id}")
+
+                    # 根据 agent 类型选择不同的上传目录
+                    if agent_id == 'deep_research_agent':
+                        # 文献研究 agent 使用 papers 目录
+                        base_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
+                    elif agent_id == 'simulation_agent':
+                        # 模拟 agent 使用 simulation/cif 目录
+                        base_dir = Path(__file__).parent.parent / "mcp_servers" / "simulation" / "cif"
+                    else:
+                        # 默认使用 papers 目录
+                        base_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
+
+                    upload_dir = base_dir / actual_session_id / "uploads"
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+
+                    saved_files = []
+                    for att in attachments:
+                        filename = att.get('filename', 'document.txt')
+
+                        # 处理 base64 编码的文件
+                        if att.get('encoding') == 'base64':
+                            content_b64 = att.get('content', '')
+                            try:
+                                file_bytes = base64.b64decode(content_b64)
+                                file_path = upload_dir / filename
+                                file_path.write_bytes(file_bytes)
+
+                                saved_files.append({
+                                    'filename': filename,
+                                    'path': str(file_path),
+                                    'size': len(file_bytes),
+                                    'mime_type': att.get('mime_type', 'application/octet-stream')
+                                })
+                                logger.info(f"💾 Saved base64 file: {filename} ({len(file_bytes)} bytes) -> {file_path}")
+                            except Exception as e:
+                                logger.error(f"❌ Failed to save base64 file {filename}: {e}")
+                                continue
+
+                        # 处理纯文本文件（如 CIF 文件）
+                        else:
+                            text_content = att.get('content', '')
+                            if text_content:
+                                try:
+                                    file_path = upload_dir / filename
+                                    file_path.write_text(text_content, encoding='utf-8')
+
+                                    saved_files.append({
+                                        'filename': filename,
+                                        'path': str(file_path),
+                                        'size': len(text_content.encode('utf-8')),
+                                        'mime_type': att.get('mime_type', 'text/plain')
+                                    })
+                                    logger.info(f"💾 Saved text file: {filename} ({len(text_content)} chars) -> {file_path}")
+                                except Exception as e:
+                                    logger.error(f"❌ Failed to save text file {filename}: {e}")
+                                    continue
+
+                    if saved_files:
+                        # 只传递文件元数据（不包含内容），引导 agent 使用工具
+                        file_info = f"\n\n用户上传了 {len(saved_files)} 个文件：\n"
+                        for f in saved_files:
+                            size_kb = f['size'] / 1024
+                            file_info += f"- {f['filename']} ({size_kb:.2f}KB, {f['mime_type']})\n"
+                        file_info += f"\n文件已保存到：{upload_dir}\n"
+
+                        # 根据 agent 类型提供不同的工具调用提示
+                        if agent_id == 'deep_research_agent':
+                            file_info += f"\n⚠️ 请立即调用工具：ingest_uploaded_papers(session_id=\"{actual_session_id}\")"
+                            file_info += f"\n注意：session_id 必须使用引号中的值：\"{actual_session_id}\""
+                        elif agent_id == 'simulation_agent':
+                            # 检查是否有 CIF 文件
+                            cif_files = [f for f in saved_files if f['filename'].lower().endswith('.cif')]
+                            if cif_files:
+                                file_info += f"\n⚠️ 检测到 CIF 文件，请调用工具：extract_and_validate_cif(session_id=\"{actual_session_id}\")"
+                                file_info += f"\n注意：session_id 必须使用引号中的值：\"{actual_session_id}\""
+
+                        parts.append(types.Part(text=file_info))
+                else:
+                    # 其他 agent 或纯文本附件：直接附加文本内容
+                    for att in attachments:
+                        fname = att.get('filename') or 'attachment.txt'
+                        text = att.get('content') or ''
+                        # Prefix to help agent tools detect attachment context
+                        att_text = f"[附件: {fname}]\n{text}"
+                        parts.append(types.Part(text=att_text))
             user_message = types.Content(role='user', parts=parts)
+
+            # 设置线程本地存储的 session 上下文，供 callbacks 使用
+            from agents.callbacks import set_current_session_context
+            set_current_session_context(session_id or 'unknown', client_id)
+            logger.info(f"🔍 [AGENT_COORDINATOR] 设置 session 上下文: session_id={session_id}, user_id={client_id}")
 
             # Google ADK API: run_async() 需要 user_id, session_id 和 new_message 参数
             event_count = 0
@@ -126,16 +256,76 @@ class AgentCoordinator:
                 event_count += 1
                 logger.info(f"🔍 [Event {event_count}] Type: {type(event).__name__}")
                 logger.info(f"🔍 [Event {event_count}] Attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
-                await self._handle_agent_event(event, agent_id, websocket, session_id)
+                await self._handle_agent_event(event, agent_id, websocket, client_id, session_id)
 
             logger.info(f"✅ Agent {agent_id} completed - processed {event_count} events")
 
-            # 发送完成状态
+            # 获取会话的计费统计（使用隔离上下文）
+            from .user_billing_config import get_billing_context_manager
+            context_manager = get_billing_context_manager()
+
+            # 使用 session_id 和 client_id 获取隔离的计费上下文
+            billing_session_key = session_id or 'unknown'
+            context = context_manager.get_context(billing_session_key)
+
+            # 计算本次对话的计费信息
+            previous_total_tokens = 0
+            previous_total_photons = 0.0
+            session_usage = {
+                'total_tokens': 0,
+                'total_photons': 0.0,
+                'requests_count': 0
+            }
+
+            if context:
+                # 从隔离上下文获取统计数据
+                snapshot = context.get_snapshot()
+                session_usage = {
+                    'total_tokens': snapshot['total_tokens'],
+                    'total_photons': snapshot['total_photons'],
+                    'requests_count': snapshot['request_count']
+                }
+
+            # 同步计费信息到 SessionManager
+            if session_id:
+                from .session_manager import SessionManager
+
+                # 更新会话的计费使用情况
+                current_billing = SessionManager.get_billing_summary(session_id)
+                if current_billing:
+                    previous_total_tokens = current_billing['total_tokens']
+                    previous_total_photons = current_billing['total_photons']
+
+            # 计算本次新增的 tokens 和光子
+            current_tokens = session_usage.get('total_tokens', 0) - previous_total_tokens
+            current_photons = session_usage.get('total_photons', 0.0) - previous_total_photons
+
+            # 如果本次有新增，更新 SessionManager
+            if session_id and current_tokens > 0:
+                from .session_manager import SessionManager
+                SessionManager.update_billing_usage(session_id, current_tokens, current_photons)
+                logger.info(f"💳 更新会话 {session_id[:8]}... 计费: +{current_tokens} tokens, +{current_photons:.4f} 光子")
+
+            logger.info(f"💎 [计费] 本次对话: {current_tokens} tokens = {current_photons:.4f} 光子 | 会话累计: {session_usage.get('total_tokens', 0)} tokens = {session_usage.get('total_photons', 0.0):.4f} 光子")
+
+            # 发送完成状态（包含计费信息）
+            billing_data = {
+                "session_total_tokens": session_usage.get('total_tokens', 0),
+                "session_total_photons": session_usage.get('total_photons', 0.0),
+                "requests_count": session_usage.get('requests_count', 0),
+                "current_tokens": current_tokens,  # 本次对话的 tokens
+                "current_photons": current_photons,  # 本次对话的光子
+                "model_name": os.getenv('MODEL_USE', 'qwen-plus')  # 使用的模型
+            }
+            logger.info(f"📤 [WebSocket] 准备发送 complete 状态，计费数据: {billing_data}")
+
             await MessageHandler.send_message(websocket, "status", {
                 "status": "complete",
-                "message": "处理完成"
+                "message": "处理完成",
+                "billing": billing_data
             })
 
+            logger.info(f"✅ [WebSocket] 已发送 complete 状态")
             logger.info(f"✅ Agent {agent_id} completed")
             
         except Exception as e:
@@ -335,6 +525,7 @@ class AgentCoordinator:
         event: Any,
         agent_id: str,
         websocket: Any,
+        client_id: str,
         session_id: Optional[str] = None
     ) -> None:
         """Handle agent event"""
@@ -342,6 +533,9 @@ class AgentCoordinator:
             event_type = type(event).__name__
             logger.debug(f"📨 Agent event: {event_type}")
             logger.debug(f"📨 Event attributes: {dir(event)}")
+
+            # 获取计费服务（用于计算消息级别的计费）
+            billing_service = get_billing_service()
 
             # Handle text content
             if hasattr(event, 'content') and event.content:
@@ -351,11 +545,57 @@ class AgentCoordinator:
                         if hasattr(part, 'text') and part.text:
                             text_content = part.text
                             if text_content.strip():
+                                # 获取当前会话的tool calls
+                                # 使用与 process_chat_message() 相同的 session_key 格式
+                                session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
+                                tool_calls = self.current_tool_calls.get(session_key, [])
+
+                                # 计算本条消息的计费增量
+                                billing_data = None
+                                try:
+                                    from services.user_billing_config import get_billing_context_manager
+                                    context_manager = get_billing_context_manager()
+
+                                    start_billing_info = self.message_start_billing.get(session_key, {})
+                                    conversation_id = start_billing_info.get('conversation_id', session_id or 'unknown')
+                                    user_id = start_billing_info.get('user_id', client_id or 'unknown')
+
+                                    context = context_manager.get_context(conversation_id)
+                                    if context:
+                                        current_snapshot = context.get_snapshot()
+                                    else:
+                                        current_snapshot = {'total_tokens': 0, 'total_photons': 0.0}
+
+                                    logger.debug(f"💎 [消息计费] 调试信息:")
+                                    logger.debug(f"  session_key={session_key}")
+                                    logger.debug(f"  conversation_id={conversation_id}")
+                                    logger.debug(f"  start_billing_info={start_billing_info}")
+                                    logger.debug(f"  current_snapshot={current_snapshot}")
+
+                                    current_tokens = current_snapshot.get('total_tokens', 0) - start_billing_info.get('total_tokens', 0)
+                                    current_photons = current_snapshot.get('total_photons', 0.0) - start_billing_info.get('total_photons', 0.0)
+
+                                    if current_tokens > 0 or current_photons > 0:
+                                        billing_data = {
+                                            'tokens': current_tokens,
+                                            'photons': round(current_photons, 4),
+                                            'model_name': os.getenv('MODEL_USE', 'qwen-plus')
+                                        }
+                                        logger.info(f"💎 [消息计费] 本条消息计费: tokens={current_tokens}, photons={current_photons}")
+                                except Exception as e:
+                                    logger.error(f"⚠️ 计算消息计费失败: {e}", exc_info=True)
+
                                 await MessageHandler.send_agent_response(
                                     websocket=websocket,
                                     agent_id=agent_id,
-                                    content=text_content
+                                    content=text_content,
+                                    tool_calls=tool_calls if tool_calls else None,
+                                    billing=billing_data
                                 )
+
+                                # 清除已发送的tool calls记录
+                                if session_key in self.current_tool_calls:
+                                    self.current_tool_calls[session_key] = []
 
             # Handle tool calls
             if hasattr(event, 'tool_calls') and event.tool_calls:
@@ -364,6 +604,27 @@ class AgentCoordinator:
                     if hasattr(tool_call, 'name'):
                         # 发送工具调用状态到前端
                         tool_name = tool_call.name
+
+                        # 提取工具调用参数
+                        tool_input = {}
+                        if hasattr(tool_call, 'args'):
+                            tool_input = tool_call.args if isinstance(tool_call.args, dict) else {}
+                        elif hasattr(tool_call, 'input'):
+                            tool_input = tool_call.input if isinstance(tool_call.input, dict) else {}
+
+                        # 记录工具调用信息
+                        # 使用与 process_chat_message() 相同的 session_key 格式
+                        session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
+                        if session_key not in self.current_tool_calls:
+                            self.current_tool_calls[session_key] = []
+
+                        tool_call_record = {
+                            "name": tool_name,
+                            "input": tool_input,
+                            "timestamp": datetime.now().isoformat(),
+                            "status": "pending"
+                        }
+                        self.current_tool_calls[session_key].append(tool_call_record)
 
                         # 根据工具名称生成更友好的提示信息
                         tool_message = self._get_tool_friendly_message(tool_name)
@@ -524,6 +785,17 @@ class AgentCoordinator:
                             websocket=websocket,
                             session_id=session_id  # Pass session_id
                         )
+
+                        # 更新工具调用记录的输出
+                        # 使用与 process_chat_message() 相同的 session_key 格式
+                        session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
+                        if session_key in self.current_tool_calls and self.current_tool_calls[session_key]:
+                            # 找到最后一个pending状态的tool call并更新
+                            for tool_call_record in reversed(self.current_tool_calls[session_key]):
+                                if tool_call_record.get("status") == "pending":
+                                    tool_call_record["output"] = result_data
+                                    tool_call_record["status"] = "success"
+                                    break
 
                         # 工具结果处理完成后，发送thinking状态
                         await MessageHandler.send_message(websocket, "status", {

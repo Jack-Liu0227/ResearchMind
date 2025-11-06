@@ -1,14 +1,41 @@
 """
-Google ADK Callbacks for context management.
+Google ADK Callbacks for context management and billing.
 参考: https://google.github.io/adk-docs/callbacks/
 """
 import logging
+import threading
 from typing import Optional
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models import LlmResponse, LlmRequest
 from google.genai import types
 
 logger = logging.getLogger(__name__)
+
+# 线程本地存储，用于在 agent_coordinator 和 callbacks 之间传递 session_id
+_thread_local = threading.local()
+
+
+def set_current_session_context(session_id: str, user_id: str):
+    """设置当前线程的 session 上下文（由 agent_coordinator 调用）"""
+    _thread_local.session_id = session_id
+    _thread_local.user_id = user_id
+
+
+def get_current_session_context():
+    """获取当前线程的 session 上下文（由 callbacks 调用）"""
+    return (
+        getattr(_thread_local, 'session_id', 'unknown'),
+        getattr(_thread_local, 'user_id', None)
+    )
+
+
+# Import billing service
+try:
+    from services.photon_billing import get_billing_service
+    BILLING_AVAILABLE = True
+except ImportError:
+    BILLING_AVAILABLE = False
+    logger.warning("⚠️ Photon billing service not available")
 
 # 上下文管理配置
 MAX_CONTEXT_TOKENS = 50000  # DeepSeek模型的安全上下文长度（降低以强制触发修剪）
@@ -100,4 +127,104 @@ def trim_llm_request_context(
     except Exception as e:
         logger.error(f"❌ 修剪上下文失败: {e}", exc_info=True)
         return None  # 即使失败也允许请求继续
+
+
+def record_llm_usage(
+    callback_context: CallbackContext,
+    llm_response: LlmResponse
+) -> Optional[LlmResponse]:
+    """
+    记录 LLM 使用情况并计费
+
+    这个 callback 在 LLM 调用完成后执行，用于记录 token 使用和计算光子消耗
+
+    Args:
+        callback_context: ADK 提供的回调上下文
+        llm_response: LLM 返回的响应
+
+    Returns:
+        None 或修改后的 LlmResponse
+    """
+    if not BILLING_AVAILABLE:
+        return None
+
+    try:
+        agent_name = callback_context.agent_name
+
+        # 从响应中提取 token 使用信息
+        # LiteLLM 的响应通常包含 usage 信息
+        total_tokens = 0
+        prompt_tokens = 0
+        completion_tokens = 0
+        model_name = "unknown"
+
+        # 尝试从响应中获取 usage 信息
+        if hasattr(llm_response, 'usage_metadata'):
+            usage = llm_response.usage_metadata
+            if hasattr(usage, 'total_token_count'):
+                total_tokens = usage.total_token_count
+            if hasattr(usage, 'prompt_token_count'):
+                prompt_tokens = usage.prompt_token_count
+            if hasattr(usage, 'candidates_token_count'):
+                completion_tokens = usage.candidates_token_count
+
+        # 如果没有 usage 信息，尝试估算响应 tokens
+        if total_tokens == 0:
+            # 估算响应 tokens
+            if hasattr(llm_response, 'candidates'):
+                for candidate in llm_response.candidates:
+                    if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                        for part in candidate.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                completion_tokens += estimate_token_count(part.text)
+
+            # 无法准确估算 prompt tokens，使用响应的 2 倍作为总数（经验值）
+            total_tokens = completion_tokens * 2
+            prompt_tokens = completion_tokens
+
+        # 尝试从 callback_context 获取模型名称
+        if hasattr(callback_context, 'model_name'):
+            model_name = callback_context.model_name
+        elif hasattr(llm_response, 'model'):
+            model_name = llm_response.model
+
+        # 如果有 token 使用，记录计费
+        if total_tokens > 0:
+            billing_service = get_billing_service()
+
+            # 从线程本地存储获取 session_id 和 user_id
+            # 这些值由 agent_coordinator 在调用 run_async() 前设置
+            session_id, user_id = get_current_session_context()
+            logger.info(f"🔍 [BILLING CALLBACK] session_id={session_id}, user_id={user_id}")
+
+            # 使用隔离的计费方法
+            # 如果没有 user_id，使用 'unknown' 作为默认值
+            billing_result = billing_service.record_usage_isolated(
+                conversation_id=session_id or 'unknown',
+                user_id=user_id or 'unknown',
+                tokens=total_tokens,
+                model=model_name,
+                metadata={
+                    'agent_name': agent_name,
+                    'prompt_tokens': prompt_tokens,
+                    'completion_tokens': completion_tokens
+                }
+            )
+
+            # 记录日志
+            if billing_result.get('billing_enabled'):
+                current = billing_result['current_request']
+                # 兼容两种返回格式
+                session_total = billing_result.get('session_total') or billing_result.get('conversation_total', {})
+                logger.info(
+                    f"💎 [{agent_name}] Token使用: {current['tokens']} tokens "
+                    f"({prompt_tokens} prompt + {completion_tokens} completion) → "
+                    f"{current['photons']:.4f} 光子 | "
+                    f"累计: {session_total.get('photons', 0):.4f} 光子"
+                )
+
+    except Exception as e:
+        logger.error(f"❌ [BILLING CALLBACK ERROR] {e}", exc_info=True)
+
+    return None  # 不修改响应
 

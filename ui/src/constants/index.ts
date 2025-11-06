@@ -231,7 +231,7 @@ export const APP_CONFIG = {
   VERSION: '2.0.0',
   DESCRIPTION: 'AI 研究助手',
   MAX_MESSAGE_LENGTH: 10000,
-  MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
+  MAX_FILE_SIZE: 30 * 1024 * 1024, // 30MB (base64 编码后约 40MB，小于 WebSocket 的 50MB 限制)
   SUPPORTED_FILE_TYPES: ['.txt', '.pdf', '.doc', '.docx', '.cif', '.xyz', '.pdb'],
 } as const
 

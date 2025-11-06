@@ -101,7 +101,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         {/* 右侧面板 - 结构查看器 */}
         {rightPanelOpen && (
           <div
-            className="border-l border-gray-200 bg-white flex-shrink-0 relative"
+            className="border-l border-gray-200 bg-white flex-shrink-0 relative h-full"
             style={{ width: rightPanelWidth }}
           >
             {/* 拖拽条 */}

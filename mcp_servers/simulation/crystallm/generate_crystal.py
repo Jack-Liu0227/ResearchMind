@@ -10,7 +10,10 @@ from pymatgen.io.cif import CifWriter
 import pandas as pd
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
+import structlog
 # from CrystaLLM.bin import make_prompt_file, sample, postprocess
+
+logger = structlog.get_logger(__name__)
 
 class CrystalStructureGenerator:
     def __init__(self, composition, params=None, progress_callback: Optional[Callable[[str, float], None]] = None):
@@ -478,11 +481,77 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
         try:
             from pymatgen.core import Structure
             from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-            
+
             struct = Structure.from_str(cif_content, fmt="cif")
-            
-            # 提取晶格参数
-            lattice = struct.lattice
+
+            # 使用 SpacegroupAnalyzer 获取标准化结构
+            try:
+                sga = SpacegroupAnalyzer(struct, symprec=0.1, angle_tolerance=5.0)
+                primitive_structure = sga.get_primitive_standard_structure()
+                conventional_structure = sga.get_conventional_standard_structure()
+                space_group = sga.get_space_group_symbol()
+                space_group_number = sga.get_space_group_number()
+                crystal_system = sga.get_crystal_system()
+
+                # 使用原胞作为显示结构
+                display_struct = primitive_structure
+                logger.info(f"✅ Analyzed structure: {composition}")
+                logger.info(f"   Primitive: {len(primitive_structure)} sites")
+                logger.info(f"   Conventional: {len(conventional_structure)} sites")
+
+                # 准备原胞和惯胞的cellTypes数据（用于前端切换）
+                prim_lattice = primitive_structure.lattice
+                primitive_data = {
+                    "latticeParameters": {
+                        "a": round(prim_lattice.a, 6),
+                        "b": round(prim_lattice.b, 6),
+                        "c": round(prim_lattice.c, 6),
+                        "alpha": round(prim_lattice.alpha, 6),
+                        "beta": round(prim_lattice.beta, 6),
+                        "gamma": round(prim_lattice.gamma, 6)
+                    },
+                    "atoms": [],
+                    "volume": float(prim_lattice.volume),
+                    "numAtoms": len(primitive_structure)
+                }
+                for site in primitive_structure:
+                    primitive_data["atoms"].append({
+                        "element": site.species_string,
+                        "position": [round(x, 6) for x in site.frac_coords.tolist()],  # 分数坐标
+                        "occupancy": 1.0
+                    })
+
+                conv_lattice = conventional_structure.lattice
+                conventional_data = {
+                    "latticeParameters": {
+                        "a": round(conv_lattice.a, 6),
+                        "b": round(conv_lattice.b, 6),
+                        "c": round(conv_lattice.c, 6),
+                        "alpha": round(conv_lattice.alpha, 6),
+                        "beta": round(conv_lattice.beta, 6),
+                        "gamma": round(conv_lattice.gamma, 6)
+                    },
+                    "atoms": [],
+                    "volume": float(conv_lattice.volume),
+                    "numAtoms": len(conventional_structure)
+                }
+                for site in conventional_structure:
+                    conventional_data["atoms"].append({
+                        "element": site.species_string,
+                        "position": [round(x, 6) for x in site.frac_coords.tolist()],  # 分数坐标
+                        "occupancy": 1.0
+                    })
+            except Exception as sga_error:
+                logger.warning(f"⚠️ SpacegroupAnalyzer failed: {sga_error}, using original structure")
+                display_struct = struct
+                # Keep the space_group from CIF parsing above
+                space_group_number = None
+                crystal_system = "triclinic"
+                primitive_data = None
+                conventional_data = None
+
+            # 提取晶格参数（用于主显示）
+            lattice = display_struct.lattice
             lattice_params = {
                 "a": round(lattice.a, 6),
                 "b": round(lattice.b, 6),
@@ -491,27 +560,17 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                 "beta": round(lattice.beta, 6),
                 "gamma": round(lattice.gamma, 6)
             }
-            
-            # 提取原子位置（使用笛卡尔坐标）
+
+            # 提取原子位置（使用笛卡尔坐标用于主显示）
             atoms = []
-            for site in struct:
+            for site in display_struct:
                 atoms.append({
                     "element": site.species_string,
                     "position": [round(x, 6) for x in site.coords.tolist()],  # 使用笛卡尔坐标
                     "occupancy": 1.0
                 })
-            
-            # 获取空间群信息
-            try:
-                sga = SpacegroupAnalyzer(struct)
-                space_group = sga.get_space_group_symbol()
-                space_group_number = sga.get_space_group_number()
-                crystal_system = sga.get_crystal_system()
-            except:
-                space_group_number = None
-                crystal_system = None
-            
-            return {
+
+            result = {
                 "id": structure_id,
                 "name": filename.replace('.cif', ''),
                 "formula": formula,
@@ -525,8 +584,8 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                 "latticeParameters": lattice_params,
                 "atoms": atoms,
                 "properties": {
-                    "density": float(struct.density),
-                    "volume": float(struct.lattice.volume),
+                    "density": float(display_struct.density),
+                    "volume": float(display_struct.lattice.volume),
                     "numAtoms": len(atoms),
                     "spaceGroupNumber": space_group_number,
                     "crystalSystem": crystal_system
@@ -539,6 +598,17 @@ def convert_cif_to_frontend_format(cif_content: str, filename: str, composition:
                     "timestamp": datetime.now().isoformat()
                 }
             }
+
+            # 添加cellTypes数据（如果成功分析了原胞和惯胞）
+            if primitive_data and conventional_data:
+                result["cellTypes"] = {
+                    "primitive": primitive_data,
+                    "conventional": conventional_data
+                }
+                result["currentCellType"] = "primitive"
+                logger.info(f"✅ Added cellTypes data: primitive ({primitive_data['numAtoms']} atoms) and conventional ({conventional_data['numAtoms']} atoms)")
+
+            return result
             
         except Exception as parse_error:
             logger.warning(f"Could not parse CIF with pymatgen: {parse_error}, returning basic structure")

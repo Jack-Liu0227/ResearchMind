@@ -34,7 +34,8 @@ const ChatPage: React.FC = () => {
     setCurrentSessionPhononImages,
     addToCurrentSessionPhononImages,
     setShowPhononVisualization,
-    sessions
+    sessions,
+    updateBillingData
   } = useAppStore()
 
   const pendingFileMetadataRef = useRef<any[]>([])
@@ -224,26 +225,8 @@ const ChatPage: React.FC = () => {
       console.log('📥 [WebSocket接收] 完整消息:', message)
 
       if (message.type === 'message' && message.data) {
-        // 收到任何来自后端的消息时，立即显示加载提示
-        if (message.data.agentName) {
-          // 如果有agentName，说明是来自agent的消息
-          setIsLoading(true)
-
-          // 根据消息内容生成更详细的提示
-          if (message.data.content) {
-            // 如果已经有内容，显示"正在处理"
-            setLoadingMessage(`⏳ ${message.data.agentName} 正在处理...`)
-          } else {
-            // 如果没有内容，显示"正在思考"
-            setLoadingMessage(`⏳ ${message.data.agentName} 正在思考...`)
-          }
-
-          // 显示toast提示（不自动消失，等待complete状态）
-          toast.loading(`${message.data.agentName} 正在处理您的请求...`, {
-            id: 'agent-processing-toast',
-            duration: Infinity, // 不自动消失
-          })
-        }
+        // 收到 agent 的回复消息，说明处理已完成，应该停止 loading
+        // 注意：不要在这里设置 setIsLoading(true)，这会导致一直显示"正在处理"
 
         // 如果消息有内容，添加到消息列表
       if (message.data.content && message.data.content.trim()) {
@@ -352,9 +335,48 @@ const ChatPage: React.FC = () => {
         })
       } else if (message.type === 'status' && message.data) {
         // 处理状态消息
+        console.log('📊 [状态消息] 收到状态:', message.data.status, '数据:', message.data)
+
         if (message.data.status === 'complete') {
+          console.log('✅ [状态消息] 处理完成，停止 loading')
           setIsLoading(false)
           setLoadingMessage('')
+
+          // 更新计费数据
+          if (message.data.billing) {
+            console.log('💎 [计费] 收到计费数据:', message.data.billing)
+            updateBillingData(message.data.billing)
+
+            // 将本次对话的计费信息添加到最后一条 assistant 消息
+            if (message.data.billing.current_tokens && message.data.billing.current_tokens > 0) {
+              const lastAssistantMessage = messages
+                .slice()
+                .reverse()
+                .find(msg => msg.role === 'assistant')
+
+              if (lastAssistantMessage) {
+                console.log('💎 [计费] 更新消息计费:', lastAssistantMessage.id, {
+                  tokens: message.data.billing.current_tokens,
+                  photons: message.data.billing.current_photons,
+                  model_name: message.data.billing.model_name
+                })
+                updateMessage(lastAssistantMessage.id, {
+                  billing: {
+                    tokens: message.data.billing.current_tokens,
+                    photons: message.data.billing.current_photons,
+                    model_name: message.data.billing.model_name
+                  }
+                })
+              } else {
+                console.warn('💎 [计费] 未找到最后一条 assistant 消息')
+              }
+            } else {
+              console.log('💎 [计费] 本次对话无 token 消耗')
+            }
+          } else {
+            console.warn('💎 [计费] 完成消息中没有计费数据')
+          }
+
           toast.success('✅ 处理完成', {
             id: 'agent-processing-toast',
             duration: 3000, // 显示3秒后消失

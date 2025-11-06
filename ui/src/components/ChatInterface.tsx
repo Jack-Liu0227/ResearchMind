@@ -155,13 +155,21 @@ const ChatInterface: React.FC = () => {
     if (!fileList || fileList.length === 0) return
 
     const selected: File[] = []
+    const skipped: string[] = []
+
     for (let i = 0; i < fileList.length; i++) {
       const f = fileList[i]
       if (f.size > APP_CONFIG.MAX_FILE_SIZE) {
-        toast.error(`文件大小超过限制，已跳过: ${f.name}`)
+        const sizeMB = (f.size / (1024 * 1024)).toFixed(1)
+        const maxSizeMB = (APP_CONFIG.MAX_FILE_SIZE / (1024 * 1024)).toFixed(0)
+        skipped.push(`${f.name} (${sizeMB}MB > ${maxSizeMB}MB)`)
         continue
       }
       selected.push(f)
+    }
+
+    if (skipped.length > 0) {
+      toast.error(`文件过大已跳过：${skipped.join(', ')}`)
     }
 
     if (selected.length === 0) return
@@ -215,14 +223,55 @@ const ChatInterface: React.FC = () => {
     }
     setInputValue('')
 
-    // 如果包含非 CIF 文件，改为走文档批量上传（服务端提取文本并返回链接）
+    // 如果包含非 CIF 文件，根据当前 agent 决定处理方式
     const hasNonCif = uploadedFiles.some(f => !f.name.toLowerCase().endsWith('.cif'))
     if (hasNonCif) {
+      const nonCifFiles = uploadedFiles.filter(f => !f.name.toLowerCase().endsWith('.cif'))
+
+      // 如果是 deep_research_agent，通过 WebSocket 发送文件内容给 agent 处理
+      if (currentAgent?.id === 'deep_research_agent') {
+        try {
+          // 读取文件内容并转换为 base64
+          const fileAttachments: Array<{ filename: string; content: string; encoding: string; mime_type: string }> = []
+
+          for (const file of nonCifFiles) {
+            const arrayBuffer = await file.arrayBuffer()
+            const base64 = btoa(
+              new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+            )
+            fileAttachments.push({
+              filename: file.name,
+              content: base64,
+              encoding: 'base64',
+              mime_type: file.type || 'application/octet-stream'
+            })
+          }
+
+          // 通过 WebSocket 发送文件附件给 agent
+          wsService.sendChatWithAttachments({
+            content: (pendingUserText || '').trim() || '请分析这些上传的文献文件',
+            agentId: currentAgent.id,
+            sessionId: (sessionToUse || currentSession)?.id,
+            attachments: fileAttachments,
+          })
+
+          toast.success(`已上传 ${nonCifFiles.length} 个文件，正在处理...`)
+        } catch (err) {
+          console.error('文件读取失败:', err)
+          toast.error('文件读取失败，请重试')
+        } finally {
+          setUploadedFiles(null)
+          if (fileInputRef.current) fileInputRef.current.value = ''
+          setIsLoading(false)
+          setLoadingMessage('')
+        }
+        return
+      }
+
+      // 其他 agent 或默认情况：走文档批量上传（服务端提取文本并返回链接）
       try {
         const form = new FormData()
-        uploadedFiles
-          .filter(f => !f.name.toLowerCase().endsWith('.cif'))
-          .forEach(f => form.append('files', f))
+        nonCifFiles.forEach(f => form.append('files', f))
 
         const uploadUrl = resolveFileUrl('/upload?type=documents')
         const resp = await fetch(uploadUrl, { method: 'POST', body: form })

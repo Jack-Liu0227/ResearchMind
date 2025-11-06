@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react'
-import { Bot, User, Copy, ThumbsUp, ThumbsDown, RotateCcw, Download } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Bot, User, Copy, ThumbsUp, ThumbsDown, RotateCcw, Download, ChevronDown, ChevronRight } from 'lucide-react'
 import { Message } from '../types'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
@@ -15,6 +15,102 @@ import { CrystalStructure } from '../types'
 import { CsvViewer, MarkdownViewer } from './FileViewer'
 import { API_CONFIG } from '../constants'
 import { resolveFileUrl } from '../utils/apiClient'
+import MessageBillingBadge from './MessageBillingBadge'
+
+/**
+ * Tool Calls 折叠显示组件
+ */
+const ToolCallsDisplay: React.FC<{ toolCalls: any[] }> = ({ toolCalls }) => {
+  const [expandedCalls, setExpandedCalls] = useState<Set<number>>(new Set())
+
+  const toggleCall = (index: number) => {
+    const newExpanded = new Set(expandedCalls)
+    if (newExpanded.has(index)) {
+      newExpanded.delete(index)
+    } else {
+      newExpanded.add(index)
+    }
+    setExpandedCalls(newExpanded)
+  }
+
+  if (!toolCalls || toolCalls.length === 0) return null
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="text-xs font-semibold text-gray-600 mb-2">🔧 工具调用记录</div>
+      {toolCalls.map((call, index) => {
+        const isExpanded = expandedCalls.has(index)
+        return (
+          <div key={index} className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+            {/* 工具调用头部 */}
+            <button
+              onClick={() => toggleCall(index)}
+              className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-100 transition-colors"
+            >
+              <div className="flex items-center space-x-2">
+                {isExpanded ? (
+                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-500" />
+                )}
+                <span className="text-sm font-medium text-gray-700">{call.name}</span>
+                {call.status && (
+                  <span className={`text-xs px-2 py-0.5 rounded ${
+                    call.status === 'success' ? 'bg-green-100 text-green-700' :
+                    call.status === 'error' ? 'bg-red-100 text-red-700' :
+                    'bg-yellow-100 text-yellow-700'
+                  }`}>
+                    {call.status}
+                  </span>
+                )}
+              </div>
+              {call.timestamp && (
+                <span className="text-xs text-gray-500">{new Date(call.timestamp).toLocaleTimeString()}</span>
+              )}
+            </button>
+
+            {/* 工具调用详情 */}
+            {isExpanded && (
+              <div className="px-3 py-2 border-t border-gray-200 bg-white">
+                {/* 输入参数 */}
+                {call.input && Object.keys(call.input).length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-xs font-semibold text-gray-600 mb-1">📥 输入参数</div>
+                    <pre className="text-xs bg-gray-50 p-2 rounded border border-gray-200 overflow-x-auto">
+                      {JSON.stringify(call.input, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {/* 输出结果 */}
+                {call.output !== undefined && (
+                  <div>
+                    <div className="text-xs font-semibold text-gray-600 mb-1">📤 输出结果</div>
+                    <pre className="text-xs bg-gray-50 p-2 rounded border border-gray-200 overflow-x-auto max-h-60">
+                      {typeof call.output === 'string'
+                        ? call.output
+                        : JSON.stringify(call.output, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {/* 错误信息 */}
+                {call.error && (
+                  <div className="mt-2">
+                    <div className="text-xs font-semibold text-red-600 mb-1">❌ 错误信息</div>
+                    <pre className="text-xs bg-red-50 p-2 rounded border border-red-200 overflow-x-auto">
+                      {call.error}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 /**
  * 从文本中提取多个 CIF 块
@@ -487,6 +583,11 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
               )}
             </div>
 
+            {/* Tool Calls 显示 */}
+            {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+              <ToolCallsDisplay toolCalls={message.toolCalls} />
+            )}
+
             {/* 简化的晶体结构提示 */}
             {message.metadata?.structureData && (
               <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
@@ -699,6 +800,20 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
               )
             })()}
           </div>
+
+          {/* 计费信息徽章 */}
+          {(() => {
+            const shouldShow = !isUser && message.billing && (message.billing.tokens || 0) > 0
+            console.log('💎 [MessageBillingBadge] 消息:', message.id, '是否显示:', shouldShow, 'billing:', message.billing)
+            return shouldShow ? (
+              <MessageBillingBadge
+                tokens={message.billing.tokens}
+                photons={message.billing.photons}
+                modelName={message.billing.model_name}
+                compact={true}
+              />
+            ) : null
+          })()}
 
           {/* 操作按钮 */}
           {!isUser && (

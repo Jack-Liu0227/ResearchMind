@@ -339,10 +339,11 @@ def download_paper_file(
     try:
         paper_id = paper.get('paper_id', 'unknown')
         source = paper.get('source', 'unknown')
-        
-        # 设置下载目录
+
+        # 设置下载目录 - 使用 MCP server 的 papers 目录
         if not download_dir:
-            download_dir = './papers'
+            from .shared.session_folder_manager import PAPER_DIR
+            download_dir = PAPER_DIR
         Path(download_dir).mkdir(parents=True, exist_ok=True)
         
         # ArXiv论文使用专用下载函数

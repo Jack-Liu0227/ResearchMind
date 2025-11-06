@@ -105,6 +105,10 @@ class WebSocketService {
           this.isConnecting = false
           this.reconnectAttempts = 0
           this.notifyConnectionHandlers(true)
+
+          // 自动发送用户的 Bohrium 配置（从 Cookie 读取）
+          this.sendUserBohriumConfig()
+
           resolve()
         }
 
@@ -196,6 +200,47 @@ class WebSocketService {
       this.ws.send(JSON.stringify(message))
     } else {
       console.warn('WebSocket is not connected')
+    }
+  }
+
+  /**
+   * 发送用户的 Bohrium 配置（从 Cookie 读取）
+   * 在 WebSocket 连接成功后自动调用
+   *
+   * 新方案：通过 FastAPI HTTP 端点保存 Cookie 配置
+   * 优点：更简单、更标准、更易维护
+   */
+  private async sendUserBohriumConfig(): Promise<void> {
+    try {
+      // 获取当前会话 ID（从 localStorage）
+      const sessionId = localStorage.getItem('researchmind_session_id') || this.clientId
+
+      // 调用 FastAPI 端点，自动从 Cookie 读取配置
+      // 就像 Flask 的 request.cookies.get() 一样简单！
+      const response = await fetch(
+        `/api/billing/config/save-from-cookie?user_id=${sessionId}`,
+        {
+          method: 'POST',
+          credentials: 'include'  // 重要：确保发送 Cookie
+        }
+      )
+
+      if (response.ok) {
+        const result = await response.json()
+
+        if (result.has_config) {
+          console.log('✅ 用户 Bohrium 配置已保存 (来自 Cookie)')
+          console.log('   来源:', result.config?.source)
+          console.log('   AccessKey:', result.config?.access_key_masked)
+          console.log('   ClientName:', result.config?.client_name)
+        } else {
+          console.log('ℹ️ Cookie 中未找到用户 Bohrium 配置，将使用开发者默认配置')
+        }
+      } else {
+        console.warn('⚠️ 保存用户 Bohrium 配置失败:', response.statusText)
+      }
+    } catch (error) {
+      console.error('❌ 保存用户 Bohrium 配置失败:', error)
     }
   }
 

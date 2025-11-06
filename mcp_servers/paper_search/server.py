@@ -455,41 +455,42 @@ async def search_papers(
     final_papers = list(unique_papers.values())
     logger.info(f"Total papers after deduplication: {len(final_papers)}")
 
-    # 自动保存检索结果到 CSV 文件
+    # 自动保存检索结果到 CSV 文件（追加模式）
     from modules.paper_manager.export_tools import save_papers_to_csv as save_csv_impl
     csv_result = save_csv_impl(
         papers=final_papers,
         session_id=session_id,
         topic=query,
-        file_prefix='search_results'
+        file_prefix='search_results',
+        append_mode=True  # 启用追加模式，合并到 all_papers.csv
     )
 
-    # 构建简化版的papers列表(只包含重要信息)
-    simplified_papers = []
-    for paper in final_papers:
-        simplified_papers.append({
-            'title': paper.get('title', 'Unknown'),
-            'url': paper.get('url', ''),
-            'source': paper.get('source', 'unknown'),
-            'published': paper.get('published', ''),
-            'authors': paper.get('authors', [])[:3] if isinstance(paper.get('authors'), list) else []  # 只保留前3个作者
-        })
+    # 构建返回结果（最小化 token 使用，只返回关键信息）
+    # Agent 通过 CSV 文件获取完整论文信息，无需在响应中返回完整列表
+    papers_added = csv_result.get('papers_added', len(final_papers))
+    total_papers = csv_result.get('total_papers', len(final_papers))
 
-    # 构建返回结果
+    # 构建消息
+    if papers_added < len(final_papers):
+        message = f'Found {len(final_papers)} papers, added {papers_added} new papers. Total {total_papers} papers in CSV.'
+    else:
+        message = f'Found {len(final_papers)} unique papers. CSV file contains full details.'
+
     final_result = {
         'status': 'success',
-        'papers': simplified_papers,  # 简化版papers
         'sources_used': sources or ['arxiv', 'tavily_academic', 'tavily'],
         'total_results': len(final_papers),
-        'message': f'Found {len(final_papers)} unique papers, saved to CSV'
+        'papers_added': papers_added,
+        'total_papers_in_csv': total_papers,
+        'message': message
     }
 
-    # 添加 CSV 文件下载URL
+    # 添加 CSV 文件下载URL（最重要的返回信息）
     if csv_result.get('file_path'):
         # 使用新的 get_download_url 函数生成下载URL
         download_url = get_download_url(csv_result['file_path'])
         final_result['csv_download_url'] = download_url
-        final_result['csv_file_path'] = csv_result['file_path']  # 保留原始路径用于调试
+        final_result['csv_file_path'] = csv_result['file_path']
 
     if expand_query:
         final_result['queries_used'] = queries_to_search
@@ -502,45 +503,82 @@ async def search_papers(
 
 @mcp.tool()
 async def ingest_uploaded_papers(
-    files: Any,
-    session_id: str = None,
+    session_id: str,
     topic: str = None,
     file_prefix: str = "uploaded_papers"
 ) -> Dict[str, Any]:
     """
-    将用户上传的文件转为论文条目，写入会话目录并生成 CSV。
+    处理用户上传的文件（从磁盘读取），转为论文条目并生成 CSV。
+
+    **重要**：文件已由前端保存到 papers/{session_id}/uploads/ 目录，
+    本工具从该目录读取文件进行处理。
 
     Args:
-        files: 单个或多个文件字典，包含 filename、content、encoding 等字段
-        session_id: 会话 ID（可选，未提供时自动生成）
+        session_id: 会话 ID（必需，用于定位上传文件目录）
         topic: 会话主题（可选）
         file_prefix: CSV 文件名前缀
 
     Returns:
         与 search_papers 类似的结果字典，包含简化条目及 CSV 下载链接。
     """
-    logger.info("Ingesting uploaded papers", session_id=session_id, topic=topic)
-
-    if not files:
-        return sanitize_tool_response({
-            'status': 'error',
-            'error': 'No files provided'
-        })
-
-    # Normalize files input to list
-    if isinstance(files, dict):
-        files_list = [files]
-    else:
-        files_list = list(files)
+    logger.info("Ingesting uploaded papers from disk", session_id=session_id, topic=topic)
 
     if not session_id:
-        from datetime import datetime
-        import uuid
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': 'session_id is required'
+        })
 
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        unique_id = str(uuid.uuid4())[:8]
-        session_id = f"upload_{timestamp}_{unique_id}"
-        logger.info("Generated upload session_id", session_id=session_id)
+    # 从磁盘读取上传的文件
+    from pathlib import Path
+    import base64
+    from modules.shared.session_folder_manager import get_session_folder
+
+    # 使用 session_folder_manager 获取正确的路径
+    session_folder = Path(get_session_folder(session_id, topic))
+    upload_dir = session_folder / "uploads"
+
+    logger.info(f"🔍 Looking for uploaded files in: {upload_dir}")
+    logger.info(f"🔍 Absolute path: {upload_dir.absolute()}")
+    logger.info(f"🔍 Directory exists: {upload_dir.exists()}")
+
+    if upload_dir.exists():
+        logger.info(f"🔍 Directory contents: {list(upload_dir.iterdir())}")
+    else:
+        # 列出 session folder 下的所有子目录，帮助调试
+        if session_folder.exists():
+            subdirs = [d.name for d in session_folder.iterdir() if d.is_dir()]
+            logger.info(f"🔍 Available directories in session folder: {subdirs}")
+
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': f'Upload directory not found: {upload_dir}. Please check session_id is correct.'
+        })
+
+    # 读取所有文件
+    files_list = []
+    for file_path in upload_dir.iterdir():
+        if file_path.is_file():
+            try:
+                file_bytes = file_path.read_bytes()
+                content_b64 = base64.b64encode(file_bytes).decode('utf-8')
+
+                files_list.append({
+                    'filename': file_path.name,
+                    'content': content_b64,
+                    'encoding': 'base64',
+                    'mime_type': 'application/pdf' if file_path.suffix.lower() == '.pdf' else 'application/octet-stream'
+                })
+                logger.info(f"📄 Read file from disk: {file_path.name} ({len(file_bytes)} bytes)")
+            except Exception as e:
+                logger.error(f"❌ Failed to read file {file_path}: {e}")
+                continue
+
+    if not files_list:
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': f'No files found in {upload_dir}'
+        })
 
     topic = topic or "uploaded_documents"
 
@@ -557,49 +595,34 @@ async def ingest_uploaded_papers(
     papers = ingestion_result.get('papers', [])
     csv_result = ingestion_result.get('csv_result', {})
 
-    simplified_papers = []
-    file_downloads = []
-    for paper in papers:
-        abstract = paper.get('abstract', '')
-        preview = abstract[:200] + '...' if len(abstract) > 200 else abstract
-        simplified_papers.append({
-            'paper_id': paper.get('paper_id'),
-            'title': paper.get('title', 'Uploaded Document'),
-            'source': paper.get('source', 'upload'),
-            'preview': preview,
-            'uploaded_filename': paper.get('upload_metadata', {}).get('filename'),
-        })
+    # 构建返回结果（最小化 token 使用，只返回关键信息）
+    # Agent 通过 CSV 文件获取完整论文信息，无需在响应中返回完整列表
+    papers_added = csv_result.get('papers_added', len(papers))
+    total_papers = csv_result.get('total_papers', len(papers))
 
-        local_path = paper.get('upload_metadata', {}).get('saved_path')
-        if local_path:
-            try:
-                download_url = get_download_url(local_path)
-                file_downloads.append({
-                    'paper_id': paper.get('paper_id'),
-                    'filename': paper.get('upload_metadata', {}).get('filename'),
-                    'download_url': download_url
-                })
-            except Exception as err:
-                logger.warning("Failed to build download URL for uploaded file", error=str(err))
+    # 构建消息
+    if papers_added < len(papers):
+        message = f'Processed {len(papers)} files, added {papers_added} new papers. Total {total_papers} papers in CSV.'
+    else:
+        message = f'Successfully processed {len(papers)} uploaded document(s). CSV file contains full details.'
 
     final_result: Dict[str, Any] = {
         'status': 'success',
-        'session_id': session_id,
-        'topic': topic,
-        'papers': simplified_papers,
         'total_results': len(papers),
+        'papers_added': papers_added,
+        'total_papers_in_csv': total_papers,
         'sources_used': ['upload'],
-        'uploaded_files': file_downloads,
-        'message': f'Processed {len(papers)} uploaded document(s)'
+        'message': message
     }
 
+    # 添加 CSV 文件下载URL（最重要的返回信息）
     csv_path = csv_result.get('file_path')
     if csv_path:
         try:
             final_result['csv_download_url'] = get_download_url(csv_path)
+            final_result['csv_file_path'] = csv_path
         except Exception as err:
             logger.warning("Failed to build CSV download URL", error=str(err))
-        final_result['csv_file_path'] = csv_path
 
     return sanitize_tool_response(final_result)
 

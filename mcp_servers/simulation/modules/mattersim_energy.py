@@ -135,10 +135,33 @@ def calculate_energy_from_cif_impl(
         n_atoms = len(structure)
         
         # Validate structure before calculation
-        if not validate_structure(structure):
+        # Validate structure with detailed error reporting
+        validation_result = validate_structure(structure)
+        if not validation_result:
+            # Provide detailed diagnostic information
+            try:
+                n_atoms = len(structure)
+                cell = structure.get_cell()
+                cell_lengths = np.linalg.norm(cell, axis=1)
+                positions = structure.get_positions()
+
+                error_details = []
+                if n_atoms == 0:
+                    error_details.append("Structure contains no atoms")
+                if not np.all(np.isfinite(cell_lengths)):
+                    error_details.append(f"Cell parameters contain NaN/Inf: {cell_lengths}")
+                if np.any(cell_lengths < 0.001):
+                    error_details.append(f"Cell parameters too small or negative: {cell_lengths} Å")
+                if not np.all(np.isfinite(positions)):
+                    error_details.append("Atomic positions contain NaN/Inf")
+
+                error_msg = "Invalid structure detected. " + "; ".join(error_details) if error_details else "Unknown validation error"
+            except Exception:
+                error_msg = "Invalid structure detected. Structure validation failed."
+
             return {
                 "success": False,
-                "error": "Invalid structure detected. Please check the CIF file."
+                "error": error_msg
             }
         
         logger.info("Loaded and validated structure", composition=composition_str, n_atoms=n_atoms)
@@ -732,60 +755,110 @@ def validate_structure(structure) -> bool:
     """
     Validate ASE structure before calculation.
 
+    Performs MINIMAL validation - only rejects structures that will cause critical failures.
+    Philosophy: If ASE can parse it, we should try to calculate with it.
+    Let MatterSim handle edge cases and provide meaningful physics-based errors.
+
     Args:
         structure: ASE Atoms object
 
     Returns:
-        True if structure is valid, False otherwise
+        True if structure passes basic checks, False only for critical failures
     """
     try:
-        # Check basic properties
+        # Check 1: Structure must have atoms (CRITICAL - cannot calculate without atoms)
         if len(structure) == 0:
-            logger.warning("Structure has no atoms")
+            logger.error("❌ CRITICAL: Structure has no atoms - cannot proceed")
             return False
 
-        # Check for reasonable cell parameters
+        # Check 2: Cell parameters must be finite (CRITICAL - NaN/Inf will crash)
         cell = structure.get_cell()
-        if np.any(np.linalg.norm(cell, axis=1) < 0.1):
-            logger.warning("Structure has very small cell parameters")
+        cell_lengths = np.linalg.norm(cell, axis=1)
+        if not np.all(np.isfinite(cell_lengths)):
+            logger.error("❌ CRITICAL: Structure has non-finite (NaN/Inf) cell parameters")
             return False
 
-        # Check for reasonable atomic positions
+        # Check 3: Cell parameters must be positive (CRITICAL - negative/zero is unphysical)
+        # Use very small threshold (0.001 Å = 0.01 pm) to catch only truly broken structures
+        # This allows molecular systems with small cells while rejecting invalid data
+        if np.any(cell_lengths < 0.001):
+            logger.error(f"❌ CRITICAL: Structure has zero or negative cell parameters: {cell_lengths}")
+            return False
+
+        # Check 4: Atomic positions must be finite (CRITICAL - NaN/Inf will crash)
         positions = structure.get_positions()
         if not np.all(np.isfinite(positions)):
-            logger.warning("Structure has non-finite atomic positions")
+            logger.error("❌ CRITICAL: Structure has non-finite (NaN/Inf) atomic positions")
             return False
 
-        # Check for overlapping atoms (if scipy is available)
-        if SCIPY_AVAILABLE and len(structure) > 1:
-            distances = pdist(positions)
-            if np.any(distances < 0.5):  # Atoms closer than 0.5 Å
-                logger.warning("Structure has overlapping atoms")
-                return False
+        # Log structure info for debugging (informational only)
+        formula = structure.get_chemical_formula()
+        logger.info(f"✅ Structure validation passed: {formula}, {len(structure)} atoms, "
+                   f"cell: {cell_lengths[0]:.2f} × {cell_lengths[1]:.2f} × {cell_lengths[2]:.2f} Å")
+
+        # Log warnings for unusual but potentially valid structures
+        if np.any(cell_lengths < 1.0):
+            logger.warning(f"⚠️ Structure has very small cell parameters: {cell_lengths} Å - may be intentional for molecular systems")
+
+        if np.any(cell_lengths > 1000.0):
+            logger.warning(f"⚠️ Structure has very large cell parameters: {cell_lengths} Å - may be intentional for supercells")
+
+        # INTENTIONALLY NOT CHECKING:
+        # - Overlapping atoms: Bond lengths vary wildly (0.74 Å for H2 to 3+ Å for metals)
+        # - CIF format requirements: ASE already parsed it successfully
+        # - Space group validity: Not required for DFT calculations
+        # - Charge neutrality: Some systems are intentionally charged
+        # - Standard cell shapes: Triclinic cells are perfectly valid
+        # - Atom type validity: Let MatterSim's model handle unknown elements
 
         return True
 
     except Exception as e:
-        logger.warning("Structure validation failed", error=str(e))
+        logger.error(f"❌ Structure validation failed with exception: {str(e)}")
         return False
 
 
 def _clean_cif_content(cif_content: str) -> str:
-    """Clean CIF content to fix common formatting issues"""
+    """
+    Clean CIF content to fix common formatting issues.
+
+    This function attempts to normalize CIF files from various sources
+    (Materials Project, ICSD, COD, user-generated, etc.) to a format
+    that ASE can reliably parse.
+
+    Args:
+        cif_content: Raw CIF content string
+
+    Returns:
+        Cleaned CIF content string
+    """
+    # Handle different line endings (Windows \r\n, Unix \n, Mac \r)
+    cif_content = cif_content.replace('\r\n', '\n').replace('\r', '\n')
+
     lines = cif_content.split('\n')
     cleaned_lines = []
 
     for line in lines:
         # Remove any non-ASCII characters that might cause issues
+        # But preserve the line structure
         line = line.encode('ascii', 'ignore').decode('ascii')
-        # Remove extra whitespace
-        line = line.strip()
-        # Skip empty lines in the middle of data blocks
-        if line or not cleaned_lines or not cleaned_lines[-1]:
+
+        # Remove trailing whitespace but preserve leading whitespace
+        # (important for CIF loop structures)
+        line = line.rstrip()
+
+        # Skip completely empty lines, but keep lines with just whitespace
+        # (they might be significant in CIF format)
+        if line or not cleaned_lines:
             cleaned_lines.append(line)
 
     # Ensure proper line endings
-    return '\n'.join(cleaned_lines)
+    cleaned_content = '\n'.join(cleaned_lines)
+
+    # Ensure the CIF has a data_ block (required by CIF standard)
+    cleaned_content = normalize_cif_content(cleaned_content)
+
+    return cleaned_content
 
 
 def relax_structure_impl(
@@ -852,29 +925,76 @@ def relax_structure_impl(
             structure = ase_io.read(str(cif_path))
             composition_str = structure.get_chemical_formula()
             n_atoms = len(structure)
+            logger.info(f"✅ Successfully parsed CIF with ASE: {composition_str}, {n_atoms} atoms")
+        except StopIteration as e:
+            # This specific error usually means the CIF file is empty or has no structure data
+            logger.error("CIF file appears to be empty or missing structure data", error=str(e))
+            return {
+                "success": False,
+                "error": "CIF file is empty or missing structure data. Please ensure the file contains complete crystal structure information including lattice parameters and atomic positions."
+            }
         except Exception as e:
-            logger.error("Failed to read CIF file with ASE", error=str(e), cif_path=str(cif_path))
+            logger.warning(f"⚠️ Initial CIF parsing failed: {str(e)}, attempting to clean and retry...")
             # Try to clean up the CIF content and retry
             try:
-                # Clean up the CIF content
-                cleaned_cif = _clean_cif_content(cif_content)
+                logger.info("Attempting to normalize and clean CIF content...")
+                cleaned_cif = _clean_cif_content(cif_text)
                 with open(cif_path, 'w', encoding='utf-8') as f:
                     f.write(cleaned_cif)
                 structure = ase_io.read(str(cif_path))
                 composition_str = structure.get_chemical_formula()
                 n_atoms = len(structure)
-                logger.info("Successfully read CIF after cleaning")
-            except Exception as e2:
-                logger.error("Failed to read CIF even after cleaning", error=str(e2))
+                logger.info(f"✅ Successfully parsed CIF after cleaning: {composition_str}, {n_atoms} atoms")
+            except StopIteration as e2:
+                logger.error("CIF file appears to be empty even after cleaning", error=str(e2))
                 return {
                     "success": False,
-                    "error": f"Failed to read CIF file: {str(e)}. Cleaning attempt also failed: {str(e2)}"
+                    "error": "CIF file is empty or missing structure data. Please ensure the file contains complete crystal structure information."
+                }
+            except Exception as e2:
+                logger.error(f"❌ Failed to parse CIF even after cleaning: {str(e2)}")
+                # Provide helpful error message based on the error type
+                error_msg = f"Failed to parse CIF file. "
+                if "data_" in str(e2).lower():
+                    error_msg += "The file may be missing a 'data_' block declaration. "
+                elif "cell" in str(e2).lower():
+                    error_msg += "The file may be missing lattice parameters (_cell_length_a, _cell_length_b, etc.). "
+                elif "atom" in str(e2).lower():
+                    error_msg += "The file may be missing atomic position data (_atom_site_*). "
+
+                error_msg += f"Original error: {str(e)}. After cleaning: {str(e2)}"
+
+                return {
+                    "success": False,
+                    "error": error_msg
                 }
 
+        # Validate structure with detailed error reporting
         if not validate_structure(structure):
+            # Provide detailed diagnostic information
+            try:
+                n_atoms = len(structure)
+                cell = structure.get_cell()
+                cell_lengths = np.linalg.norm(cell, axis=1)
+                positions = structure.get_positions()
+
+                error_details = []
+                if n_atoms == 0:
+                    error_details.append("Structure contains no atoms")
+                if not np.all(np.isfinite(cell_lengths)):
+                    error_details.append(f"Cell parameters contain NaN/Inf: {cell_lengths}")
+                if np.any(cell_lengths < 0.001):
+                    error_details.append(f"Cell parameters too small or negative: {cell_lengths} Å")
+                if not np.all(np.isfinite(positions)):
+                    error_details.append("Atomic positions contain NaN/Inf")
+
+                error_msg = "Invalid structure detected. " + "; ".join(error_details) if error_details else "Unknown validation error"
+            except Exception:
+                error_msg = "Invalid structure detected. Structure validation failed."
+
             return {
                 "success": False,
-                "error": "Invalid structure detected. Please check the CIF file."
+                "error": error_msg
             }
 
         logger.info("Loaded and validated structure", composition=composition_str, n_atoms=n_atoms)
@@ -1081,13 +1201,14 @@ def calculate_phonon_impl(
     device: str = "cpu",
     supercell_matrix: Optional[List[int]] = None,
     amplitude: float = 0.01,
-    find_prim: bool = False
+    find_prim: bool = False,
+    output_dir: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Calculate phonon dispersion using MatterSim.
 
-    Results are saved to persistent directory to avoid context window issues.
-    Images are stored in mcp_servers/simulation/phonon_results/ directory.
+    Results are saved to the specified output directory (or default persistent directory).
+    This avoids duplicate file saves and ensures images go directly to the target location.
 
     Based on: https://microsoft.github.io/mattersim/examples/phonon_example.html
 
@@ -1098,6 +1219,7 @@ def calculate_phonon_impl(
         supercell_matrix: Supercell matrix for phonon calculation (default: [4, 4, 4])
         amplitude: Displacement amplitude for phonon calculation (default: 0.01 Å)
         find_prim: Whether to find primitive cell before calculation
+        output_dir: Target directory for saving images (if None, uses default phonon_results/)
 
     Returns:
         Dict with phonon calculation results including image file paths
@@ -1113,10 +1235,16 @@ def calculate_phonon_impl(
     # Create temporary directory for calculation
     temp_dir = tempfile.mkdtemp(prefix="mattersim_phonon_")
     temp_dir_path = Path(temp_dir)
-    
-    # Create persistent directory for results
-    persistent_dir = Path(__file__).parent.parent / "phonon_results"
-    persistent_dir.mkdir(exist_ok=True)
+
+    # Determine output directory for results
+    if output_dir:
+        persistent_dir = Path(output_dir)
+        logger.info(f"📁 Using provided output directory: {persistent_dir}")
+    else:
+        persistent_dir = Path(__file__).parent.parent / "phonon_results"
+        logger.info(f"📁 Using default output directory: {persistent_dir}")
+
+    persistent_dir.mkdir(parents=True, exist_ok=True)
 
     # Set work directory to temp directory
     work_dir = str(temp_dir_path / "phonon_work")
@@ -1163,10 +1291,42 @@ def calculate_phonon_impl(
         composition_str = structure.get_chemical_formula()
         n_atoms = len(structure)
 
+        # Extract base name from cif_filename for consistent image naming
+        # This ensures image filenames match the original structure name
+        # Example: "C.cif" -> "C", "relaxed_C.cif" -> "C"
+        import re
+        base_filename = Path(cif_filename).stem  # Remove .cif extension
+        # Remove "relaxed_" prefix if present
+        base_filename = re.sub(r'^relaxed_', '', base_filename)
+        # Use this for image naming instead of composition_str to maintain consistency
+        image_name_base = base_filename
+
+        # Validate structure with detailed error reporting
         if not validate_structure(structure):
+            # Provide detailed diagnostic information
+            try:
+                n_atoms = len(structure)
+                cell = structure.get_cell()
+                cell_lengths = np.linalg.norm(cell, axis=1)
+                positions = structure.get_positions()
+
+                error_details = []
+                if n_atoms == 0:
+                    error_details.append("Structure contains no atoms")
+                if not np.all(np.isfinite(cell_lengths)):
+                    error_details.append(f"Cell parameters contain NaN/Inf: {cell_lengths}")
+                if np.any(cell_lengths < 0.001):
+                    error_details.append(f"Cell parameters too small or negative: {cell_lengths} Å")
+                if not np.all(np.isfinite(positions)):
+                    error_details.append("Atomic positions contain NaN/Inf")
+
+                error_msg = "Invalid structure detected. " + "; ".join(error_details) if error_details else "Unknown validation error"
+            except Exception:
+                error_msg = "Invalid structure detected. Structure validation failed."
+
             return {
                 "success": False,
-                "error": "Invalid structure detected. Please check the CIF file."
+                "error": error_msg
             }
 
         logger.info("Loaded and validated structure", composition=composition_str, n_atoms=n_atoms)
@@ -1235,11 +1395,12 @@ def calculate_phonon_impl(
             # PhononWorkflow saves plots with format: {chemical_formula}_phonon_band.png
             # e.g., "Si2_phonon_band.png" for Si2
             work_dir_path = Path(work_dir)
-            
-            # Generate timestamp for unique filenames  
+
+            # Generate timestamp for unique filenames
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base_name = f"relaxed_{composition_str}_"
+            # Use image_name_base (from original filename) for consistent naming
+            base_name = f"relaxed_{image_name_base}_"
 
             # Find phonon band plot (search for *_phonon_band.png)
             phonon_band_files = list(work_dir_path.glob("*_phonon_band.png"))

@@ -104,70 +104,89 @@ def extract_and_validate_cif_impl(message_parts: List[Dict[str, Any]]) -> Dict[s
         # Step 2.5: Normalize CIF content (add data_ block if missing)
         cif_content = normalize_cif_content(cif_content)
         
-        # Step 3: Validate CIF format
+        # Step 3: Validate CIF format (informational only - don't block workflow)
         validation_result = {
             "has_data_block": False,
             "has_cell_parameters": False,
             "has_atom_sites": False,
             "line_count": 0,
-            "warnings": []
+            "warnings": [],
+            "info": []
         }
-        
+
         lines = cif_content.split('\n')
         validation_result["line_count"] = len(lines)
-        
-        # Check for data block (required)
+
+        # Check for data block (will be auto-added if missing)
         if re.search(r'^data_', cif_content, re.MULTILINE):
             validation_result["has_data_block"] = True
+            validation_result["info"].append("✓ 包含 data_ 块声明")
         else:
-            validation_result["warnings"].append("缺少 data_ 块声明")
-        
+            validation_result["info"].append("ℹ️ 缺少 data_ 块声明（将自动添加）")
+
         # Check for cell parameters (at least one)
         cell_params = ['_cell_length_a', '_cell_length_b', '_cell_length_c',
                       '_cell_angle_alpha', '_cell_angle_beta', '_cell_angle_gamma']
         if any(param in cif_content for param in cell_params):
             validation_result["has_cell_parameters"] = True
+            validation_result["info"].append("✓ 包含晶胞参数")
         else:
-            validation_result["warnings"].append("缺少晶胞参数")
-        
+            validation_result["warnings"].append("⚠️ 未检测到晶胞参数（ASE 将尝试解析）")
+
         # Check for atom sites
         atom_keywords = ['_atom_site_', 'loop_']
         if any(keyword in cif_content for keyword in atom_keywords):
             validation_result["has_atom_sites"] = True
+            validation_result["info"].append("✓ 包含原子位置信息")
         else:
-            validation_result["warnings"].append("缺少原子位置信息")
-        
-        # Determine if valid
-        is_valid = (
+            validation_result["warnings"].append("⚠️ 未检测到原子位置信息（ASE 将尝试解析）")
+
+        # Try to parse with ASE to get actual structure info
+        ase_parse_success = False
+        structure_info = None
+        try:
+            from ase.io import read
+            from io import StringIO
+            atoms = read(StringIO(cif_content), format='cif')
+            ase_parse_success = True
+            structure_info = {
+                "formula": atoms.get_chemical_formula(),
+                "num_atoms": len(atoms),
+                "cell_volume": round(atoms.get_volume(), 2)
+            }
+            validation_result["info"].append(f"✅ ASE 成功解析: {structure_info['formula']}, {structure_info['num_atoms']} 个原子")
+            logger.info(f"✅ ASE successfully parsed CIF: {structure_info}")
+        except Exception as e:
+            validation_result["warnings"].append(f"⚠️ ASE 预解析失败（将在计算时重试）: {str(e)[:100]}")
+            logger.warning(f"ASE pre-parse failed (will retry during calculation): {e}")
+
+        # Always consider valid if ASE can parse it, or if it has basic structure
+        # Philosophy: Be permissive - let the calculation engine handle validation
+        is_valid = ase_parse_success or (
             validation_result["has_data_block"] and
             validation_result["has_cell_parameters"] and
-            validation_result["line_count"] > 10
+            validation_result["line_count"] > 5  # Very low threshold
         )
-        
-        if is_valid:
-            logger.info("CIF validation passed", filename=cif_filename)
-            return {
-                "success": True,
-                "cif_content": cif_content,
-                "cif_filename": cif_filename,
-                "is_valid": True,
-                "is_base64": is_base64,
-                "validation_details": validation_result,
-                "message": f"✅ 成功提取并验证 CIF 文件: {cif_filename}"
-            }
+
+        # Build message
+        if ase_parse_success:
+            message = f"✅ CIF 文件已验证: {structure_info['formula']}, {structure_info['num_atoms']} 个原子"
+        elif is_valid:
+            message = f"✅ CIF 文件格式基本正确: {cif_filename}"
         else:
-            logger.warning("CIF validation failed", 
-                          filename=cif_filename,
-                          warnings=validation_result["warnings"])
-            return {
-                "success": True,  # Extraction succeeded
-                "cif_content": cif_content,
-                "cif_filename": cif_filename,
-                "is_valid": False,
-                "is_base64": is_base64,
-                "validation_details": validation_result,
-                "warning": f"⚠️ CIF 文件格式可能不完整: {', '.join(validation_result['warnings'])}"
-            }
+            message = f"⚠️ CIF 文件格式可能不完整，但将尝试处理: {cif_filename}"
+
+        return {
+            "success": True,  # Always succeed - let calculation handle validation
+            "cif_content": cif_content,
+            "cif_filename": cif_filename,
+            "is_valid": is_valid,
+            "is_base64": is_base64,
+            "validation_details": validation_result,
+            "structure_info": structure_info,
+            "message": message,
+            "warnings": validation_result["warnings"] if validation_result["warnings"] else None
+        }
     
     except Exception as e:
         logger.error("CIF extraction/validation failed", error=str(e))

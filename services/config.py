@@ -69,6 +69,7 @@ class ServerConfig:
     STATIC_FILES_ROOT = os.path.abspath(os.path.dirname(__file__) + "/..")
     PHONON_RESULTS_DIR = os.path.join(STATIC_FILES_ROOT, "mcp_servers", "simulation", "phonon_results")
     GENERATED_STRUCTURES_DIR = os.path.join(STATIC_FILES_ROOT, "mcp_servers", "simulation", "crystallm", "generated_structures")
+    RELAXED_STRUCTURES_DIR = os.path.join(STATIC_FILES_ROOT, "mcp_servers", "simulation", "relaxed_structures")
     
     # Logging
     LOG_LEVEL = os.getenv("RESEARCHMIND_LOG_LEVEL", "INFO")

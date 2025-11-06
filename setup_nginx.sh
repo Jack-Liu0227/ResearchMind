@@ -38,15 +38,12 @@ fi
 LISTEN_PORT="${2:-50001}"
 if [[ "${1:-}" != "--listen-port" && -n "${1:-}" ]]; then LISTEN_PORT="50001"; fi
 
-# 检查 .env 文件是否存在，如果存在远程部署配置文件则优先使用
-if [[ -f .env.remote ]]; then
-  log "使用远程部署配置文件 .env.remote"
-  ENV_FILE=".env.remote"
-elif [[ -f .env ]]; then
-  log "使用本地配置文件 .env"
+# 检查 .env 文件是否存在
+if [[ -f .env ]]; then
+  log "使用配置文件 .env"
   ENV_FILE=".env"
 else
-  log_error "未找到 .env 或 .env.remote 配置文件"
+  log_error "未找到 .env 配置文件"
   exit 1
 fi
 

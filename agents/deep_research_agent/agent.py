@@ -21,6 +21,11 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 # 导入 prompt
 from .prompts import get_deep_research_instruction
 
+# Import callbacks
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from agents.callbacks import trim_llm_request_context, record_llm_usage
+
 # 创建 MCPToolset（使用 SSE 连接到 paper_search server）
 toolset = MCPToolset(
     connection_params=SseServerParams(
@@ -32,8 +37,14 @@ toolset = MCPToolset(
 # 创建 root agent（参考 database_agent 和 simulation_agent 的设计）
 root_agent = Agent(
     name="deep_research_agent",
-    model=LiteLlm(model=os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')),
+    model=LiteLlm(
+        model=os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash'),
+        api_key=os.getenv('OPENAI_API_KEY'),
+        api_base=os.getenv('OPENAI_BASE_URL')
+    ),
     instruction=get_deep_research_instruction(),
-    tools=[toolset]
+    tools=[toolset],
+    before_model_callback=trim_llm_request_context,
+    after_model_callback=record_llm_usage
 )
 

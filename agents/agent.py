@@ -20,6 +20,7 @@ from google.adk.models.lite_llm import LiteLlm
 from google.adk.tools.agent_tool import AgentTool
 
 from .prompt import RESEARCH_COORDINATOR_PROMPT
+from .callbacks import trim_llm_request_context, record_llm_usage
 
 # Import sub-agents
 from .deep_research_agent.agent import root_agent as deep_research_agent
@@ -32,7 +33,11 @@ MODEL = os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')
 # Create the main coordinator agent
 research_coordinator = LlmAgent(
     name="research_coordinator",
-    model=LiteLlm(model=MODEL),
+    model=LiteLlm(
+        model=MODEL,
+        api_key=os.getenv('OPENAI_API_KEY'),
+        api_base=os.getenv('OPENAI_BASE_URL')
+    ),
     description=(
         "Coordinating materials science research by analyzing user queries, "
         "delegating to specialized sub-agents (literature, database, simulation), "
@@ -45,6 +50,8 @@ research_coordinator = LlmAgent(
         AgentTool(agent=database_agent),
         AgentTool(agent=simulation_agent),
     ],
+    before_model_callback=trim_llm_request_context,
+    after_model_callback=record_llm_usage
 )
 
 # Export the main agent as root_agent for compatibility

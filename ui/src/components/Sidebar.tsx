@@ -16,6 +16,7 @@ const Sidebar: React.FC = () => {
     clearSession,
     updateSession,
     currentAgent,
+    settings,
     forceSave
   } = useAppStore()
   
@@ -40,12 +41,14 @@ const Sidebar: React.FC = () => {
   }
 
   const handleCreateSession = () => {
-    if (currentAgent) {
+    // 使用设置中的默认智能体，如果没有则使用当前智能体
+    const agentId = settings.defaultAgent || currentAgent?.id
+    if (agentId) {
       // 创建新会话时，当前会话的消息已经通过 addMessage 保存了
       // 所以直接创建新会话即可
-      const newSession = createSession('新对话', currentAgent.id)
+      const newSession = createSession('新对话', agentId)
       setCurrentSession(newSession)
-      console.log('创建新会话:', newSession.id, '当前会话数:', sessions.length + 1)
+      console.log('创建新会话:', newSession.id, '使用智能体:', agentId, '当前会话数:', sessions.length + 1)
     }
   }
 
