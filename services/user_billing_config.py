@@ -118,8 +118,13 @@ class UserBillingConfigManager:
             'sku_id': os.getenv('BOHRIUM_SKU_ID', '10048'),
             'client_name': 'ResearchMind'
         }
-        
-        logger.info(f"💎 用户计费配置管理器已初始化 - 配置目录: {self.config_dir}")
+
+        # 🔒 生产模式：简化日志
+        verbose = os.getenv('PHOTON_BILLING_VERBOSE', 'false').lower() == 'true'
+        if verbose:
+            logger.info(f"💎 用户计费配置管理器已初始化 - 配置目录: {self.config_dir}")
+        else:
+            logger.info("💎 用户计费配置管理器已初始化")
     
     def save_user_config(self, user_id: str, access_key: str, sku_id: str,
                         client_name: str = "ResearchMind") -> bool:
@@ -147,7 +152,12 @@ class UserBillingConfigManager:
             with open(config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
 
-            logger.info(f"✅ 已保存用户 {user_id[:8]}... 的计费配置")
+            # 🔒 生产模式：简化日志
+            verbose = os.getenv('PHOTON_BILLING_VERBOSE', 'false').lower() == 'true'
+            if verbose:
+                logger.info(f"✅ 已保存用户 {user_id[:8]}... 的计费配置")
+            else:
+                logger.info("✅ 已保存用户计费配置")
             return True
 
         except Exception as e:
@@ -224,7 +234,12 @@ class ConversationBillingContextManager:
         # 对话 ID -> 计费上下文的映射
         self._contexts: Dict[str, ConversationBillingContext] = {}
 
-        logger.info("💎 对话计费隔离管理器已初始化")
+        # 🔒 生产模式：简化日志
+        verbose = os.getenv('PHOTON_BILLING_VERBOSE', 'false').lower() == 'true'
+        if verbose:
+            logger.info("💎 对话计费隔离管理器已初始化")
+        else:
+            logger.debug("💎 对话计费隔离管理器已初始化")
 
     def get_or_create_context(self, conversation_id: str, user_id: str) -> ConversationBillingContext:
         """
@@ -241,7 +256,13 @@ class ConversationBillingContextManager:
             if conversation_id not in self._contexts:
                 context = ConversationBillingContext(conversation_id, user_id)
                 self._contexts[conversation_id] = context
-                logger.info(f"✅ 为对话 {conversation_id[:8]}... 创建了新的计费上下文")
+
+                # 🔒 生产模式：简化日志
+                verbose = os.getenv('PHOTON_BILLING_VERBOSE', 'false').lower() == 'true'
+                if verbose:
+                    logger.info(f"✅ 为对话 {conversation_id[:8]}... 创建了新的计费上下文")
+                else:
+                    logger.debug("✅ 创建了新的计费上下文")
 
             return self._contexts[conversation_id]
 

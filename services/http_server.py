@@ -191,51 +191,55 @@ class HTTPServer:
         @self.app.get("/api/files")
         async def list_files(type: str = "phonon_results"):
             """
-            List available files by type
+            List available files by type (unified endpoint)
 
             Args:
-                type: File type (phonon_results, phonon_examples, generated_structures)
+                type: File type - one of:
+                    - phonon_results: Phonon calculation results (PNG, CSV)
+                    - phonon_examples: Example phonon spectra
+                    - generated_structures: AI-generated crystal structures (CIF)
 
             Returns:
-                List of files with metadata
+                JSON with file list, count, and timestamp
+
+            Example:
+                GET /api/files?type=phonon_results
             """
-            if type == "phonon_results":
-                files = StaticFileService.list_phonon_results()
-                return {
-                    "success": True,
-                    "type": "phonon_results",
-                    "files": files,
-                    "count": len(files),
-                    "timestamp": datetime.now().isoformat()
-                }
-            elif type == "phonon_examples":
-                files = StaticFileService.list_phonon_examples()
-                return {
-                    "success": True,
-                    "type": "phonon_examples",
-                    "files": files,
-                    "count": len(files),
-                    "timestamp": datetime.now().isoformat()
-                }
-            elif type == "generated_structures":
-                files = StaticFileService.list_generated_structures()
-                return {
-                    "success": True,
-                    "type": "generated_structures",
-                    "files": files,
-                    "count": len(files),
-                    "timestamp": datetime.now().isoformat()
-                }
-            else:
+            # Map of valid file types to their handler functions
+            file_handlers = {
+                "phonon_results": StaticFileService.list_phonon_results,
+                "phonon_examples": StaticFileService.list_phonon_examples,
+                "generated_structures": StaticFileService.list_generated_structures
+            }
+
+            if type not in file_handlers:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid file type: {type}. Must be one of: phonon_results, phonon_examples, generated_structures"
+                    detail=f"Invalid file type: {type}. Must be one of: {', '.join(file_handlers.keys())}"
                 )
 
-        # 保留旧端点以兼容性（转发到新端点）
+            files = file_handlers[type]()
+            return {
+                "success": True,
+                "type": type,
+                "files": files,
+                "count": len(files),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        # ============================================
+        # Legacy endpoints for backward compatibility
+        # ============================================
+        # These endpoints are deprecated but kept for frontend compatibility
+        # Frontend should migrate to /api/files?type=<type>
+
         @self.app.get("/api/phonon_results")
         async def list_phonon_results():
-            """List available phonon result files (deprecated, use /api/files?type=phonon_results)"""
+            """
+            List phonon result files (deprecated)
+
+            Use /api/files?type=phonon_results instead
+            """
             files = StaticFileService.list_phonon_results()
             return {
                 "success": True,
@@ -244,20 +248,13 @@ class HTTPServer:
                 "timestamp": datetime.now().isoformat()
             }
 
-        @self.app.get("/api/phonon_examples")
-        async def list_phonon_examples():
-            """List phonon example files (deprecated, use /api/files?type=phonon_examples)"""
-            files = StaticFileService.list_phonon_examples()
-            return {
-                "success": True,
-                "files": files,
-                "count": len(files),
-                "timestamp": datetime.now().isoformat()
-            }
-
         @self.app.get("/api/generated_structures")
         async def list_generated_structures():
-            """List available generated structure files (deprecated, use /api/files?type=generated_structures)"""
+            """
+            List generated structure files (deprecated)
+
+            Use /api/files?type=generated_structures instead
+            """
             files = StaticFileService.list_generated_structures()
             return {
                 "files": files,
@@ -274,15 +271,15 @@ class HTTPServer:
             Unified CIF operation endpoint
 
             Supports:
-            - action=parse: Parse CIF file (default)
-            - action=convert_to_conventional: Convert to conventional cell
-            - action=convert_to_primitive: Convert to primitive cell
+            - Parse CIF file
+            - Convert to conventional cell (to_conventional=True)
+            - Convert to primitive cell (to_conventional=False)
 
             Args:
                 request: CIF content and operation parameters
 
             Returns:
-                Structure data
+                Structure data with lattice parameters, atoms, and properties
             """
             if not PYMATGEN_AVAILABLE:
                 raise HTTPException(
@@ -364,111 +361,21 @@ class HTTPServer:
                     detail=f"CIF operation failed: {str(e)}"
                 )
 
-        @self.app.post("/api/convert_to_conventional", response_model=StructureResponse)
-        async def convert_to_conventional(request: CIFConversionRequest):
-            """
-            Convert crystal structure to conventional cell
-
-            Workflow:
-            1. Parse CIF file
-            2. Symmetry analysis
-            3. Convert to primitive cell
-            4. Convert to conventional cell
-            """
-            if not PYMATGEN_AVAILABLE:
-                raise HTTPException(
-                    status_code=503,
-                    detail="pymatgen not available, CIF conversion disabled"
-                )
-
-            try:
-                logger.info("📥 Received CIF conversion request")
-
-                # Parse CIF - use parse_structures instead of deprecated get_structures
-                parser = CifParser.from_str(request.cif_content)
-                original_structure = parser.parse_structures(primitive=True)[0]
-
-                logger.info(f"✅ CIF parsed: {original_structure.composition.reduced_formula}")
-                logger.info(f"   Original: {len(original_structure)} atoms")
-
-                # Symmetry analysis
-                analyzer = SpacegroupAnalyzer(original_structure, symprec=0.1, angle_tolerance=5.0)
-                space_group = analyzer.get_space_group_symbol()
-                space_group_number = analyzer.get_space_group_number()
-                crystal_system = analyzer.get_crystal_system()
-
-                logger.info(f"   Space group: {space_group} (No. {space_group_number})")
-                logger.info(f"   Crystal system: {crystal_system}")
-
-                # Convert to primitive or conventional
-                if request.to_conventional:
-                    structure = analyzer.get_conventional_standard_structure()
-                    logger.info(f"   Conventional: {len(structure)} atoms")
-                else:
-                    structure = analyzer.get_primitive_standard_structure()
-                    logger.info(f"   Primitive: {len(structure)} atoms")
-
-                # Extract lattice parameters
-                lattice = structure.lattice
-                lattice_params = {
-                    "a": float(lattice.a),
-                    "b": float(lattice.b),
-                    "c": float(lattice.c),
-                    "alpha": float(lattice.alpha),
-                    "beta": float(lattice.beta),
-                    "gamma": float(lattice.gamma)
-                }
-
-                # Extract atoms (Cartesian coordinates)
-                atoms = []
-                for site in structure:
-                    atoms.append({
-                        "element": str(site.specie),
-                        "position": [float(x) for x in site.coords],
-                        "charge": 0
-                    })
-
-                # Build response
-                response = StructureResponse(
-                    formula=structure.composition.reduced_formula,
-                    spaceGroup=space_group,
-                    latticeParameters=lattice_params,
-                    atoms=atoms,
-                    properties={
-                        "volume": float(lattice.volume),
-                        "density": float(structure.density),
-                        "isConventionalCell": request.to_conventional,
-                        "numAtoms": len(structure),
-                        "numSites": structure.num_sites,
-                        "spaceGroupNumber": space_group_number,
-                        "crystalSystem": crystal_system
-                    }
-                )
-
-                logger.info(f"✅ Returning structure: {response.formula}, {len(atoms)} atoms")
-                return response
-
-            except Exception as e:
-                logger.error(f"❌ CIF conversion failed: {e}", exc_info=True)
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"CIF conversion failed: {str(e)}"
-                )
-
         @self.app.post("/api/parse_cif", response_model=StructureResponse)
         async def parse_cif(request: CIFConversionRequest):
             """
-            Parse CIF file (alias for convert_to_conventional)
+            Parse CIF file (alias for /api/cif)
 
             This endpoint is used by the frontend to parse CIF files.
-            It calls the same implementation as convert_to_conventional.
+            It calls the same implementation as /api/cif.
             """
-            return await convert_to_conventional(request)
+            return await cif_operation(request)
 
         # Compatibility: alias without /api prefix
         @self.app.post("/cif", response_model=StructureResponse)
         async def cif_operation_alias(request: CIFConversionRequest):
-            return await convert_to_conventional(request)
+            """Legacy endpoint without /api prefix for backward compatibility"""
+            return await cif_operation(request)
 
         # Robust download handlers that try both paper_search roots
         def _safe_join(base_dir: str, rel_path: str) -> Optional[str]:
@@ -498,22 +405,16 @@ class HTTPServer:
 
         @self.app.get("/download/{file_path:path}")
         async def download_file_legacy(file_path: str):
+            """Legacy download endpoint without /api prefix for backward compatibility"""
             full = _find_download_file(file_path)
             if not full:
                 raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
             return FileResponse(full)
 
-        # Compatibility: alias without /api prefix
-        @self.app.post("/cif", response_model=StructureResponse)
-        async def cif_operation_alias(request: CIFConversionRequest):
-            return await convert_to_conventional(request)
-
         # NOTE: /api/download/{file_path:path} 路由已移至静态文件挂载
         # 在 StaticFileService.setup_static_files() 中通过以下方式处理：
         # app.mount("/api/download", StaticFiles(directory=papers_dir), name="papers_download")
         # 这样可以直接提供 CSV 和 MD 文件，无需额外的路由处理
-
-        # Removed legacy redirect to avoid 307 loops; now handled by StaticFiles mount at /download
 
     def get_app(self) -> FastAPI:
         """Get FastAPI application instance"""
@@ -651,7 +552,7 @@ class HTTPServer:
                 # Mark as uploaded
                 structure = StructureConverter.mark_as_uploaded(structure)
 
-                logger.info(f"✅ Uploaded structure: {formula} from {file.filename}")
+                logger.info(f"✅ Uploaded structure: {structure.get('formula', 'Unknown')} from {file.filename}")
                 logger.info(f"📋 Final structure source: {structure.get('source')}")
                 logger.info(f"📋 Final structure metadata: {structure.get('metadata')}")
 
@@ -829,7 +730,7 @@ class HTTPServer:
                         structure = StructureConverter.mark_as_uploaded(structure)
 
                         structures.append(structure)
-                        logger.info(f"✅ Uploaded structure: {formula} from {file.filename}")
+                        logger.info(f"✅ Uploaded structure: {structure.get('formula', 'Unknown')} from {file.filename}")
 
                     except UnicodeDecodeError as e:
                         error_msg = f"{file.filename}: Invalid file encoding (must be UTF-8)"

@@ -301,10 +301,25 @@ def calculate_kappa_from_cif_impl(
                 # Extract results
                 if not result_df.empty:
                     kappa_value = float(result_df[kappa_column].iloc[0])
-                    
+
                     # Generate calculation ID
                     calc_id = f"calc_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                    
+
+                    # ⚠️ TOKEN OPTIMIZATION: Save full results to CSV file
+                    # 🔧 修复：将 CSV 保存到持久化目录，避免临时目录被删除
+                    results_csv_path = None
+                    try:
+                        # 创建持久化目录
+                        persistent_dir = Path(__file__).parent.parent / "thermal_conductivity_results"
+                        persistent_dir.mkdir(parents=True, exist_ok=True)
+
+                        # 保存到持久化目录
+                        results_csv_path = persistent_dir / f"kappa_results_{calc_id}.csv"
+                        result_df.to_csv(results_csv_path, index=False)
+                        logger.info(f"💾 Saved full kappa results to persistent directory: {results_csv_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to save results CSV: {e}")
+
                     result = {
                         "calculation_id": calc_id,
                         "method": f"Kappa-{'P (Slack Model)' if method.lower() == 'kappa_p' else 'MTP (ML)'}",
@@ -316,7 +331,14 @@ def calculate_kappa_from_cif_impl(
                             "unit": "W/(m·K)"
                         },
                         "calculation_mode": "real",
-                        "full_results": result_df.to_dict(),
+                        # ⚠️ TOKEN OPTIMIZATION: Return file path instead of full DataFrame (~80% reduction)
+                        "results_file": str(results_csv_path) if results_csv_path else None,
+                        "key_metrics": {
+                            "kappa_value": round(kappa_value, 2),
+                            "temperature": temperature,
+                            "method": method,
+                            "num_atoms": int(result_df['Number of Atoms'].iloc[0]) if 'Number of Atoms' in result_df.columns else None
+                        },
                         "timestamp": datetime.now().isoformat(),
                         "success": True
                     }
@@ -508,7 +530,24 @@ def _calculate_kappa_batch(
                     kappa_column = 'Kappa_cal (W m-1 K-1)'
                 else:
                     raise ValueError(f"Unknown method: {method}")
-                
+
+                # ⚠️ TOKEN OPTIMIZATION: Save batch results to CSV file
+                # 🔧 修复：将 CSV 保存到持久化目录，避免临时目录被删除
+                batch_results_csv = None
+                try:
+                    batch_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+                    # 创建持久化目录
+                    persistent_dir = Path(__file__).parent.parent / "thermal_conductivity_results"
+                    persistent_dir.mkdir(parents=True, exist_ok=True)
+
+                    # 保存到持久化目录
+                    batch_results_csv = persistent_dir / f"batch_kappa_results_{batch_timestamp}.csv"
+                    result_df.to_csv(batch_results_csv, index=False)
+                    logger.info(f"💾 Saved batch kappa results to persistent directory: {batch_results_csv}")
+                except Exception as e:
+                    logger.warning(f"Failed to save batch results CSV: {e}")
+
                 # Process results for each structure
                 for result_idx, cif_info in enumerate(cif_files):
                     try:
@@ -651,15 +690,17 @@ def _calculate_kappa_batch(
             summary["average_kappa"] = round(avg_kappa, 4)
         
         logger.info(f"✅ Batch calculation completed: {completed}/{len(structures)} successful")
-        
+
         return {
             "success": True,
             "batch_mode": True,
             "total": len(structures),
             "completed": completed,
             "failed": failed,
-            "results": results,
+            "results": results,  # Individual results (already optimized - no full_results field)
             "summary": summary,
+            # ⚠️ TOKEN OPTIMIZATION: Full batch results saved to CSV file
+            "batch_results_file": str(batch_results_csv) if batch_results_csv else None,
             "timestamp": datetime.now().isoformat()
         }
         

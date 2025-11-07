@@ -209,44 +209,44 @@ def generate_crystal_from_composition(
                 "generation_id": generation_id
             }
 
-        # Read all generated CIF files
-        cif_contents = []
-        for cif_file in cif_files:
-            with open(cif_file, 'r', encoding='utf-8') as f:
-                cif_contents.append(f.read())
-
-        logger.info("Successfully read all CIF files",
+        logger.info("Successfully located CIF files",
                    source=cif_source,
                    total_files=len(cif_files))
 
         # Step 8: Return result (keeping files in generated_structures directory)
+        # Return file paths instead of full CIF content to optimize token consumption
         result = {
             "success": True,
-            "cif_contents": cif_contents,  # Changed from cif_content to cif_contents
+            "cif_file_paths": [str(f) for f in cif_files],  # Return file paths instead of content
             "cif_filenames": [f.name for f in cif_files],
             "composition": composition,
             "generation_id": generation_id,
             "num_generated": len(cif_files),
             "cif_source": cif_source,  # "postprocessed" or "raw"
-            "cif_file_path": str(cif_file),
             "model_used": Path(model_path).name,
-            "device": device
+            "device": device,
+            "cif_directory": str(postprocess_output_dir if cif_source == "postprocessed" else generate_dir)
         }
         
-        # Generate frontend-compatible structures from CIF contents
+        # Generate frontend-compatible structures from CIF files
+        # Only read CIF content when generating frontend structures
         frontend_structures = []
         try:
             # Import the function from the same directory
             import importlib.util
             spec = importlib.util.spec_from_file_location(
-                "generate_crystal", 
+                "generate_crystal",
                 _MODULE_DIR / "generate_crystal.py"
             )
             generate_crystal_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(generate_crystal_module)
             convert_cif_to_frontend_format = generate_crystal_module.convert_cif_to_frontend_format
-            
-            for i, cif_content in enumerate(cif_contents):
+
+            for i, cif_file_path in enumerate(result["cif_file_paths"]):
+                # Read CIF content only when needed for frontend structure generation
+                with open(cif_file_path, 'r', encoding='utf-8') as f:
+                    cif_content = f.read()
+
                 cif_filename = result["cif_filenames"][i]
                 frontend_structure = convert_cif_to_frontend_format(
                     cif_content=cif_content,
@@ -255,14 +255,16 @@ def generate_crystal_from_composition(
                     generation_id=generation_id
                 )
                 if frontend_structure:
+                    # Add file path to frontend structure for downstream tools
+                    frontend_structure["cif_file_path"] = cif_file_path
                     frontend_structures.append(frontend_structure)
-                    
-            logger.info(f"Generated {len(frontend_structures)} frontend structures from {len(cif_contents)} CIF files")
-                    
+
+            logger.info(f"Generated {len(frontend_structures)} frontend structures from {len(result['cif_file_paths'])} CIF files")
+
         except Exception as e:
             logger.warning(f"Failed to generate frontend structures: {e}")
             frontend_structures = []
-        
+
         # Add frontend structures to result
         result["frontend_structures"] = frontend_structures
         result["num_frontend_structures"] = len(frontend_structures)

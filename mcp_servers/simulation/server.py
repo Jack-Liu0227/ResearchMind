@@ -267,7 +267,11 @@ async def calculate_energy_from_cif(
         - formation_energy: Formation energy (eV/atom)
         - decomposition_energy: Energy above hull (eV/atom)
         - forces: Atomic forces (eV/Å)
-        - stress: Stress tensor (GPa)
+        - stress_tensor_gpa: Full 3×3 stress tensor (GPa) - ~200 tokens
+        - pressure_gpa: Scalar hydrostatic pressure (GPa)
+
+        Note: Full stress tensor is returned for detailed analysis. If token optimization
+        is critical, consider using only pressure_gpa for scalar stress information.
 
     Example:
         # After relaxation:
@@ -350,10 +354,17 @@ async def relax_structure(
         - relaxed_cif_file: Path to saved relaxed CIF file
         - relaxed_cif_url: URL to access the relaxed CIF file
         - relaxed_cif_filename: Filename of the relaxed CIF
+        - frontend_structures: List with relaxed structure in frontend format (includes cifContent for visualization)
         - initial_energy: Initial energy before relaxation
         - final_energy: Final energy after relaxation
         - energy_change: Energy change during relaxation
         - structure_changes: Structural changes (volume, lattice parameters)
+
+        ⚠️ TOKEN OPTIMIZATION: CIF content is NOT returned in the response to reduce token consumption by ~95%.
+        Instead, use:
+        - relaxed_cif_file: File path for downstream calculations
+        - relaxed_cif_url: URL for downloading the CIF file
+        - frontend_structures[0].cifContent: CIF content for frontend visualization
 
     Example:
         # User uploads structure.cif via web interface, then:
@@ -474,10 +485,19 @@ async def relax_structure(
                 result["frontend_structures"] = [frontend_structure]
                 logger.info(f"✅ Relaxed structure converted to frontend format: {frontend_structure.get('formula')}")
 
-            # Remove the large CIF content from result to avoid JSON issues
-            # Keep only base64 version for backward compatibility if needed
+            # ⚠️ TOKEN OPTIMIZATION: Remove large CIF content to reduce token consumption by ~95%
+            # CIF content is now saved to file and accessible via file path/URL
             if "relaxed_cif_content" in result:
                 del result["relaxed_cif_content"]
+            if "relaxed_cif_base64" in result:
+                del result["relaxed_cif_base64"]
+
+            # Add optimization note
+            result["token_optimization"] = {
+                "cif_content_removed": True,
+                "reason": "CIF content saved to file to optimize token usage (~95% reduction)",
+                "access_via": "Use relaxed_cif_file, relaxed_cif_url, or frontend_structures"
+            }
 
         except Exception as e:
             logger.warning(f"⚠️ Failed to save/convert relaxed structure: {e}")
@@ -541,7 +561,16 @@ async def calculate_phonon(
         - has_imaginary_modes: Whether structure has imaginary phonon modes (unstable)
         - stability_status: "STABLE" or "UNSTABLE"
         - images: List of image objects with URLs for frontend display
-        - phonon_frequencies: Phonon frequency data
+        - phonon_data_file: Path to JSON file containing full phonon frequency data
+        - phonon_summary: Summary statistics (has_imaginary_modes, num_frequencies, min/max frequency)
+
+        ⚠️ TOKEN OPTIMIZATION: Full phonon frequency data is NOT returned in the response (~90% reduction).
+        Instead, use:
+        - phonon_data_file: Path to JSON file with complete frequency data
+        - phonon_dispersion_csv: Path to CSV file with dispersion data (q-points × frequencies)
+        - phonon_dos_csv: Path to CSV file with DOS data (frequency × density)
+        - phonon_summary: Key statistics for quick reference
+        - images: Phonon band structure and DOS plots for visualization
         - composition: Chemical composition
         - n_atoms: Number of atoms
 
@@ -595,7 +624,7 @@ async def calculate_phonon(
     # 统一使用 mcp_servers/simulation/phonon_results 目录
     phonon_dir = Path(__file__).parent / "phonon_results"
     phonon_dir.mkdir(parents=True, exist_ok=True)
-    url_prefix = f"/images/phonon_results"
+    url_prefix = f"/images/phonon"
     logger.info(f"📁 Target phonon directory: {phonon_dir}")
 
     # 调用实现函数，传入目标目录以避免重复保存
@@ -608,6 +637,24 @@ async def calculate_phonon(
     if result.get("success"):
         images = []
 
+        # 🆕 提取 CSV 文件路径（用于原始数据展示）
+        dispersion_csv_path = result.get("phonon_dispersion_csv")
+        dos_csv_path = result.get("phonon_dos_csv")
+
+        # 转换为前端可访问的 URL
+        dispersion_csv_url = None
+        dos_csv_url = None
+
+        if dispersion_csv_path:
+            csv_filename = Path(dispersion_csv_path).name
+            dispersion_csv_url = f"{url_prefix}/{csv_filename}"
+            logger.info(f"📊 Phonon dispersion CSV: {csv_filename}")
+
+        if dos_csv_path:
+            csv_filename = Path(dos_csv_path).name
+            dos_csv_url = f"{url_prefix}/{csv_filename}"
+            logger.info(f"📊 Phonon DOS CSV: {csv_filename}")
+
         # 处理声子色散图
         if result.get("phonon_band_plot_path") and result.get("phonon_band_plot_available"):
             band_path = Path(result["phonon_band_plot_path"])
@@ -619,7 +666,10 @@ async def calculate_phonon(
                 "type": "phonon_dispersion",
                 "url": f"{url_prefix}/{filename}",
                 "filename": filename,
-                "available": True
+                "available": True,
+                # 🆕 添加 CSV 数据路径
+                "dispersionCsvPath": dispersion_csv_url,
+                "dosCsvPath": dos_csv_url
             })
             logger.info(f"📊 Phonon band plot: {filename}")
 
@@ -634,7 +684,10 @@ async def calculate_phonon(
                 "type": "phonon_dos",
                 "url": f"{url_prefix}/{filename}",
                 "filename": filename,
-                "available": True
+                "available": True,
+                # 🆕 添加 CSV 数据路径
+                "dispersionCsvPath": dispersion_csv_url,
+                "dosCsvPath": dos_csv_url
             })
             logger.info(f"📊 Phonon DOS plot: {filename}")
 
@@ -867,9 +920,19 @@ async def calculate_kappa_from_cif(
         keep_files: Whether to keep generated CIF files for inspection
 
     Returns:
-        SINGLE: Dict containing calculated thermal conductivity and results
-        BATCH: Dict with summary, all results, and statistics
-        
+        SINGLE: Dict containing:
+        - thermal_conductivity: {value, unit}
+        - results_file: Path to CSV file with full calculation results
+        - key_metrics: Summary of key values (kappa, temperature, method, num_atoms)
+
+        BATCH: Dict containing:
+        - results: List of individual results (optimized, no full_results field)
+        - summary: Statistics and thermal conductivities
+        - batch_results_file: Path to CSV file with complete batch results
+
+        ⚠️ TOKEN OPTIMIZATION: Full calculation results are saved to CSV files (~80% reduction).
+        Use results_file or batch_results_file to access complete data.
+
     Examples:
         # Single CIF
         result = await calculate_kappa_from_cif("data_crystal\\n...", method="kappa_p")
@@ -1004,8 +1067,11 @@ async def generate_crystal_structure(
     Generate crystal structure from chemical composition using CrystaLLM.
 
     This tool uses the CrystaLLM AI model to generate realistic crystal structures
-    from a given chemical composition. The generated structures are in CIF format
+    from a given chemical composition. The generated structures are saved as CIF files
     and can be used for further calculations (energy, thermal conductivity, etc.).
+
+    ⚠️ IMPORTANT: This tool returns FILE PATHS instead of full CIF content to optimize token consumption.
+    Downstream tools (thermal conductivity, phonon spectrum) can read CIF files directly from these paths.
 
     Args:
         composition: Chemical composition (e.g., "Si", "GaN", "Fe2O3", "NaCl")
@@ -1017,17 +1083,25 @@ async def generate_crystal_structure(
     Returns:
         Dict containing:
         - success: bool - Whether generation succeeded
-        - cif_content: str - Generated CIF file content
-        - cif_filename: str - Generated CIF filename
+        - cif_file_paths: List[str] - Paths to generated CIF files (optimized for token usage)
+        - cif_filenames: List[str] - Generated CIF filenames
+        - cif_directory: str - Directory containing all generated CIF files
         - composition: str - Input composition
         - generation_id: str - Unique generation ID
+        - num_generated: int - Number of structures generated
+        - frontend_structures: List[Dict] - Frontend-compatible structure data (includes cifContent for visualization)
         - error: str - Error message if failed
 
     Example:
-        result = await generate_crystal_structure(composition="GaN")
+        result = await generate_crystal_structure(composition="GaN", num_samples=3)
         if result["success"]:
-            cif_content = result["cif_content"]
-            # Use cif_content for further calculations
+            # Use file paths for downstream calculations
+            for cif_path in result["cif_file_paths"]:
+                # Read CIF when needed
+                with open(cif_path, 'r') as f:
+                    cif_content = f.read()
+                # Or pass path directly to thermal conductivity calculation
+                kappa_result = await calculate_kappa_from_cif(cif_content, ...)
     """
     result = generate_crystal_from_composition(
         composition=composition,
@@ -1036,18 +1110,23 @@ async def generate_crystal_structure(
         top_k=top_k,
         max_new_tokens=max_new_tokens
     )
-    
+
     # 如果生成成功且包含frontend_structures，记录到全局缓存
     if result.get("success") and result.get("frontend_structures"):
         # 将结构数据存储到全局变量，供主服务器获取
         global latest_generated_structures
         latest_generated_structures = result["frontend_structures"]
         logger.info(f"Cached {len(latest_generated_structures)} frontend format structures")
-        
+
         # 确保返回结果包含正确的字段名，以便主服务器可以识别
         result["structures"] = result["frontend_structures"]  # 添加structures字段作为备选
         logger.info(f"Structure generation completed: {result.get('composition')}, {len(result['frontend_structures'])} structures")
-    
+
+        # Log file paths for verification
+        if result.get("cif_file_paths"):
+            logger.info(f"Generated CIF files saved to: {result.get('cif_directory')}")
+            logger.info(f"File paths: {result['cif_file_paths']}")
+
     return result
 
 @app.tool

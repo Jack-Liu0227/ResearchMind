@@ -64,13 +64,13 @@ class ServerConfig:
         ]
 
     CORS_ORIGINS = get_cors_origins()
-    
+
     # Static Files
     STATIC_FILES_ROOT = os.path.abspath(os.path.dirname(__file__) + "/..")
     PHONON_RESULTS_DIR = os.path.join(STATIC_FILES_ROOT, "mcp_servers", "simulation", "phonon_results")
     GENERATED_STRUCTURES_DIR = os.path.join(STATIC_FILES_ROOT, "mcp_servers", "simulation", "crystallm", "generated_structures")
-    RELAXED_STRUCTURES_DIR = os.path.join(STATIC_FILES_ROOT, "mcp_servers", "simulation", "relaxed_structures")
-    
+    # Note: RELAXED_STRUCTURES_DIR removed - all relaxed structures use session-isolated paths
+
     # Logging
     LOG_LEVEL = os.getenv("RESEARCHMIND_LOG_LEVEL", "INFO")
     DEBUG = os.getenv("RESEARCHMIND_DEBUG", "false").lower() == "true"

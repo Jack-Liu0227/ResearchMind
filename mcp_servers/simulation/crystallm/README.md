@@ -7,10 +7,11 @@ This module provides crystal structure generation using CrystaLLM, a large langu
 ## 🎯 Features
 
 - **Composition-to-Structure**: Generate CIF files from chemical formulas
+- **Token-Optimized Output**: Returns file paths instead of full CIF content to reduce token consumption
 - **Modular Design**: Clean separation of concerns
 - **MCP Integration**: Exposed as MCP tool for agent use
 - **CPU/CUDA Support**: Flexible device selection
-- **Automatic Cleanup**: Temporary files are automatically cleaned up
+- **Persistent Storage**: Generated CIF files are saved to `generated_structures/` directory for downstream use
 
 ## 📁 Module Structure
 
@@ -37,10 +38,16 @@ result = generate_crystal_from_composition(
 )
 
 if result['success']:
-    cif_content = result['cif_content']
-    cif_filename = result['cif_filename']
+    # Result now returns file paths instead of full CIF content (optimized for token usage)
+    cif_file_path = result['cif_file_paths'][0]
+    cif_filename = result['cif_filenames'][0]
     print(f"Generated: {cif_filename}")
-    print(cif_content)
+    print(f"Saved to: {cif_file_path}")
+
+    # Read CIF content when needed
+    with open(cif_file_path, 'r', encoding='utf-8') as f:
+        cif_content = f.read()
+    print(f"CIF content length: {len(cif_content)} characters")
 else:
     print(f"Error: {result['error']}")
 ```
@@ -86,13 +93,17 @@ Generate crystal structure from chemical composition.
 ```python
 {
     "success": bool,              # Whether generation succeeded
-    "cif_content": str,           # Generated CIF file content
-    "cif_filename": str,          # Generated CIF filename
+    "cif_file_paths": List[str],  # Paths to generated CIF files (optimized for token usage)
+    "cif_filenames": List[str],   # Generated CIF filenames
+    "cif_directory": str,         # Directory containing all generated CIF files
     "composition": str,           # Input composition
     "generation_id": str,         # Unique generation ID
     "num_generated": int,         # Number of structures generated
+    "cif_source": str,            # "postprocessed" or "raw"
     "model_used": str,            # Model name used
     "device": str,                # Device used for generation
+    "frontend_structures": List[Dict],  # Frontend-compatible structure data (includes cifContent)
+    "num_frontend_structures": int,     # Number of frontend structures
     "error": str                  # Error message if failed (only if success=False)
 }
 ```
@@ -105,7 +116,8 @@ Generate crystal structure from chemical composition.
 result = generate_crystal_from_composition("Si")
 
 if result['success']:
-    print(f"✅ Generated {result['cif_filename']}")
+    print(f"✅ Generated {result['cif_filenames'][0]}")
+    print(f"📁 Saved to: {result['cif_file_paths'][0]}")
     print(f"Model: {result['model_used']}")
     print(f"Device: {result['device']}")
 ```
@@ -121,6 +133,9 @@ result = generate_crystal_from_composition(
 
 if result['success']:
     print(f"Generated {result['num_generated']} structures")
+    print(f"📁 Directory: {result['cif_directory']}")
+    for i, path in enumerate(result['cif_file_paths']):
+        print(f"  {i+1}. {result['cif_filenames'][i]} -> {path}")
 ```
 
 ### Example 3: With Property Calculation
@@ -130,15 +145,20 @@ if result['success']:
 gen_result = generate_crystal_from_composition("GaN")
 
 if gen_result['success']:
+    # Read CIF content from file path (optimized for token usage)
+    cif_path = gen_result['cif_file_paths'][0]
+    with open(cif_path, 'r', encoding='utf-8') as f:
+        cif_content = f.read()
+
     # Calculate thermal conductivity
     from modules import calculate_kappa_from_cif_impl
-    
+
     kappa_result = calculate_kappa_from_cif_impl(
-        cif_content=gen_result['cif_content'],
-        cif_filename=gen_result['cif_filename'],
+        cif_content=cif_content,
+        cif_filename=gen_result['cif_filenames'][0],
         method="kappa_p"
     )
-    
+
     if kappa_result['success']:
         print(f"Thermal Conductivity: {kappa_result['kappa']} W/(m·K)")
 ```
@@ -209,14 +229,17 @@ The module looks for CrystaLLM models in:
 3. `CrystaLLM/pre-trained-model/crystallm_v1_large`
 4. `CrystaLLM/pre-trained-model/crystallm_v1_small`
 
-### Temporary Files
+### Generated Files
 
-The module creates temporary directories for:
-- Prompts
-- Generated structures
-- Processed structures
+The module creates persistent directories in `generated_structures/` for:
+- Prompts: `{composition}_{generation_id}/prompts/`
+- Generated structures: `{composition}_{generation_id}/generated/`
+- Processed structures: `{composition}_{generation_id}/processed/`
 
-All temporary files are automatically cleaned up after generation.
+**Important**: Generated CIF files are kept in the `generated_structures/` directory for downstream use (thermal conductivity, phonon calculations, etc.). This enables:
+1. Token-efficient responses (file paths instead of full content)
+2. Direct file access for downstream tools
+3. Reproducibility and traceability of generated structures
 
 ## 🔧 Configuration
 
