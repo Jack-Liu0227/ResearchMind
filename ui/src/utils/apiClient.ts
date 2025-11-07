@@ -216,11 +216,11 @@ export async function checkAPIHealth(): Promise<boolean> {
 
 /**
  * 获取声子谱图片
- * @param imageType 图片类型 (phonon_results 或 generated_structures)
+ * @param imageType 图片类型 (phonon 或 generated_structures)
  * @param filename 文件名
  */
 export async function getPhononImage(
-  imageType: 'phonon_results' | 'generated_structures',
+  imageType: 'phonon' | 'generated_structures',
   filename: string
 ): Promise<string> {
   try {

@@ -92,16 +92,29 @@ class StaticFileService:
             logger.warning(f"⚠️ Paper search directory not found: {paper_search_dir}")
 
         # Phonon results directory - mount second (specific)
+        # 声子谱图片和 CSV 文件
         phonon_dir = server_config.PHONON_RESULTS_DIR
         if os.path.exists(phonon_dir):
             app.mount(
-                "/api/images/phonon_results",
+                "/api/images/phonon",
                 StaticFiles(directory=phonon_dir),
                 name="phonon_images"
             )
-            logger.info(f"✅ Static files: /api/images/phonon_results -> {phonon_dir}")
+            logger.info(f"✅ Static files: /api/images/phonon -> {phonon_dir}")
         else:
             logger.warning(f"⚠️ Phonon results directory not found: {phonon_dir}")
+
+        # 🆕 Thermal conductivity results directory - mount for CSV files
+        thermal_conductivity_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "simulation", "thermal_conductivity_results")
+        if os.path.exists(thermal_conductivity_dir):
+            app.mount(
+                "/api/files/thermal_conductivity",
+                StaticFiles(directory=thermal_conductivity_dir),
+                name="thermal_conductivity_files"
+            )
+            logger.info(f"✅ Static files: /api/files/thermal_conductivity -> {thermal_conductivity_dir}")
+        else:
+            logger.warning(f"⚠️ Thermal conductivity results directory not found: {thermal_conductivity_dir}")
 
         # Generated structures directory - mount third (specific)
         structures_dir = server_config.GENERATED_STRUCTURES_DIR
@@ -115,17 +128,8 @@ class StaticFileService:
         else:
             logger.warning(f"⚠️ Generated structures directory not found: {structures_dir}")
 
-        # Relaxed structures directory (global) - mount fourth (specific)
-        relaxed_structures_dir = server_config.RELAXED_STRUCTURES_DIR
-        if os.path.exists(relaxed_structures_dir):
-            app.mount(
-                "/api/structures/relaxed",
-                StaticFiles(directory=relaxed_structures_dir),
-                name="relaxed_structures"
-            )
-            logger.info(f"✅ Static files: /api/structures/relaxed -> {relaxed_structures_dir}")
-        else:
-            logger.warning(f"⚠️ Relaxed structures directory not found: {relaxed_structures_dir}")
+        # Note: /api/structures/relaxed mount removed (directory never existed)
+        # All relaxed structures now use session-isolated paths: /api/structures/{session_id}/relax/
 
         # Simulation CIF structures directory (会话隔离的弛豫结构文件) - mount before general structures
         # This serves files from mcp_servers/simulation/cif/{session_id}/structures/
@@ -140,38 +144,14 @@ class StaticFileService:
         else:
             logger.warning(f"⚠️ Simulation CIF directory not found: {simulation_cif_dir}")
 
-        # Session structures directory (会话隔离的结构文件 - 备用) - mount as fallback
-        # This is kept for backward compatibility
-        session_structures_dir = SessionManager.STRUCTURES_DIR
-        if session_structures_dir.exists():
-            app.mount(
-                "/api/structures/session",
-                StaticFiles(directory=str(session_structures_dir)),
-                name="session_structures_fallback"
-            )
-            logger.info(f"✅ Static files: /api/structures/session -> {session_structures_dir}")
-        else:
-            logger.warning(f"⚠️ Session structures directory not found: {session_structures_dir}")
+        # 🔧 优化：删除冗余的会话结构和图片挂载
+        # 原因：
+        # 1. session_data/structures 已被 /api/structures 替代
+        # 2. session_data/images 从未被实际使用，且会覆盖 /api/images/* 子路径
+        # 3. 所有图片都保存在具体的目录（如 phonon_results, generated_structures）
 
-        # Session images directory (会话隔离的图片) - mount last (least specific, catch-all)
-        session_images_dir = SessionManager.IMAGES_DIR
-        if session_images_dir.exists():
-            app.mount(
-                "/api/images",
-                StaticFiles(directory=str(session_images_dir)),
-                name="session_images"
-            )
-            logger.info(f"✅ Static files: /api/images -> {session_images_dir}")
-        else:
-            # Fallback to general images directory
-            mcp_servers_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers")
-            if os.path.exists(mcp_servers_dir):
-                app.mount(
-                    "/api/images",
-                    StaticFiles(directory=mcp_servers_dir),
-                    name="all_images"
-                )
-                logger.info(f"✅ Static files: /api/images -> {mcp_servers_dir}")
+        # 如果未来需要会话隔离的图片，应使用不同的路径（如 /api/session/images）
+        # 而不是使用 /api/images 这种会覆盖子路径的通用路径
     
     @staticmethod
     def get_file_url(filename: str, file_type: str = "phonon_results") -> str:
@@ -229,7 +209,7 @@ class StaticFileService:
 
                     files.append({
                         'name': filename,
-                        'url': f"/api/images/phonon_results/{url_path}",
+                        'url': f"/api/images/phonon/{url_path}",
                         'path': url_path,
                         'type': file_type,
                         'description': f"声子谱图像: {filename}"
@@ -285,7 +265,7 @@ class StaticFileService:
             url_path = f"examples/{filename}"
             result.append({
                 'name': filename,
-                'url': f"{get_api_base_url()}/api/images/phonon_results/{url_path}",
+                'url': f"{get_api_base_url()}/api/images/phonon/{url_path}",
                 'path': url_path,
                 'type': 'phonon_dispersion',
                 'description': f"示例声子色散关系图"
@@ -297,7 +277,7 @@ class StaticFileService:
             url_path = f"examples/{filename}"
             result.append({
                 'name': filename,
-                'url': f"{get_api_base_url()}/api/images/phonon_results/{url_path}",
+                'url': f"{get_api_base_url()}/api/images/phonon/{url_path}",
                 'path': url_path,
                 'type': 'phonon_dos',
                 'description': f"示例声子态密度图"

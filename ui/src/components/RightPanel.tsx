@@ -3,7 +3,7 @@
  */
 
 import React, { useMemo, useState } from 'react'
-import { Download, ExternalLink, Image as ImageIcon, FileText, Table as TableIcon } from 'lucide-react'
+import { Download, ExternalLink, Image as ImageIcon, FileText, Table as TableIcon, ChevronDown, ChevronRight } from 'lucide-react'
 import StructureViewerThreeJS from './StructureViewerThreeJS'
 import StructureList from './StructureList'
 import FullscreenViewer from './FullscreenViewer'
@@ -135,7 +135,7 @@ const getImageUrl = (image: PhononImage): string | undefined => {
     return resolveFileUrl(`/images/${normalizedPath}`)
   }
   if (image.filename) {
-    return resolveFileUrl(`/images/phonon_results/${image.filename}`)
+    return resolveFileUrl(`/images/phonon/${image.filename}`)
   }
   return undefined
 }
@@ -368,6 +368,9 @@ interface PhononTabProps {
 
 
 const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, onDownloadImage }) => {
+  // 🆕 状态：控制每个图片的原始数据展示
+  const [expandedDataIndex, setExpandedDataIndex] = useState<number | null>(null)
+
   const handleDownload = async (image: PhononImage, fallbackName: string) => {
     try {
       if (image.base64) {
@@ -393,6 +396,10 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
     }
   }
 
+  const toggleDataExpansion = (index: number) => {
+    setExpandedDataIndex(expandedDataIndex === index ? null : index)
+  }
+
   if (!phononImages.length) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-gray-500">
@@ -408,6 +415,8 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
       {phononImages.map((image, index) => {
         const displayUrl = getImageUrl(image)
         const fallbackName = image.filename || image.name || `phonon_${index + 1}.png`
+        const hasRawData = image.dispersionCsvPath || image.dosCsvPath
+        const isDataExpanded = expandedDataIndex === index
 
         return (
           <div key={index} className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
@@ -450,11 +459,54 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
               </div>
             </div>
             <div className="p-3 bg-gray-50">
-              <p className="text-sm font-medium text-gray-900">{fallbackName}</p>
-              {image.description && (
-                <p className="text-xs text-gray-500 mt-1">{image.description}</p>
-              )}
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-900">{fallbackName}</p>
+                  {image.description && (
+                    <p className="text-xs text-gray-500 mt-1">{image.description}</p>
+                  )}
+                </div>
+                {/* 🆕 原始数据按钮 */}
+                {hasRawData && (
+                  <button
+                    onClick={() => toggleDataExpansion(index)}
+                    className="ml-2 px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded flex items-center space-x-1 transition-colors"
+                    title={isDataExpanded ? "隐藏原始数据" : "显示原始数据"}
+                  >
+                    {isDataExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                    <span>数据</span>
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* 🆕 原始数据展示区域 */}
+            {hasRawData && isDataExpanded && (
+              <div className="border-t border-gray-200 bg-gray-50 p-3 space-y-3">
+                {image.dispersionCsvPath && (
+                  <div className="bg-white rounded p-2">
+                    <h5 className="text-xs font-medium text-gray-700 mb-2">声子色散数据</h5>
+                    <CsvViewer
+                      url={resolveFileUrl(image.dispersionCsvPath)}
+                      filename="phonon_dispersion.csv"
+                      maxHeight="200px"
+                      defaultExpanded={true}
+                    />
+                  </div>
+                )}
+                {image.dosCsvPath && (
+                  <div className="bg-white rounded p-2">
+                    <h5 className="text-xs font-medium text-gray-700 mb-2">声子态密度数据</h5>
+                    <CsvViewer
+                      url={resolveFileUrl(image.dosCsvPath)}
+                      filename="phonon_dos.csv"
+                      maxHeight="200px"
+                      defaultExpanded={true}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )
       })}

@@ -87,6 +87,10 @@ class ImageHandler:
 
             # Method 2-3: Only extract from paths if no images field exists
             elif result.get("phonon_band_plot_path") or result.get("phonon_dos_plot_path"):
+                # 🆕 提取 CSV 路径（用于原始数据展示）
+                dispersion_csv = result.get("phonon_dispersion_csv")
+                dos_csv = result.get("phonon_dos_csv")
+
                 # Method 2: Phonon band plot
                 if result.get("phonon_band_plot_path"):
                     logger.info(f"🔍 Found phonon_band_plot_path: {result['phonon_band_plot_path']}")
@@ -96,7 +100,9 @@ class ImageHandler:
                         image = ImageHandler._create_phonon_image(
                             result["phonon_band_plot_path"],
                             "phonon_dispersion",
-                            "Phonon Dispersion"
+                            "Phonon Dispersion",
+                            dispersion_csv=dispersion_csv,
+                            dos_csv=dos_csv
                         )
                         if image:
                             images.append(image)
@@ -111,7 +117,9 @@ class ImageHandler:
                         image = ImageHandler._create_phonon_image(
                             result["phonon_dos_plot_path"],
                             "phonon_dos",
-                            "Phonon DOS"
+                            "Phonon DOS",
+                            dispersion_csv=dispersion_csv,
+                            dos_csv=dos_csv
                         )
                         if image:
                             images.append(image)
@@ -136,22 +144,24 @@ class ImageHandler:
         return images
     
     @staticmethod
-    def _create_phonon_image(path: str, image_type: str, name: str) -> Optional[Dict[str, Any]]:
-        """Create phonon image data with proper URL"""
+    def _create_phonon_image(path: str, image_type: str, name: str,
+                            dispersion_csv: Optional[str] = None,
+                            dos_csv: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Create phonon image data with proper URL and CSV paths"""
         try:
             # Extract filename from path
             filename = Path(path).name
 
-            # Generate URL - 统一使用 /images/... 格式（不包含 /api 前缀）
-            # Nginx 代理会添加 /api 前缀，前端会自动转换为完整 URL
-            url = f"/images/phonon_results/{filename}"
+            # 🔧 优化：使用简洁的 /api/images/phonon 路径
+            # FastAPI 挂载点：/api/images/phonon -> mcp_servers/simulation/phonon_results
+            url = f"/api/images/phonon/{filename}"
 
             # Check if file exists
             available = os.path.exists(path)
             if not available:
                 logger.warning(f"⚠️ Image file not found: {path}")
 
-            return {
+            image_data = {
                 "name": name,
                 "type": image_type,
                 "path": path,
@@ -160,6 +170,19 @@ class ImageHandler:
                 "available": available,
                 "timestamp": datetime.now().isoformat()
             }
+
+            # 🆕 添加 CSV 数据路径（如果提供）
+            if dispersion_csv:
+                csv_filename = Path(dispersion_csv).name
+                image_data["dispersionCsvPath"] = f"/api/images/phonon/{csv_filename}"
+                logger.info(f"📊 Added dispersion CSV path: {csv_filename}")
+
+            if dos_csv:
+                csv_filename = Path(dos_csv).name
+                image_data["dosCsvPath"] = f"/api/images/phonon/{csv_filename}"
+                logger.info(f"📊 Added DOS CSV path: {csv_filename}")
+
+            return image_data
         except Exception as e:
             logger.error(f"Failed to create phonon image data: {e}")
             return None
@@ -172,7 +195,7 @@ class ImageHandler:
 
             # Determine URL prefix based on path（不包含 /api 前缀）
             if "phonon" in path.lower():
-                url_prefix = "/images/phonon_results"
+                url_prefix = "/images/phonon"
             elif "structure" in path.lower() or "generated" in path.lower():
                 url_prefix = "/images/generated_structures"
             else:
@@ -207,13 +230,13 @@ class ImageHandler:
             return False
     
     @staticmethod
-    def get_image_url(filename: str, image_type: str = "phonon_results") -> str:
+    def get_image_url(filename: str, image_type: str = "phonon") -> str:
         """
         Generate image URL for a given filename
 
         Args:
             filename: Image filename
-            image_type: Type of image (phonon_results, generated_structures, etc.)
+            image_type: Type of image (phonon, generated_structures, etc.)
 
         Returns:
             Full URL to access the image (relative path)
