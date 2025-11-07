@@ -1162,9 +1162,12 @@ def relax_structure_impl(
             "cell_change": float(cell_change),
 
             # Relaxed structure
-            "relaxed_cif_content": relaxed_cif_content,
-            "relaxed_cif_base64": relaxed_cif_base64,
+            # ⚠️ TOKEN OPTIMIZATION: Return CIF content for server processing, but mark for removal
+            # Server will save to file and remove content before returning to client
+            "relaxed_cif_content": relaxed_cif_content,  # Needed by server for file saving
+            "relaxed_cif_base64": relaxed_cif_base64,    # Kept for backward compatibility
             "relaxed_cif_filename": f"relaxed_{cif_filename}",
+            "_remove_cif_content_before_return": True,  # Flag for server to remove large content
 
             # Structure properties
             "composition": composition_str,
@@ -1451,14 +1454,170 @@ def calculate_phonon_impl(
         # Generate calculation ID
         calculation_id = str(uuid.uuid4())[:12]
 
+        # ⚠️ TOKEN OPTIMIZATION: Save phonon frequencies to file instead of returning in response
+        phonon_data_file = ""
+        phonon_dispersion_csv = ""
+        phonon_dos_csv = ""
+
+        try:
+            import json
+            import pandas as pd
+            import yaml
+
+            phonon_data_file = persistent_dir / f"{base_name}frequencies_{timestamp}.json"
+
+            # Prepare phonon data for saving
+            phonon_data = {
+                "frequencies": phonons if isinstance(phonons, list) else str(phonons),
+                "has_imaginary": bool(has_imag),
+                "calculation_id": calculation_id,
+                "composition": composition_str,
+                "n_atoms": int(n_atoms),
+                "supercell_matrix": supercell_matrix,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            with open(phonon_data_file, 'w', encoding='utf-8') as f:
+                json.dump(phonon_data, f, indent=2)
+
+            logger.info(f"💾 Saved phonon frequencies to: {phonon_data_file}")
+
+            # Calculate summary statistics
+            if isinstance(phonons, list) and len(phonons) > 0:
+                num_frequencies = len(phonons)
+                # Try to extract min/max if phonons is a list of numbers
+                try:
+                    flat_phonons = []
+                    if isinstance(phonons[0], (list, tuple)):
+                        for item in phonons:
+                            flat_phonons.extend(item)
+                    else:
+                        flat_phonons = phonons
+                    min_freq = min(flat_phonons) if flat_phonons else None
+                    max_freq = max(flat_phonons) if flat_phonons else None
+                except:
+                    min_freq = None
+                    max_freq = None
+            else:
+                num_frequencies = 0
+                min_freq = None
+                max_freq = None
+
+            # 🆕 Extract and save phonon dispersion data from band.yaml
+            try:
+                band_yaml_path = work_dir_path / "band.yaml"
+                if band_yaml_path.exists():
+                    logger.info(f"📊 Extracting phonon dispersion data from band.yaml")
+
+                    with open(band_yaml_path, 'r', encoding='utf-8') as f:
+                        band_data = yaml.safe_load(f)
+
+                    # Extract q-points and frequencies
+                    if band_data and 'phonon' in band_data:
+                        dispersion_rows = []
+                        for phonon_point in band_data['phonon']:
+                            q_point = phonon_point.get('q-position', [0, 0, 0])
+                            distance = phonon_point.get('distance', 0.0)
+                            bands = phonon_point.get('band', [])
+
+                            # Create row with q-point distance and all band frequencies
+                            row = {'q_distance': distance}
+                            for i, band in enumerate(bands):
+                                freq = band.get('frequency', 0.0)
+                                row[f'band_{i+1}'] = freq
+
+                            dispersion_rows.append(row)
+
+                        if dispersion_rows:
+                            # Save to CSV
+                            df_dispersion = pd.DataFrame(dispersion_rows)
+                            phonon_dispersion_csv = persistent_dir / f"{base_name}dispersion_{timestamp}.csv"
+                            df_dispersion.to_csv(phonon_dispersion_csv, index=False, float_format='%.6f')
+                            logger.info(f"✅ Saved phonon dispersion data to: {phonon_dispersion_csv}")
+                            logger.info(f"   Data shape: {df_dispersion.shape[0]} q-points × {df_dispersion.shape[1]-1} bands")
+                        else:
+                            logger.warning("⚠️ No dispersion data found in band.yaml")
+                    else:
+                        logger.warning("⚠️ band.yaml does not contain 'phonon' key")
+                else:
+                    logger.warning(f"⚠️ band.yaml not found at: {band_yaml_path}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to extract phonon dispersion data: {e}")
+
+            # 🆕 Extract and save phonon DOS data from mesh.yaml or total_dos.dat
+            try:
+                # Try mesh.yaml first
+                mesh_yaml_path = work_dir_path / "mesh.yaml"
+                dos_dat_path = work_dir_path / "total_dos.dat"
+
+                dos_extracted = False
+
+                if mesh_yaml_path.exists():
+                    logger.info(f"📊 Extracting phonon DOS data from mesh.yaml")
+
+                    with open(mesh_yaml_path, 'r', encoding='utf-8') as f:
+                        mesh_data = yaml.safe_load(f)
+
+                    if mesh_data and 'phonon_dos' in mesh_data:
+                        dos_data = mesh_data['phonon_dos']
+                        frequencies = [point[0] for point in dos_data]
+                        dos_values = [point[1] for point in dos_data]
+
+                        df_dos = pd.DataFrame({
+                            'frequency_THz': frequencies,
+                            'dos': dos_values
+                        })
+
+                        phonon_dos_csv = persistent_dir / f"{base_name}dos_{timestamp}.csv"
+                        df_dos.to_csv(phonon_dos_csv, index=False, float_format='%.6f')
+                        logger.info(f"✅ Saved phonon DOS data to: {phonon_dos_csv}")
+                        logger.info(f"   Data points: {len(frequencies)}")
+                        dos_extracted = True
+
+                # Fallback to total_dos.dat
+                if not dos_extracted and dos_dat_path.exists():
+                    logger.info(f"📊 Extracting phonon DOS data from total_dos.dat")
+
+                    df_dos = pd.read_csv(dos_dat_path, sep=r'\s+', header=None,
+                                        names=['frequency_THz', 'dos'], comment='#')
+
+                    phonon_dos_csv = persistent_dir / f"{base_name}dos_{timestamp}.csv"
+                    df_dos.to_csv(phonon_dos_csv, index=False, float_format='%.6f')
+                    logger.info(f"✅ Saved phonon DOS data to: {phonon_dos_csv}")
+                    logger.info(f"   Data points: {len(df_dos)}")
+                    dos_extracted = True
+
+                if not dos_extracted:
+                    logger.warning(f"⚠️ No DOS data files found (mesh.yaml or total_dos.dat)")
+
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to extract phonon DOS data: {e}")
+
+        except Exception as e:
+            logger.warning(f"Failed to save phonon frequencies: {e}")
+            num_frequencies = 0
+            min_freq = None
+            max_freq = None
+
         return {
             "success": True,
             # Phonon results
             "has_imaginary_modes": bool(has_imag),
             "stability_status": "UNSTABLE" if has_imag else "STABLE",
 
-            # Phonon data
-            "phonon_frequencies": phonons if isinstance(phonons, list) else str(phonons),
+            # ⚠️ TOKEN OPTIMIZATION: Phonon data saved to file (~90% token reduction)
+            "phonon_data_file": str(phonon_data_file) if phonon_data_file else None,
+            "phonon_summary": {
+                "has_imaginary_modes": bool(has_imag),
+                "num_frequencies": num_frequencies,
+                "min_frequency": min_freq,
+                "max_frequency": max_freq,
+                "data_saved_to_file": bool(phonon_data_file)
+            },
+
+            # 🆕 Raw data CSV files for frontend display
+            "phonon_dispersion_csv": str(phonon_dispersion_csv) if phonon_dispersion_csv else None,
+            "phonon_dos_csv": str(phonon_dos_csv) if phonon_dos_csv else None,
 
             # Plots (file paths for persistent storage - lightweight approach)
             "phonon_band_plot_path": plot_relative_path,

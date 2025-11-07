@@ -52,7 +52,7 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
       return resolveFileUrl(image.url)
     }
     if (image.filename) {
-      return resolveFileUrl(`/images/phonon_results/${image.filename}`)
+      return resolveFileUrl(`/images/phonon/${image.filename}`)
     }
     if (image.path) {
       return resolveFileUrl(`/images/${image.path}`)

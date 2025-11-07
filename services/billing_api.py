@@ -279,6 +279,8 @@ async def oauth_callback(
     OAuth 回调端点
 
     Bohrium 授权成功后会重定向到这里，携带 code 和 state 参数
+
+    🆕 修复：现在会设置浏览器 Cookie，以便前端能够检测用户登录状态
     """
     try:
         oauth_service = get_oauth_service()
@@ -310,10 +312,41 @@ async def oauth_callback(
                 f"Session: {user_session_id[:8]}..."
             )
 
-            # 重定向回前端，携带成功标志
-            return RedirectResponse(
+            # 🆕 创建重定向响应并设置 Cookie
+            response = RedirectResponse(
                 url=f"/?auth_success=true&username={user_info.get('username', 'User')}"
             )
+
+            # 🆕 设置 appAccessKey Cookie（有效期 30 天）
+            response.set_cookie(
+                key="appAccessKey",
+                value=user_info['access_key'],
+                max_age=30 * 24 * 60 * 60,  # 30 天
+                path="/",
+                httponly=False,  # 允许 JavaScript 读取（前端需要检测）
+                samesite="lax",  # 防止 CSRF 攻击
+                secure=False  # 开发环境使用 HTTP，生产环境应改为 True
+            )
+
+            # 🆕 设置 clientName Cookie（有效期 30 天）
+            client_name = user_info.get('client_name', 'ResearchMind')
+            response.set_cookie(
+                key="clientName",
+                value=client_name,
+                max_age=30 * 24 * 60 * 60,  # 30 天
+                path="/",
+                httponly=False,  # 允许 JavaScript 读取
+                samesite="lax",
+                secure=False
+            )
+
+            logger.info(
+                f"🍪 已设置用户 Cookie - "
+                f"AccessKey: {user_info['access_key'][:8]}...{user_info['access_key'][-4:]}, "
+                f"ClientName: {client_name}"
+            )
+
+            return response
         else:
             logger.error("❌ 保存用户配置失败")
             return RedirectResponse(url="/?auth_error=config_save_failed")

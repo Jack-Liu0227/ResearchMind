@@ -6,6 +6,7 @@ Handles structure data, image data, and other result types.
 """
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -203,6 +204,39 @@ class DataProcessor:
                     if inline_md is not None:
                         file_metadata['md_inline_content'] = inline_md
                 logger.info(f"📄 Found MD file: {data['md_download_url']}")
+
+            # 🆕 处理热导率计算结果的 CSV 文件
+            # 单个热导率计算
+            if 'results_file' in data and data['results_file']:
+                csv_path = data['results_file']
+                filename = os.path.basename(csv_path)
+                # 转换为前端可访问的 URL
+                csv_url = f"/api/files/thermal_conductivity/{filename}"
+                file_metadata['kappa_results_csv_url'] = csv_url
+                file_metadata['kappa_results_csv_path'] = csv_path
+
+                # 读取 CSV 内容用于内联展示
+                inline_csv = DataProcessor._read_text_file(csv_path)
+                if inline_csv is not None:
+                    file_metadata['kappa_results_csv_content'] = inline_csv
+
+                logger.info(f"📄 Found thermal conductivity results CSV: {csv_url}")
+
+            # 批量热导率计算
+            if 'batch_results_file' in data and data['batch_results_file']:
+                csv_path = data['batch_results_file']
+                filename = os.path.basename(csv_path)
+                # 转换为前端可访问的 URL
+                csv_url = f"/api/files/thermal_conductivity/{filename}"
+                file_metadata['kappa_batch_csv_url'] = csv_url
+                file_metadata['kappa_batch_csv_path'] = csv_path
+
+                # 读取 CSV 内容用于内联展示
+                inline_csv = DataProcessor._read_text_file(csv_path)
+                if inline_csv is not None:
+                    file_metadata['kappa_batch_csv_content'] = inline_csv
+
+                logger.info(f"📄 Found batch thermal conductivity results CSV: {csv_url}")
 
             # If we found any file links, send them as metadata
             if file_metadata:

@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { X, Download, ZoomIn, ZoomOut, RotateCcw, Info, Maximize, Minimize, ExternalLink, Layout } from 'lucide-react'
+import { X, Download, ZoomIn, ZoomOut, RotateCcw, Info, Maximize, Minimize, ExternalLink, Layout, Table, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { API_CONFIG } from '../constants'
 import { resolveFileUrl } from '../utils/apiClient'
+import { CsvViewer } from './FileViewer/CsvViewer'
 
 interface PhononImage {
   name: string
@@ -18,15 +19,24 @@ interface Props {
   images: PhononImage[]
   onClose: () => void
   className?: string
+  dispersionCsvPath?: string  // 🆕 声子色散数据 CSV 路径
+  dosCsvPath?: string         // 🆕 声子 DOS 数据 CSV 路径
 }
 
 /**
  * 声子谱可视化组件
  * 支持声子色散关系图和声子态密度图的显示
+ * 🆕 支持原始数据表格展示（色散和 DOS 数据）
  */
-const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' }) => {
+const PhononVisualization: React.FC<Props> = ({
+  images,
+  onClose,
+  className = '',
+  dispersionCsvPath,
+  dosCsvPath
+}) => {
   const { setPhononDisplayMode } = useAppStore()
-  
+
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [scale, setScale] = useState(1)
   const [position, setPosition] = useState({ x: 0, y: 0 })
@@ -35,7 +45,8 @@ const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' 
   const [imageLoadError, setImageLoadError] = useState<boolean[]>([])
   const [showInfo, setShowInfo] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
-  
+  const [showRawData, setShowRawData] = useState(false)  // 🆕 控制原始数据显示
+
   const containerRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
 
@@ -129,7 +140,7 @@ const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' 
 
     // 统一使用 resolveFileUrl 处理相对路径（不包含 /api 前缀）
     if (image.url) return resolveFileUrl(image.url)
-    if (image.filename) return resolveFileUrl(`/images/phonon_results/${image.filename}`)
+    if (image.filename) return resolveFileUrl(`/images/phonon/${image.filename}`)
     if (image.path) return resolveFileUrl(`/images/${image.path}`)
     return ''
   }
@@ -275,6 +286,22 @@ const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' 
         </div>
         
         <div className="flex items-center space-x-2">
+          {/* 🆕 显示原始数据按钮 */}
+          {(dispersionCsvPath || dosCsvPath) && (
+            <button
+              onClick={() => setShowRawData(!showRawData)}
+              className={`px-3 py-2 rounded transition-colors flex items-center space-x-1 ${
+                showRawData
+                  ? 'bg-blue-600 hover:bg-blue-700'
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              title={showRawData ? "隐藏原始数据" : "显示原始数据"}
+            >
+              <Table className="w-4 h-4" />
+              <span className="text-sm">原始数据</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowInfo(!showInfo)}
             className="p-2 hover:bg-gray-700 rounded transition-colors"
@@ -282,7 +309,7 @@ const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' 
           >
             <Info className="w-5 h-5" />
           </button>
-          
+
           <button
             onClick={handleZoomOut}
             className="p-2 hover:bg-gray-700 rounded transition-colors"
@@ -503,6 +530,75 @@ const PhononVisualization: React.FC<Props> = ({ images, onClose, className = '' 
           )}
         </div>
       </div>
+
+      {/* 🆕 原始数据展示区域 */}
+      {showRawData && (dispersionCsvPath || dosCsvPath) && !isFullscreen && (
+        <div className="bg-gray-900 border-t border-gray-700 p-4 max-h-[50vh] overflow-y-auto">
+          <div className="max-w-7xl mx-auto space-y-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white text-lg font-semibold flex items-center space-x-2">
+                <Table className="w-5 h-5" />
+                <span>声子计算原始数据</span>
+              </h3>
+              <button
+                onClick={() => setShowRawData(false)}
+                className="text-gray-400 hover:text-white transition-colors"
+                title="隐藏原始数据"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* 声子色散数据 */}
+            {dispersionCsvPath && (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-3">
+                  <ChevronDown className="w-4 h-4 text-blue-400" />
+                  <h4 className="text-white font-medium">声子色散数据 (Phonon Dispersion)</h4>
+                  <span className="text-xs text-gray-400">
+                    q-点坐标 × 声子模式频率 (THz)
+                  </span>
+                </div>
+                <div className="text-sm text-gray-300 mb-2">
+                  显示声子频率随波矢的变化，用于分析晶格振动模式和声学性质。
+                </div>
+                <CsvViewer
+                  url={dispersionCsvPath}
+                  filename="phonon_dispersion.csv"
+                  maxHeight="300px"
+                  defaultExpanded={true}
+                />
+              </div>
+            )}
+
+            {/* 声子态密度数据 */}
+            {dosCsvPath && (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-3">
+                  <ChevronDown className="w-4 h-4 text-green-400" />
+                  <h4 className="text-white font-medium">声子态密度数据 (Phonon DOS)</h4>
+                  <span className="text-xs text-gray-400">
+                    频率 (THz) × 态密度
+                  </span>
+                </div>
+                <div className="text-sm text-gray-300 mb-2">
+                  显示不同频率下的声子态密度分布，用于分析热力学性质。
+                </div>
+                <CsvViewer
+                  url={dosCsvPath}
+                  filename="phonon_dos.csv"
+                  maxHeight="300px"
+                  defaultExpanded={true}
+                />
+              </div>
+            )}
+
+            <div className="text-xs text-gray-400 text-center pt-2 border-t border-gray-700">
+              💡 提示：点击表格右上角的下载按钮可导出完整数据用于进一步分析
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

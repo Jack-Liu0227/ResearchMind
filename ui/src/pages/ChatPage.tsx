@@ -132,6 +132,21 @@ const ChatPage: React.FC = () => {
       metadata.zip_filename
     )
 
+    // 🆕 热导率计算结果 CSV 文件
+    pushFile(
+      'csv',
+      metadata.kappa_results_csv_url,
+      metadata.kappa_results_csv_path,
+      '热导率计算结果'
+    )
+
+    pushFile(
+      'csv',
+      metadata.kappa_batch_csv_url,
+      metadata.kappa_batch_csv_path,
+      '批量热导率计算结果'
+    )
+
     return files
   }
 
@@ -225,8 +240,8 @@ const ChatPage: React.FC = () => {
       console.log('📥 [WebSocket接收] 完整消息:', message)
 
       if (message.type === 'message' && message.data) {
-        // 收到 agent 的回复消息，说明处理已完成，应该停止 loading
-        // 注意：不要在这里设置 setIsLoading(true)，这会导致一直显示"正在处理"
+        // 🆕 收到 agent 的回复消息，立即显示内容
+        // 保持 loading 状态，等待 complete 状态才关闭（表示还在处理中）
 
         // 如果消息有内容，添加到消息列表
       if (message.data.content && message.data.content.trim()) {
@@ -241,6 +256,11 @@ const ChatPage: React.FC = () => {
             metadata: message.data.metadata,
           }
         addMessage(newMessage)
+
+        // 🆕 更新 loading 消息，提示用户正在查看实时输出
+        if (isLoading) {
+          setLoadingMessage('正在继续处理...')
+        }
 
         if (pendingFileMetadataRef.current.length > 0) {
           let mergedMetadata = { ...(newMessage.metadata || {}) }
@@ -262,8 +282,8 @@ const ChatPage: React.FC = () => {
           bufferedFiles.forEach((file) => addToCurrentSessionFiles(file))
         }
 
-          // 收到内容后，保持loading状态，等待complete状态
-          // 不在这里关闭loading，因为可能还有后续消息
+          // 🆕 收到内容后，保持loading状态，等待complete状态
+          // 这样用户可以看到实时输出，同时知道处理还未完成
 
           // 如果消息包含结构数据，更新当前结构
           if (message.data.metadata?.structureData) {
@@ -603,6 +623,8 @@ const ChatPage: React.FC = () => {
           const fileTypes = []
           if (message.data.metadata.csv_download_url) fileTypes.push('CSV')
           if (message.data.metadata.md_download_url) fileTypes.push('Markdown')
+          if (message.data.metadata.kappa_results_csv_url) fileTypes.push('热导率结果')
+          if (message.data.metadata.kappa_batch_csv_url) fileTypes.push('批量热导率结果')
           if (fileTypes.length > 0) {
             console.log('📄 显示toast提示:', fileTypes)
             toast.success(`已生成${fileTypes.join('和')}文件，可在消息中查看和下载`, {
@@ -684,6 +706,8 @@ const ChatPage: React.FC = () => {
         <PhononVisualization
           images={phononImages}
           onClose={() => setShowPhononVisualization(false)}
+          dispersionCsvPath={phononImages[0]?.dispersionCsvPath}
+          dosCsvPath={phononImages[0]?.dosCsvPath}
         />
       )}
     </div>

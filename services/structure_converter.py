@@ -427,11 +427,27 @@ class StructureConverter:
             List of structure dicts
         """
         structures = []
+        skip_standardization = False  # Flag to skip standardization for already-standardized structures
 
         try:
             logger.info(f"🔍 Extracting structures from tool result")
             logger.info(f"🔍 Result type: {type(result)}")
             logger.info(f"🔍 Result keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
+
+            # 🔧 修复问题 1: 跳过热导率计算结果中的结构提取
+            # 热导率计算结果不应该包含结构数据，即使包含也不应该提取
+            if isinstance(result, dict):
+                # 检测热导率计算结果的特征
+                is_kappa_result = (
+                    result.get("batch_mode") is True or  # 批量热导率计算
+                    "thermal_conductivity" in result or  # 单个热导率计算
+                    "kappa_total" in result or  # 热导率值
+                    result.get("calculation_mode") in ["real", "real_batch", "mock_batch"]  # 计算模式
+                )
+
+                if is_kappa_result:
+                    logger.info(f"🔧 Detected thermal conductivity calculation result, skipping structure extraction")
+                    return []
 
             # Method 1: frontend_structures field (preferred)
             if "frontend_structures" in result and isinstance(result["frontend_structures"], list):
@@ -495,7 +511,9 @@ class StructureConverter:
                     else:
                         structures.append(struct)
                 logger.info(f"✅ Found {len(result['frontend_structures'])} structures in frontend_structures")
-            
+                # frontend_structures are already standardized, skip standardization step
+                skip_standardization = True
+
             # Method 2: structures field
             elif "structures" in result and isinstance(result["structures"], list):
                 # Check database type for format-specific processing
@@ -611,8 +629,8 @@ class StructureConverter:
                 logger.warning(f"⚠️ No structures found in tool result")
                 logger.warning(f"⚠️ Available keys: {list(result.keys())}")
 
-            # Standardize all structures
-            if structures:
+            # Standardize all structures (skip if already standardized)
+            if structures and not skip_standardization:
                 source_type = StructureConverter._determine_source_type(result)
                 logger.info(f"🔍 Determined source_type: {source_type} from result keys: {list(result.keys())}")
 
@@ -625,6 +643,8 @@ class StructureConverter:
 
                 structures = standardized_structures
                 logger.info(f"📊 Total structures extracted: {len(structures)}")
+            elif structures and skip_standardization:
+                logger.info(f"📊 Total structures extracted: {len(structures)} (already standardized, skipped standardization step)")
 
         except Exception as e:
             logger.error(f"❌ Failed to extract structures from tool result: {e}", exc_info=True)

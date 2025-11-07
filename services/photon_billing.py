@@ -184,13 +184,23 @@ class PhotonBillingService:
                 # 更新已扣费的光子数
                 context.charged_photons = photons_to_charge
                 context.mark_charged(charge_result)
-                logger.info(
-                    f"✅ [自动扣费] 对话 {conversation_id[:8]}... 累计 {total_tokens} tokens，"
-                    f"成功扣除 {photons_need_charge} 光子 (已扣费: {photons_to_charge} 光子)"
-                )
+
+                # 🔒 生产模式：简化日志输出
+                if self.config.VERBOSE_LOGGING:
+                    logger.info(
+                        f"✅ [自动扣费] 对话 {conversation_id[:8]}... 累计 {total_tokens} tokens，"
+                        f"成功扣除 {photons_need_charge} 光子 (已扣费: {photons_to_charge} 光子)"
+                    )
+                else:
+                    logger.info(f"✅ [自动扣费] 成功扣除 {photons_need_charge} 光子")
             else:
                 error_msg = charge_result.get('message', '未知错误')
-                logger.warning(f"⚠️ [自动扣费] 对话 {conversation_id[:8]}... 扣费失败: {error_msg}")
+
+                # 🔒 生产模式：简化错误日志
+                if self.config.VERBOSE_LOGGING:
+                    logger.warning(f"⚠️ [自动扣费] 对话 {conversation_id[:8]}... 扣费失败: {error_msg}")
+                else:
+                    logger.warning(f"⚠️ [自动扣费] 扣费失败: {error_msg}")
 
                 # 如果是余额不足，给出友好提示
                 if '余额不足' in error_msg or 'insufficient' in error_msg.lower():
@@ -332,7 +342,11 @@ class PhotonBillingService:
                 'photons': photons
             }
 
-        logger.info(f"💳 [计费] 使用 AccessKey 来源: {source} (AK: {access_key[:8]}...{access_key[-4:]}, Client: {client_name})")
+        # 🔒 生产模式：仅记录关键信息，不输出敏感数据
+        if self.config.VERBOSE_LOGGING:
+            logger.info(f"💳 [计费] 使用 AccessKey 来源: {source} (AK: {access_key[:8]}...{access_key[-4:]}, Client: {client_name})")
+        else:
+            logger.info(f"💳 [计费] 使用 AccessKey 来源: {source}")
 
         # 生成唯一的 bizNo（使用时间戳 + 随机数，确保不超过 int 范围）
         # 使用毫秒时间戳的后 10 位 + 4 位随机数
@@ -367,26 +381,28 @@ class PhotonBillingService:
 
         try:
             logger.info(f"💎 [计费] 正在扣除 {photons} 光子 (bizNo: {biz_no})")
-            logger.info(f"📤 [计费] 请求 URL: {url}")
-            logger.info(f"📤 [计费] 请求头: {headers}")
-            logger.info(f"📤 [计费] 请求体: {payload}")
 
-            # 添加重试机制和 SSL 配置
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            # 🔒 生产模式：仅在详细日志模式下输出请求详情
+            if self.config.VERBOSE_LOGGING:
+                logger.debug(f"📤 [计费] 请求 URL: {url}")
+                logger.debug(f"📤 [计费] 请求头: {headers}")
+                logger.debug(f"📤 [计费] 请求体: {payload}")
 
-            # 尝试使用 verify=False（仅用于测试，生产环境应使用正确的证书）
+            # 🔒 生产模式：启用 SSL 验证
             resp = requests.post(
                 url,
                 headers=headers,
                 json=payload,
-                timeout=30,  # 增加超时时间
-                verify=False  # 禁用 SSL 验证（仅用于测试）
+                timeout=30,
+                verify=True  # 启用 SSL 验证（生产模式）
             )
 
             if resp.status_code == 200:
                 result = resp.json()
-                logger.info(f"📥 [计费] Bohrium API 响应: {result}")
+
+                # 🔒 生产模式：仅在详细日志模式下输出完整响应
+                if self.config.VERBOSE_LOGGING:
+                    logger.debug(f"📥 [计费] Bohrium API 响应: {result}")
 
                 # Bohrium API 响应格式：
                 # 成功: {'success': true, ...} 或 {'code': 0, ...}
@@ -415,7 +431,11 @@ class PhotonBillingService:
                         error_msg = result['msg']
 
                     logger.error(f"❌ [计费] 扣费失败: {error_msg} (code: {result.get('code')})")
-                    logger.error(f"❌ [计费] 完整响应: {result}")
+
+                    # 🔒 生产模式：仅在详细日志模式下输出完整响应
+                    if self.config.VERBOSE_LOGGING:
+                        logger.debug(f"❌ [计费] 完整响应: {result}")
+
                     return {
                         'success': False,
                         'message': error_msg,
@@ -424,15 +444,28 @@ class PhotonBillingService:
                     }
             else:
                 logger.error(f"❌ [计费] API 请求失败: HTTP {resp.status_code}")
-                logger.error(f"❌ [计费] 响应内容: {resp.text}")
+
+                # 🔒 生产模式：仅在详细日志模式下输出响应内容
+                if self.config.VERBOSE_LOGGING:
+                    logger.debug(f"❌ [计费] 响应内容: {resp.text}")
+
                 return {
                     'success': False,
                     'message': f'API 请求失败: {resp.status_code}',
                     'photons': photons
                 }
 
+        except requests.exceptions.SSLError as e:
+            # 🔒 SSL 错误特殊处理
+            logger.error(f"❌ [计费] SSL 验证失败: {str(e)}")
+            logger.error(f"💡 [提示] 请检查网络连接或联系管理员")
+            return {
+                'success': False,
+                'message': f'SSL 验证失败: {str(e)}',
+                'photons': photons
+            }
         except Exception as e:
-            logger.error(f"❌ [计费] 扣费异常: {e}", exc_info=True)
+            logger.error(f"❌ [计费] 扣费异常: {e}", exc_info=self.config.VERBOSE_LOGGING)
             return {
                 'success': False,
                 'message': f'扣费异常: {str(e)}',

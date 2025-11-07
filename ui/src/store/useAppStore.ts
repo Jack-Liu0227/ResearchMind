@@ -14,6 +14,9 @@ export interface PhononImage {
   description?: string
   base64?: string
   timestamp?: string | number
+  // 🆕 原始数据 CSV 文件路径
+  dispersionCsvPath?: string  // 声子色散数据 CSV 路径
+  dosCsvPath?: string         // 声子 DOS 数据 CSV 路径
 }
 
 export interface BillingData {

@@ -164,6 +164,7 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
   if (metadata) {
     console.log('📄 extractFileLinks - metadata:', metadata)
 
+    // 文献搜索的 CSV 文件
     if (metadata.csv_download_url) {
       const resolvedCsvUrl = resolveFileUrl(metadata.csv_download_url)
       console.log('📄 Found CSV URL:', metadata.csv_download_url, '->', resolvedCsvUrl)
@@ -174,6 +175,32 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
         content: typeof metadata.csv_inline_content === 'string' ? metadata.csv_inline_content : undefined
       })
     }
+
+    // 🆕 热导率计算结果 CSV 文件（单个计算）
+    if (metadata.kappa_results_csv_url) {
+      const resolvedCsvUrl = resolveFileUrl(metadata.kappa_results_csv_url)
+      console.log('📄 Found Kappa Results CSV URL:', metadata.kappa_results_csv_url, '->', resolvedCsvUrl)
+      links.push({
+        type: 'csv',
+        url: resolvedCsvUrl,
+        filename: metadata.kappa_results_csv_path ? metadata.kappa_results_csv_path.split('/').pop() : '热导率计算结果.csv',
+        content: typeof metadata.kappa_results_csv_content === 'string' ? metadata.kappa_results_csv_content : undefined
+      })
+    }
+
+    // 🆕 批量热导率计算结果 CSV 文件
+    if (metadata.kappa_batch_csv_url) {
+      const resolvedCsvUrl = resolveFileUrl(metadata.kappa_batch_csv_url)
+      console.log('📄 Found Batch Kappa Results CSV URL:', metadata.kappa_batch_csv_url, '->', resolvedCsvUrl)
+      links.push({
+        type: 'csv',
+        url: resolvedCsvUrl,
+        filename: metadata.kappa_batch_csv_path ? metadata.kappa_batch_csv_path.split('/').pop() : '批量热导率计算结果.csv',
+        content: typeof metadata.kappa_batch_csv_content === 'string' ? metadata.kappa_batch_csv_content : undefined
+      })
+    }
+
+    // 文献搜索的 Markdown 文件
     if (metadata.md_download_url) {
       const resolvedMdUrl = resolveFileUrl(metadata.md_download_url)
       console.log('📄 Found MD URL:', metadata.md_download_url, '->', resolvedMdUrl)
@@ -707,7 +734,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
                                   if (!filename) return ''
                                   const t = String((image as any).type || '').toLowerCase()
                                   const kind = t.includes('phonon')
-                                    ? 'phonon_results'
+                                    ? 'phonon'
                                     : t.includes('generated') || t.includes('structure')
                                     ? 'generated_structures'
                                     : 'images'
