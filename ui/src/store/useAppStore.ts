@@ -661,64 +661,67 @@ export const useAppStore = create<AppState>()(
             }
 
             state.sessions = fixRestoredSessions(state.sessions)
-          }
-        } catch (error) {
-          console.error('❌ 恢复存储数据时出错:', error)
-          // 清空数据以防止错误传播
-          state.sessions = []
-          state.currentSession = null
-          state.messages = []
-        }
 
-          if (state.currentSession) {
-            // 有当前会话，尝试恢复
-            const restored = state.sessions.find((s) => s.id === state.currentSession?.id)
-            if (restored) {
-              console.log('✅ 恢复当前会话:', restored.id)
-              console.log('📊 结构数:', restored.structures?.length || 0)
-              console.log('📊 文件数:', restored.files?.length || 0)
-              console.log('📊 图片数:', restored.phononImages?.length || 0)
+            if (state.currentSession) {
+              // 有当前会话，尝试恢复
+              const restored = state.sessions.find((s) => s.id === state.currentSession?.id)
+              if (restored) {
+                console.log('✅ 恢复当前会话:', restored.id)
+                console.log('📊 结构数:', restored.structures?.length || 0)
+                console.log('📊 文件数:', restored.files?.length || 0)
+                console.log('📊 图片数:', restored.phononImages?.length || 0)
 
-              state.currentSession = restored
-              state.messages = restored.messages || []
-              state.currentStructure = restored.structures?.slice(-1)[0] ?? null
-              state.currentSessionStructures = restored.structures || []
-              state.currentSessionFiles = restored.files || []
-              state.currentSessionPhononImages = restored.phononImages || []
+                state.currentSession = restored
+                state.messages = restored.messages || []
+                state.currentStructure = restored.structures?.slice(-1)[0] ?? null
+                state.currentSessionStructures = restored.structures || []
+                state.currentSessionFiles = restored.files || []
+                state.currentSessionPhononImages = restored.phononImages || []
+              } else {
+                console.warn('⚠️ 当前会话不存在，清空当前会话数据')
+                state.currentSession = null
+                state.messages = []
+                state.currentStructure = null
+                state.currentSessionStructures = []
+                state.currentSessionFiles = []
+                state.currentSessionPhononImages = []
+              }
+            } else if (state.sessions.length > 0) {
+              // 没有当前会话，但有会话列表，恢复最后一个会话
+              const lastSession = state.sessions[state.sessions.length - 1]
+              console.log('🔄 没有当前会话，恢复最后一个会话:', lastSession.id)
+              console.log('📊 结构数:', lastSession.structures?.length || 0)
+              console.log('📊 文件数:', lastSession.files?.length || 0)
+              console.log('📊 图片数:', lastSession.phononImages?.length || 0)
+
+              state.currentSession = lastSession
+              state.messages = lastSession.messages || []
+              state.currentStructure = lastSession.structures?.slice(-1)[0] ?? null
+              state.currentSessionStructures = lastSession.structures || []
+              state.currentSessionFiles = lastSession.files || []
+              state.currentSessionPhononImages = lastSession.phononImages || []
             } else {
-              console.warn('⚠️ 当前会话不存在，清空当前会话数据')
-              state.currentSession = null
+              // 没有任何会话
+              console.log('ℹ️ 没有任何会话')
               state.messages = []
               state.currentStructure = null
               state.currentSessionStructures = []
               state.currentSessionFiles = []
               state.currentSessionPhononImages = []
             }
-          } else if (state.sessions.length > 0) {
-            // 没有当前会话，但有会话列表，恢复最后一个会话
-            const lastSession = state.sessions[state.sessions.length - 1]
-            console.log('🔄 没有当前会话，恢复最后一个会话:', lastSession.id)
-            console.log('📊 结构数:', lastSession.structures?.length || 0)
-            console.log('📊 文件数:', lastSession.files?.length || 0)
-            console.log('📊 图片数:', lastSession.phononImages?.length || 0)
-
-            state.currentSession = lastSession
-            state.messages = lastSession.messages || []
-            state.currentStructure = lastSession.structures?.slice(-1)[0] ?? null
-            state.currentSessionStructures = lastSession.structures || []
-            state.currentSessionFiles = lastSession.files || []
-            state.currentSessionPhononImages = lastSession.phononImages || []
           } else {
-            // 没有任何会话
-            console.log('ℹ️ 没有任何会话')
+            console.log('ℹ️ 没有存储的会话数据')
+            state.sessions = []
+            state.currentSession = null
             state.messages = []
             state.currentStructure = null
             state.currentSessionStructures = []
             state.currentSessionFiles = []
             state.currentSessionPhononImages = []
           }
-        } else {
-          console.log('ℹ️ 没有存储的会话数据')
+        } catch (error) {
+          console.error('❌ 恢复存储数据时出错:', error)
+          // 清空数据以防止错误传播
           state.sessions = []
           state.currentSession = null
           state.messages = []
