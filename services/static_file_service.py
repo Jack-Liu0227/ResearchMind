@@ -74,59 +74,67 @@ class StaticFileService:
         # 注意：挂载点是 /api/download，目录是 mcp_servers/paper_search
         # 这样 /api/download/papers/topic/file.csv 会映射到 mcp_servers/paper_search/papers/topic/file.csv
         paper_search_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "paper_search")
-        if os.path.exists(paper_search_dir):
-            app.mount(
-                "/api/download",
-                StaticFiles(directory=paper_search_dir),
-                name="papers_download"
-            )
-            # Legacy path support without /api prefix
-            app.mount(
-                "/download",
-                StaticFiles(directory=paper_search_dir),
-                name="papers_download_legacy"
-            )
-            logger.info(f"✅ Static files: /api/download -> {paper_search_dir}")
-            logger.info(f"✅ Static files: /download -> {paper_search_dir}")
-        else:
-            logger.warning(f"⚠️ Paper search directory not found: {paper_search_dir}")
+        # 🔧 确保目录存在，如果不存在则创建
+        if not os.path.exists(paper_search_dir):
+            os.makedirs(paper_search_dir, exist_ok=True)
+            logger.info(f"📁 Created paper search directory: {paper_search_dir}")
+
+        app.mount(
+            "/api/download",
+            StaticFiles(directory=paper_search_dir),
+            name="papers_download"
+        )
+        # Legacy path support without /api prefix
+        app.mount(
+            "/download",
+            StaticFiles(directory=paper_search_dir),
+            name="papers_download_legacy"
+        )
+        logger.info(f"✅ Static files: /api/download -> {paper_search_dir}")
+        logger.info(f"✅ Static files: /download -> {paper_search_dir}")
 
         # Phonon results directory - mount second (specific)
         # 声子谱图片和 CSV 文件
         phonon_dir = server_config.PHONON_RESULTS_DIR
-        if os.path.exists(phonon_dir):
-            app.mount(
-                "/api/images/phonon",
-                StaticFiles(directory=phonon_dir),
-                name="phonon_images"
-            )
-            logger.info(f"✅ Static files: /api/images/phonon -> {phonon_dir}")
-        else:
-            logger.warning(f"⚠️ Phonon results directory not found: {phonon_dir}")
+        # 🔧 确保目录存在，如果不存在则创建
+        if not os.path.exists(phonon_dir):
+            os.makedirs(phonon_dir, exist_ok=True)
+            logger.info(f"📁 Created phonon results directory: {phonon_dir}")
+
+        app.mount(
+            "/api/images/phonon",
+            StaticFiles(directory=phonon_dir),
+            name="phonon_images"
+        )
+        logger.info(f"✅ Static files: /api/images/phonon -> {phonon_dir}")
 
         # 🆕 Thermal conductivity results directory - mount for CSV files
         thermal_conductivity_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "simulation", "thermal_conductivity_results")
-        if os.path.exists(thermal_conductivity_dir):
-            app.mount(
-                "/api/files/thermal_conductivity",
-                StaticFiles(directory=thermal_conductivity_dir),
-                name="thermal_conductivity_files"
-            )
-            logger.info(f"✅ Static files: /api/files/thermal_conductivity -> {thermal_conductivity_dir}")
-        else:
-            logger.warning(f"⚠️ Thermal conductivity results directory not found: {thermal_conductivity_dir}")
+        # 🔧 确保目录存在，如果不存在则创建
+        if not os.path.exists(thermal_conductivity_dir):
+            os.makedirs(thermal_conductivity_dir, exist_ok=True)
+            logger.info(f"📁 Created thermal conductivity results directory: {thermal_conductivity_dir}")
+
+        app.mount(
+            "/api/files/thermal_conductivity",
+            StaticFiles(directory=thermal_conductivity_dir),
+            name="thermal_conductivity_files"
+        )
+        logger.info(f"✅ Static files: /api/files/thermal_conductivity -> {thermal_conductivity_dir}")
 
         # Generated structures directory - mount third (specific)
         structures_dir = server_config.GENERATED_STRUCTURES_DIR
-        if os.path.exists(structures_dir):
-            app.mount(
-                "/api/images/generated_structures",
-                StaticFiles(directory=structures_dir),
-                name="structure_images"
-            )
-            logger.info(f"✅ Static files: /api/images/generated_structures -> {structures_dir}")
-        else:
-            logger.warning(f"⚠️ Generated structures directory not found: {structures_dir}")
+        # 🔧 确保目录存在，如果不存在则创建
+        if not os.path.exists(structures_dir):
+            os.makedirs(structures_dir, exist_ok=True)
+            logger.info(f"📁 Created generated structures directory: {structures_dir}")
+
+        app.mount(
+            "/api/images/generated_structures",
+            StaticFiles(directory=structures_dir),
+            name="structure_images"
+        )
+        logger.info(f"✅ Static files: /api/images/generated_structures -> {structures_dir}")
 
         # Note: /api/structures/relaxed mount removed (directory never existed)
         # All relaxed structures now use session-isolated paths: /api/structures/{session_id}/relax/
@@ -134,15 +142,17 @@ class StaticFileService:
         # Simulation CIF structures directory (会话隔离的弛豫结构文件) - mount before general structures
         # This serves files from mcp_servers/simulation/cif/{session_id}/structures/
         simulation_cif_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "simulation", "cif")
-        if os.path.exists(simulation_cif_dir):
-            app.mount(
-                "/api/structures",
-                StaticFiles(directory=simulation_cif_dir),
-                name="simulation_structures"
-            )
-            logger.info(f"✅ Static files: /api/structures -> {simulation_cif_dir}")
-        else:
-            logger.warning(f"⚠️ Simulation CIF directory not found: {simulation_cif_dir}")
+        # 🔧 确保目录存在，如果不存在则创建
+        if not os.path.exists(simulation_cif_dir):
+            os.makedirs(simulation_cif_dir, exist_ok=True)
+            logger.info(f"📁 Created simulation CIF directory: {simulation_cif_dir}")
+
+        app.mount(
+            "/api/structures",
+            StaticFiles(directory=simulation_cif_dir),
+            name="simulation_structures"
+        )
+        logger.info(f"✅ Static files: /api/structures -> {simulation_cif_dir}")
 
         # 🔧 优化：删除冗余的会话结构和图片挂载
         # 原因：
