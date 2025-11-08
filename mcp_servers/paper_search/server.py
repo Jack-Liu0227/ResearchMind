@@ -93,7 +93,7 @@ def get_download_url(file_path: str) -> str:
     # 规范化文件路径：移除 ./ 前缀，转换反斜杠为正斜杠
     file_path = file_path.replace('\\', '/').lstrip('./')
 
-    # 🆕 处理绝对路径（Windows: D:/..., Linux: /home/...）
+    # 🆕 处理绝对路径（Windows: D:/..., Linux: /home/..., /root/...）
     # 提取相对于 paper_search 目录的路径
     if re.match(r'^[A-Za-z]:', file_path):  # Windows 绝对路径
         logger.info(f"[get_download_url] Detected Windows absolute path")
@@ -110,14 +110,20 @@ def get_download_url(file_path: str) -> str:
             file_path = os.path.basename(file_path)
     elif file_path.startswith('/'):  # Unix 绝对路径
         logger.info(f"[get_download_url] Detected Unix absolute path")
+        # 🔧 优先查找 mcp_servers/paper_search/ 标记
         if 'mcp_servers/paper_search/' in file_path:
             file_path = file_path.split('mcp_servers/paper_search/', 1)[1]
             logger.info(f"[get_download_url] Extracted after 'mcp_servers/paper_search/': {file_path}")
         elif 'paper_search/' in file_path:
             file_path = file_path.split('paper_search/', 1)[1]
             logger.info(f"[get_download_url] Extracted after 'paper_search/': {file_path}")
+        # 🔧 处理 /root/... 或其他绝对路径，但包含 papers/ 目录
+        elif '/papers/' in file_path:
+            # 提取 papers/ 之后的部分（这是相对于 paper_search 目录的路径）
+            file_path = 'papers/' + file_path.split('/papers/', 1)[1]
+            logger.info(f"[get_download_url] Extracted after '/papers/': {file_path}")
         else:
-            logger.warning(f"[get_download_url] Absolute path without paper_search directory: {file_path}")
+            logger.warning(f"[get_download_url] Absolute path without recognizable markers: {file_path}")
             file_path = os.path.basename(file_path)
 
     # 移除前缀 "mcp_servers/paper_search/" 如果存在
