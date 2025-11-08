@@ -234,7 +234,7 @@ class WebSocketService {
           console.log('   AccessKey:', result.config?.access_key_masked)
           console.log('   ClientName:', result.config?.client_name)
         } else {
-          console.log('ℹ️ Cookie 中未找到用户 Bohrium 配置，将使用开发者默认配置')
+          console.log('ℹ️ Cookie 中未找到用户 Bohrium 配置')
         }
       } else {
         console.warn('⚠️ 保存用户 Bohrium 配置失败:', response.statusText)

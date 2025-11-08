@@ -174,6 +174,7 @@ class PhotonBillingService:
             charge_result = self.charge_photons(
                 photons=photons_need_charge,
                 session_id=conversation_id,
+                user_id=user_id,  # 🆕 传递 user_id 用于查找用户配置
                 user_access_key=user_access_key,
                 user_sku_id=user_sku_id,
                 user_client_name=user_client_name
@@ -272,6 +273,7 @@ class PhotonBillingService:
         self,
         photons: float,
         session_id: str = "default",
+        user_id: str = None,
         user_access_key: str = None,
         user_sku_id: str = None,
         user_client_name: str = None
@@ -281,11 +283,13 @@ class PhotonBillingService:
 
         参考 Flask 示例的逻辑：
         1. 优先使用用户提供的 AK 和 Client Name（从 Cookie 获取）
-        2. 回退到开发者的 AK（用于测试和未认证用户）
+        2. 回退到用户配置文件（使用 user_id 查找）
+        3. 最后回退到开发者的 AK（用于测试和未认证用户）
 
         Args:
             photons: 要扣除的光子数
             session_id: 会话 ID（用于生成唯一的 bizNo）
+            user_id: 用户 ID（用于查找用户配置文件）
             user_access_key: 用户的 AccessKey（可选，优先级最高，从 Cookie 的 appAccessKey 获取）
             user_sku_id: 用户的 SKU ID（可选）
             user_client_name: 用户的 Client Name（可选，从 Cookie 的 clientName 获取）
@@ -300,7 +304,7 @@ class PhotonBillingService:
                 'photons': photons
             }
 
-        # 优先级：参数（Cookie） > 用户配置文件 > 开发者默认配置
+        # 优先级：参数（Cookie） > 用户配置文件
         access_key = None
         sku_id = None
         client_name = None
@@ -313,12 +317,12 @@ class PhotonBillingService:
             client_name = user_client_name or self.config.BOHRIUM_CLIENT_NAME
             source = "来自用户 Cookie"
 
-        # 2. 尝试从用户配置文件读取
-        if not access_key:
+        # 2. 尝试从用户配置文件读取（使用 user_id）
+        if not access_key and user_id:
             try:
                 from .user_billing_config import get_config_manager
                 config_manager = get_config_manager()
-                user_config = config_manager.get_user_config(session_id)
+                user_config = config_manager.get_user_config(user_id)
                 if user_config.get('access_key'):
                     access_key = user_config.get('access_key')
                     sku_id = user_config.get('sku_id')
@@ -327,18 +331,13 @@ class PhotonBillingService:
             except Exception as e:
                 logger.debug(f"📝 [计费] 未找到用户配置: {e}")
 
-        # 3. 回退到开发者默认配置（用于测试）
+        # 3. 如果没有找到用户凭证，返回错误
         if not access_key:
-            access_key = self.config.BOHRIUM_ACCESS_KEY
-            sku_id = self.config.BOHRIUM_SKU_ID
-            client_name = self.config.BOHRIUM_CLIENT_NAME
-            source = "开发者本地调试 AK"
-
-        if not access_key:
-            logger.error("❌ [计费] 未配置 BOHRIUM_ACCESS_KEY，无法扣费")
+            logger.error("❌ [计费] 未配置用户 AccessKey，请前往设置页面配置您的 Bohrium 凭证")
             return {
                 'success': False,
-                'message': '未配置 AccessKey',
+                'message': '未配置 Bohrium AccessKey，请前往设置页面配置您的凭证',
+                'error_code': 'NO_ACCESS_KEY',
                 'photons': photons
             }
 

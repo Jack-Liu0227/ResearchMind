@@ -32,6 +32,7 @@ export const ToolExecutionCard: React.FC<ToolExecutionCardProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(false)
   const [showInput, setShowInput] = useState(false)
+  const [showOutput, setShowOutput] = useState(false)  // 🆕 添加输出折叠状态
 
   // 状态图标和颜色
   const getStatusIcon = () => {
@@ -179,44 +180,52 @@ export const ToolExecutionCard: React.FC<ToolExecutionCardProps> = ({
             </div>
           )}
 
-          {/* 🆕 文本输出内容 */}
+          {/* 🆕 文本输出内容（可折叠） */}
           {textOutput && (
             <div className="space-y-2">
-              <div className="text-sm font-medium text-gray-700">📝 输出信息：</div>
-              <div className="p-3 bg-white rounded border border-gray-200 text-sm space-y-2">
-                {/* 优先显示 message 字段 */}
-                {textOutput.message && (
-                  <div className="text-gray-800">
-                    <strong>消息：</strong> {textOutput.message}
-                  </div>
-                )}
-
-                {/* 显示其他字段 */}
-                {Object.entries(textOutput).map(([key, value]) => {
-                  if (key === 'message') return null  // message 已经单独显示
-
-                  // 格式化字段名
-                  const fieldName = key
-                    .replace(/_/g, ' ')
-                    .replace(/\b\w/g, (l) => l.toUpperCase())
-
-                  // 格式化值
-                  let displayValue: string
-                  if (typeof value === 'boolean') {
-                    displayValue = value ? '✅ 是' : '❌ 否'
-                  } else if (typeof value === 'object') {
-                    displayValue = JSON.stringify(value, null, 2)
-                  } else {
-                    displayValue = String(value)
-                  }
-
-                  return (
-                    <div key={key} className="text-gray-700 text-xs">
-                      <strong>{fieldName}:</strong> {displayValue}
+              <button
+                onClick={() => setShowOutput(!showOutput)}
+                className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900"
+              >
+                {showOutput ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                📝 输出信息
+              </button>
+              {showOutput && (
+                <div className="p-3 bg-white rounded border border-gray-200 text-sm space-y-2">
+                  {/* 优先显示 message 字段 */}
+                  {textOutput.message && (
+                    <div className="text-gray-800">
+                      <strong>消息：</strong> {textOutput.message}
                     </div>
-                  )
-                })}
-              </div>
+                  )}
+
+                  {/* 显示其他字段 */}
+                  {Object.entries(textOutput).map(([key, value]) => {
+                    if (key === 'message') return null  // message 已经单独显示
+
+                    // 格式化字段名
+                    const fieldName = key
+                      .replace(/_/g, ' ')
+                      .replace(/\b\w/g, (l) => l.toUpperCase())
+
+                    // 格式化值
+                    let displayValue: string
+                    if (typeof value === 'boolean') {
+                      displayValue = value ? '✅ 是' : '❌ 否'
+                    } else if (typeof value === 'object') {
+                      displayValue = JSON.stringify(value, null, 2)
+                    } else {
+                      displayValue = String(value)
+                    }
+
+                    return (
+                      <div key={key} className="text-gray-700 text-xs">
+                        <strong>{fieldName}:</strong> {displayValue}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
