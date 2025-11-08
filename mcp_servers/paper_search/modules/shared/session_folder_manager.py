@@ -221,10 +221,91 @@ def get_session_folder(session_id: str, topic: Optional[str] = None) -> str:
 def cleanup_session(session_id: str):
     """
     清理会话（便捷函数）
-    
+
     Args:
         session_id: 会话ID
     """
     manager = get_session_folder_manager()
     manager.cleanup_session(session_id)
+
+
+# ============================================================================
+# 内容存储辅助函数 - 用于减少上下文开销
+# ============================================================================
+
+def save_content_to_file(
+    content: str,
+    session_id: str,
+    filename: str,
+    subfolder: str = "content"
+) -> str:
+    """
+    将大型内容保存到文件，返回文件路径
+
+    Args:
+        content: 要保存的内容
+        session_id: 会话ID
+        filename: 文件名
+        subfolder: 子文件夹名称（默认: content）
+
+    Returns:
+        文件的绝对路径
+    """
+    try:
+        # 获取会话文件夹
+        session_folder = get_session_folder(session_id)
+
+        # 创建子文件夹
+        content_dir = os.path.join(session_folder, subfolder)
+        os.makedirs(content_dir, exist_ok=True)
+
+        # 保存文件
+        file_path = os.path.join(content_dir, filename)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        logger.info(f"Saved content to file: {file_path}")
+        return file_path
+
+    except Exception as e:
+        logger.error(f"Failed to save content to file: {e}")
+        raise
+
+
+def load_content_from_file(file_path: str) -> str:
+    """
+    从文件加载内容
+
+    Args:
+        file_path: 文件路径
+
+    Returns:
+        文件内容
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        logger.info(f"Loaded content from file: {file_path}")
+        return content
+
+    except Exception as e:
+        logger.error(f"Failed to load content from file: {e}")
+        raise
+
+
+def get_content_summary(content: str, max_length: int = 500) -> str:
+    """
+    获取内容摘要（用于返回给上下文）
+
+    Args:
+        content: 完整内容
+        max_length: 最大长度
+
+    Returns:
+        内容摘要
+    """
+    if len(content) <= max_length:
+        return content
+
+    return content[:max_length] + f"... (truncated, total {len(content)} chars)"
 

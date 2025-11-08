@@ -824,7 +824,10 @@ async def download_paper(paper: Dict[str, Any], download_dir: Optional[str] = No
 @mcp.tool()
 async def get_paper_content(
     paper: Dict[str, Any],
-    prefer_fulltext: bool = True
+    prefer_fulltext: bool = True,
+    session_id: str = None,
+    save_to_file: bool = True,
+    max_summary_length: int = 500
 ) -> Dict[str, Any]:
     """
     获取论文内容（统一接口）
@@ -833,23 +836,54 @@ async def get_paper_content(
     支持ArXiv PDF、通用URL PDF、通用URL HTML。
     失败时自动回退到摘要。
 
+    ⚠️ 优化：默认将内容保存到文件，仅返回文件路径和摘要，减少上下文开销
+
     Args:
         paper: 论文信息字典（包含paper_id, source, url, abstract等）
         prefer_fulltext: 是否优先获取全文（否则只返回摘要）
+        session_id: 会话ID（用于保存内容到文件，推荐提供）
+        save_to_file: 是否保存内容到文件（默认: True，减少上下文开销）
+        max_summary_length: 摘要最大长度（默认: 500）
 
     Returns:
         Dict containing:
         - status: 'success' or 'error'
-        - content: 文本内容
+        - content: 文本内容（如果save_to_file=False）
+        - content_file_path: 内容文件路径（如果save_to_file=True且内容>1KB）
+        - content_summary: 内容摘要（如果save_to_file=True）
         - metadata: 元数据（source_type, fallback等）
     """
-    return get_paper_content_unified(paper=paper, prefer_fulltext=prefer_fulltext)
+    from modules.shared.session_folder_manager import save_content_to_file, get_content_summary
+
+    result = get_paper_content_unified(paper=paper, prefer_fulltext=prefer_fulltext)
+
+    # 如果需要保存到文件且内容较大
+    if save_to_file and session_id and 'content' in result:
+        content = result.get('content', '')
+        if len(content) > 1000:  # 只保存大于1KB的内容
+            paper_id = paper.get('paper_id', 'unknown')
+            source_type = result.get('metadata', {}).get('source_type', 'unknown')
+            filename = f"{paper_id}_{source_type}.txt"
+
+            try:
+                file_path = save_content_to_file(content, session_id, filename, subfolder="paper_content")
+                result['content_file_path'] = file_path
+                result['content_summary'] = get_content_summary(content, max_length=max_summary_length)
+                # 移除完整内容以减少上下文
+                del result['content']
+                logger.info(f"Saved paper content to file: {file_path} ({len(content)} chars)")
+            except Exception as e:
+                logger.error(f"Failed to save content to file: {e}, returning full content")
+
+    return result
 
 
 @mcp.tool()
 async def fetch_papers_content(
     papers: List[Dict[str, Any]],
-    prefer_fulltext: bool = True
+    prefer_fulltext: bool = True,
+    session_id: str = None,
+    save_to_file: bool = True
 ) -> Dict[str, Any]:
     """
     批量获取论文内容（异步并行执行）
@@ -857,18 +891,24 @@ async def fetch_papers_content(
     为每篇论文获取全文或摘要，使用异步并行执行以提高效率。
     失败时自动回退到摘要。
 
+    ⚠️ 优化：默认将内容保存到文件，仅返回文件路径和摘要，减少上下文开销
+
     Args:
         papers: 论文列表（每篇包含paper_id, source, url, abstract等）
         prefer_fulltext: 是否优先获取全文（否则只返回摘要）
+        session_id: 会话ID（用于保存内容到文件，推荐提供）
+        save_to_file: 是否保存内容到文件（默认: True，减少上下文开销）
 
     Returns:
         Dict containing:
         - status: 'success' or 'error'
-        - papers_with_content: 包含内容的论文列表
+        - papers_with_content: 包含内容引用的论文列表（如果save_to_file=True，则包含content_file_path而非full_text）
         - summary: 获取摘要（成功/失败数量）
+        - content_saved_to_files: 是否保存到文件
     """
     import asyncio
     from modules.paper_manager.content_fetcher import get_paper_content_by_source_async
+    from modules.shared.session_folder_manager import save_content_to_file, get_content_summary
 
     logger.info(f"Fetching content for {len(papers)} papers (async, max 8 concurrent)...")
 
@@ -881,7 +921,18 @@ async def fetch_papers_content(
             if not prefer_fulltext:
                 # 只使用摘要
                 enriched_paper = paper.copy()
-                enriched_paper['full_text'] = paper.get('abstract', '')
+                content = paper.get('abstract', '')
+
+                # 如果需要保存到文件
+                if save_to_file and session_id and len(content) > 1000:
+                    paper_id = paper.get('paper_id', f'paper_{i}')
+                    filename = f"{paper_id}_abstract.txt"
+                    file_path = save_content_to_file(content, session_id, filename, subfolder="paper_content")
+                    enriched_paper['content_file_path'] = file_path
+                    enriched_paper['content_summary'] = get_content_summary(content, max_length=300)
+                else:
+                    enriched_paper['full_text'] = content
+
                 enriched_paper['content_metadata'] = {'source_type': 'abstract', 'fallback': False}
                 return (enriched_paper, 'success', False)
 
@@ -899,7 +950,20 @@ async def fetch_papers_content(
                 }
 
             enriched_paper = paper.copy()
-            enriched_paper['full_text'] = content_result.get('content', '')
+            content = content_result.get('content', '')
+
+            # 优化：如果内容较大且需要保存到文件，则保存并返回路径
+            if save_to_file and session_id and len(content) > 1000:
+                paper_id = paper.get('paper_id', f'paper_{i}')
+                source_type = content_result.get('metadata', {}).get('source_type', 'unknown')
+                filename = f"{paper_id}_{source_type}.txt"
+                file_path = save_content_to_file(content, session_id, filename, subfolder="paper_content")
+                enriched_paper['content_file_path'] = file_path
+                enriched_paper['content_summary'] = get_content_summary(content, max_length=500)
+                logger.info(f"Saved content to file: {file_path} ({len(content)} chars)")
+            else:
+                enriched_paper['full_text'] = content
+
             enriched_paper['content_metadata'] = content_result.get('metadata', {})
 
             # 判断是否使用了回退
@@ -917,7 +981,17 @@ async def fetch_papers_content(
             logger.error(f"Failed to fetch content for paper {i}: {e}")
             # 失败时使用摘要
             enriched_paper = paper.copy()
-            enriched_paper['full_text'] = paper.get('abstract', '')
+            content = paper.get('abstract', '')
+
+            if save_to_file and session_id and len(content) > 1000:
+                paper_id = paper.get('paper_id', f'paper_{i}')
+                filename = f"{paper_id}_fallback.txt"
+                file_path = save_content_to_file(content, session_id, filename, subfolder="paper_content")
+                enriched_paper['content_file_path'] = file_path
+                enriched_paper['content_summary'] = get_content_summary(content, max_length=300)
+            else:
+                enriched_paper['full_text'] = content
+
             enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': str(e)}
             return (enriched_paper, 'error', True)
 
@@ -939,8 +1013,9 @@ async def fetch_papers_content(
     success_count = 0
     fallback_count = 0
     error_count = 0
+    files_saved_count = 0
 
-    for enriched_paper, status, is_fallback in results:
+    for enriched_paper, status, _ in results:
         papers_with_content.append(enriched_paper)
         if status == 'success':
             success_count += 1
@@ -949,6 +1024,10 @@ async def fetch_papers_content(
         else:
             error_count += 1
 
+        # 统计保存到文件的数量
+        if 'content_file_path' in enriched_paper:
+            files_saved_count += 1
+
     result = {
         'status': 'success',
         'papers_with_content': papers_with_content,
@@ -956,13 +1035,88 @@ async def fetch_papers_content(
             'total': len(papers),
             'success': success_count,
             'fallback': fallback_count,
-            'error': error_count
+            'error': error_count,
+            'files_saved': files_saved_count
         },
-        'message': f'Fetched content for {len(papers)} papers: {success_count} success, {fallback_count} fallback, {error_count} error'
+        'content_saved_to_files': save_to_file and session_id is not None,
+        'message': f'Fetched content for {len(papers)} papers: {success_count} success, {fallback_count} fallback, {error_count} error. {files_saved_count} saved to files.'
     }
 
     # 清理返回数据，防止 JSON 解析错误
     return sanitize_tool_response(result)
+
+
+# --- 内容加载工具 (3个) - 用于按需加载已保存的内容 ---
+
+@mcp.tool()
+async def load_saved_paper_content(file_path: str) -> Dict[str, Any]:
+    """
+    从文件加载已保存的论文内容
+
+    用于加载之前通过 fetch_papers_content 或 get_paper_content 保存的内容。
+
+    Args:
+        file_path: 内容文件路径（从之前的工具调用中获取）
+
+    Returns:
+        Dict containing:
+        - status: 'success' or 'error'
+        - content: 完整内容
+        - file_path: 文件路径
+        - size: 文件大小
+    """
+    from modules.shared.content_loader import load_paper_content
+    return load_paper_content(file_path)
+
+
+@mcp.tool()
+async def load_paper_content_segment(
+    file_path: str,
+    start: int = 0,
+    length: int = 5000
+) -> Dict[str, Any]:
+    """
+    分段加载论文内容（用于大型文件）
+
+    Args:
+        file_path: 内容文件路径
+        start: 起始位置（字符数）
+        length: 读取长度（字符数，默认5000）
+
+    Returns:
+        Dict containing:
+        - status: 'success' or 'error'
+        - content: 内容片段
+        - start: 起始位置
+        - length: 实际读取长度
+        - has_more: 是否还有更多内容
+    """
+    from modules.shared.content_loader import load_paper_content_segment as load_segment
+    return load_segment(file_path, start, length)
+
+
+@mcp.tool()
+async def search_in_saved_content(
+    file_path: str,
+    search_term: str,
+    context_length: int = 200
+) -> Dict[str, Any]:
+    """
+    在已保存的内容中搜索关键词
+
+    Args:
+        file_path: 内容文件路径
+        search_term: 搜索词
+        context_length: 上下文长度（每个匹配项前后的字符数，默认200）
+
+    Returns:
+        Dict containing:
+        - status: 'success' or 'error'
+        - matches: 匹配结果列表
+        - total_matches: 匹配总数
+    """
+    from modules.shared.content_loader import search_in_content_file
+    return search_in_content_file(file_path, search_term, context_length)
 
 
 # --- 批量汇总 (1个) ---

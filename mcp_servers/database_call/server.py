@@ -100,14 +100,26 @@ fields_to_request = ["structure",
     ]
 
 @app.tool
-async def materials_project_query_tool(formula: str, num_return: int = 3, return_frontend_format: bool = True) -> Union[str, Dict[str, Any]]:
+async def materials_project_query_tool(
+    formula: str,
+    num_return: int = 3,
+    return_frontend_format: bool = True,
+    session_id: str = None,
+    optimize_output: bool = True
+) -> Union[str, Dict[str, Any]]:
     """
     Searches the Materials Project database for a given chemical formula to get structure and properties of a specific inorganic material
+
+    ⚠️ 优化：默认将CIF内容保存到文件，仅返回文件路径和摘要，减少上下文开销
+
     :param formula: formula of the material, str type, e.g. Li3Zr2Si2PO12, NaLiTiAl(PO4)3 or NaLiTiAlP3O12
     :param num_return: maximum number of results to return, default 3
     :param return_frontend_format: if True, returns structured data for frontend use, default True (changed from False)
+    :param session_id: session ID for saving CIF files (recommended to provide)
+    :param optimize_output: if True, saves CIF to files and returns paths instead of full content (default: True)
     :return: information of the material, such as its material id, composition, SymmetryData, Lattice, and PeriodicSite
     """
+    from content_storage import optimize_batch_results
     if not MP_API_KEY:
         return "Error: MP_API_KEY is not set in the environment variables."
 
@@ -243,6 +255,11 @@ async def materials_project_query_tool(formula: str, num_return: int = 3, return
         }
         set_cached_result(cache_key, cache_data)
 
+        # 优化输出以减少上下文开销
+        if optimize_output and session_id:
+            cache_data = optimize_batch_results(cache_data, session_id=session_id, save_cif=True)
+            logger.info(f"Optimized MP results for {formula}, CIF saved to files")
+
         # Always return raw data (conversion will be done by services/structure_converter.py)
         if return_frontend_format:
             return cache_data
@@ -250,13 +267,14 @@ async def materials_project_query_tool(formula: str, num_return: int = 3, return
             return {
                 "formatted_text": formatted_text,
                 "database": "MP",
-                "structures": raw_structures,
+                "structures": cache_data.get('structures', raw_structures),
                 "query_info": {
                     "formula": formula,
                     "num_results": len(raw_structures),
                     "database": "MP",
                     "timestamp": datetime.now().isoformat()
-                }
+                },
+                "optimization_info": cache_data.get('optimization_info', {})
             }
 
     except Exception as e:
@@ -920,15 +938,27 @@ async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
 # New enhanced tools for frontend integration
 
 @app.tool
-async def batch_database_search(formula: str, databases: List[str] = ["MP", "OQMD", "COD"], num_per_db: int = 3) -> Dict[str, Any]:
+async def batch_database_search(
+    formula: str,
+    databases: List[str] = ["MP", "OQMD", "COD"],
+    num_per_db: int = 3,
+    session_id: str = None,
+    optimize_output: bool = True
+) -> Dict[str, Any]:
     """
     Search multiple databases simultaneously for a given formula and return consolidated frontend-compatible results.
-    
+
+    ⚠️ 优化：默认将CIF内容保存到文件，仅返回文件路径和摘要，减少上下文开销
+
     :param formula: Chemical formula to search for
     :param databases: List of databases to search (MP, OQMD, COD, AFLOW)
     :param num_per_db: Number of results to get from each database
+    :param session_id: Session ID for saving CIF files (recommended to provide)
+    :param optimize_output: If True, saves CIF to files and returns paths instead of full content (default: True)
     :return: Consolidated results from all databases in frontend format
     """
+    from content_storage import optimize_batch_results
+
     all_structures = []
     search_results = {
         "formula": formula,
@@ -1019,7 +1049,12 @@ async def batch_database_search(formula: str, databases: List[str] = ["MP", "OQM
     
     search_results["structures"] = all_structures
     search_results["total_structures"] = len(all_structures)
-    
+
+    # 优化输出以减少上下文开销
+    if optimize_output and session_id:
+        search_results = optimize_batch_results(search_results, session_id=session_id, save_cif=True)
+        logger.info(f"Optimized batch search results for {formula}, CIF saved to files")
+
     return search_results
 
 # 已禁用：结构生成功能已移除，避免postprocess.py缺失和序列化错误
