@@ -195,7 +195,7 @@ export const useAppStore = create<AppState>()(
       phononDisplayMode: 'fullscreen',
 
       uiConfig: {
-        showFilesInChat: true,  // 默认显示文件
+        showFilesInChat: false,  // 默认显示文件
       },
 
       settings: defaultSettings,
