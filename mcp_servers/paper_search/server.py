@@ -16,13 +16,13 @@ from dotenv import load_dotenv
 env_path = Path(__file__).parent.parent.parent / ".env"
 if env_path.exists():
     load_dotenv(env_path)
-    print(f"✅ Loaded environment variables from {env_path}")
+    print(f"[OK] Loaded environment variables from {env_path}")
     # Log critical environment variables (without exposing secrets)
-    print(f"   OPENAI_API_KEY: {'✅ Set' if os.getenv('OPENAI_API_KEY') else '❌ Not set'}")
+    print(f"   OPENAI_API_KEY: {'[OK] Set' if os.getenv('OPENAI_API_KEY') else '[WARN] Not set'}")
     print(f"   OPENAI_BASE_URL: {os.getenv('OPENAI_BASE_URL', 'Not set')}")
     print(f"   MODEL_USE: {os.getenv('MODEL_USE', 'Not set')}")
 else:
-    print(f"⚠️ WARNING: Environment file not found: {env_path}")
+    print(f"[WARN] Environment file not found: {env_path}")
 
 
 def get_api_base_url() -> str:
