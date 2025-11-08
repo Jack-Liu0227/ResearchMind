@@ -554,19 +554,91 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'researchmind-app-store',
-      partialize: (state) => ({
-        sessions: state.sessions,
-        currentSession: state.currentSession,
-        messages: state.messages,
-        settings: state.settings,
-        currentStructure: state.currentStructure,
-        currentSessionStructures: state.currentSessionStructures,
-        currentSessionFiles: state.currentSessionFiles,
-        phononImages: state.phononImages,
-        currentSessionPhononImages: state.currentSessionPhononImages,
-        showPhononVisualization: state.showPhononVisualization,
-        phononDisplayMode: state.phononDisplayMode,
-      }),
+      partialize: (state) => {
+        // 🔧 优化存储：只保存必要数据，移除大型对象（base64 图片等）
+        const optimizedSessions = state.sessions.map(session => ({
+          ...session,
+          messages: session.messages.map(msg => ({
+            ...msg,
+            // 移除消息中的 base64 图片数据
+            metadata: msg.metadata ? {
+              ...msg.metadata,
+              images: msg.metadata.images?.map(img => ({
+                ...img,
+                base64: undefined, // 不保存 base64 数据
+              })),
+            } : undefined,
+          })),
+          // 移除会话级别的大型数据
+          phononImages: session.phononImages?.map(img => ({
+            ...img,
+            base64: undefined, // 不保存 base64 数据
+          })),
+          structures: session.structures?.map(struct => ({
+            ...struct,
+            // 保留结构元数据，但移除大型 CIF 内容
+            cifContent: undefined,
+          })),
+        }))
+
+        return {
+          sessions: optimizedSessions,
+          currentSession: state.currentSession ? {
+            ...state.currentSession,
+            messages: state.currentSession.messages.map(msg => ({
+              ...msg,
+              metadata: msg.metadata ? {
+                ...msg.metadata,
+                images: msg.metadata.images?.map(img => ({
+                  ...img,
+                  base64: undefined,
+                })),
+              } : undefined,
+            })),
+            phononImages: state.currentSession.phononImages?.map(img => ({
+              ...img,
+              base64: undefined,
+            })),
+            structures: state.currentSession.structures?.map(struct => ({
+              ...struct,
+              cifContent: undefined,
+            })),
+          } : null,
+          messages: state.messages.map(msg => ({
+            ...msg,
+            metadata: msg.metadata ? {
+              ...msg.metadata,
+              images: msg.metadata.images?.map(img => ({
+                ...img,
+                base64: undefined,
+              })),
+            } : undefined,
+          })),
+          settings: state.settings,
+          // 不保存当前结构和图片的详细数据（这些可以从服务器重新获取）
+          currentStructure: state.currentStructure ? {
+            id: state.currentStructure.id,
+            formula: state.currentStructure.formula,
+          } : null,
+          currentSessionStructures: state.currentSessionStructures.map(struct => ({
+            id: struct.id,
+            formula: struct.formula,
+          })),
+          currentSessionFiles: state.currentSessionFiles.map(file => ({
+            name: file.name,
+            path: file.path,
+            type: file.type,
+          })),
+          phononImages: [], // 不保存全局图片列表
+          currentSessionPhononImages: state.currentSessionPhononImages.map(img => ({
+            name: img.name,
+            url: img.url,
+            type: img.type,
+          })),
+          showPhononVisualization: state.showPhononVisualization,
+          phononDisplayMode: state.phononDisplayMode,
+        }
+      },
       onRehydrateStorage: () => (state) => {
         if (!state) return
 
@@ -574,20 +646,29 @@ export const useAppStore = create<AppState>()(
         console.log('📊 会话数:', state.sessions?.length || 0)
         console.log('📊 当前会话:', state.currentSession?.id || 'null')
 
-        if (state.sessions) {
-          if (!validateSessionData(state.sessions)) {
-            console.warn('⚠️ 会话数据验证失败，清空数据')
-            state.sessions = []
-            state.currentSession = null
-            state.messages = []
-            state.currentStructure = null
-            state.currentSessionStructures = []
-            state.currentSessionFiles = []
-            state.currentSessionPhononImages = []
-            return
-          }
+        try {
+          if (state.sessions) {
+            if (!validateSessionData(state.sessions)) {
+              console.warn('⚠️ 会话数据验证失败，清空数据')
+              state.sessions = []
+              state.currentSession = null
+              state.messages = []
+              state.currentStructure = null
+              state.currentSessionStructures = []
+              state.currentSessionFiles = []
+              state.currentSessionPhononImages = []
+              return
+            }
 
-          state.sessions = fixRestoredSessions(state.sessions)
+            state.sessions = fixRestoredSessions(state.sessions)
+          }
+        } catch (error) {
+          console.error('❌ 恢复存储数据时出错:', error)
+          // 清空数据以防止错误传播
+          state.sessions = []
+          state.currentSession = null
+          state.messages = []
+        }
 
           if (state.currentSession) {
             // 有当前会话，尝试恢复
@@ -662,6 +743,58 @@ export const useAppStore = create<AppState>()(
         if (!Array.isArray(state.phononImages)) {
           state.phononImages = []
         }
+      },
+      // 🔧 添加存储错误处理
+      storage: {
+        getItem: (name) => {
+          try {
+            const str = localStorage.getItem(name)
+            return str ? JSON.parse(str) : null
+          } catch (error) {
+            console.error('❌ 读取存储时出错:', error)
+            return null
+          }
+        },
+        setItem: (name, value) => {
+          try {
+            localStorage.setItem(name, JSON.stringify(value))
+          } catch (error) {
+            console.error('❌ 保存存储时出错:', error)
+
+            // 如果是配额错误，尝试清理
+            if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+              console.warn('⚠️ 存储配额超限，尝试清理旧数据...')
+
+              // 导入清理函数
+              import('../utils/storage').then(({ cleanupOldSessions, clearAllStorage }) => {
+                try {
+                  // 先尝试清理旧会话
+                  cleanupOldSessions(3)
+
+                  // 再次尝试保存
+                  try {
+                    localStorage.setItem(name, JSON.stringify(value))
+                    console.log('✅ 清理后保存成功')
+                  } catch (retryError) {
+                    // 如果还是失败，清除所有数据
+                    console.error('❌ 清理后仍然失败，清除所有数据')
+                    clearAllStorage()
+                  }
+                } catch (cleanupError) {
+                  console.error('❌ 清理失败:', cleanupError)
+                  clearAllStorage()
+                }
+              })
+            }
+          }
+        },
+        removeItem: (name) => {
+          try {
+            localStorage.removeItem(name)
+          } catch (error) {
+            console.error('❌ 删除存储时出错:', error)
+          }
+        },
       },
     },
   ),

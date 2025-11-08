@@ -209,6 +209,126 @@ export function validateSessionData(sessions: any[]): boolean {
 }
 
 /**
+ * 获取 localStorage 使用情况
+ */
+export function getStorageUsage(): { used: number; total: number; percentage: number } {
+  let used = 0
+  let total = 5 * 1024 * 1024 // 默认 5MB
+
+  try {
+    // 计算当前使用量
+    for (const key in localStorage) {
+      if (localStorage.hasOwnProperty(key)) {
+        used += localStorage[key].length + key.length
+      }
+    }
+
+    // 尝试估算总容量（通过二分查找）
+    try {
+      const testKey = '__storage_test__'
+      let low = 0
+      let high = 10 * 1024 * 1024 // 10MB
+
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2)
+        try {
+          localStorage.setItem(testKey, 'x'.repeat(mid))
+          localStorage.removeItem(testKey)
+          low = mid + 1
+        } catch {
+          high = mid
+        }
+      }
+
+      total = low + used
+    } catch {
+      // 如果测试失败，使用默认值
+    }
+  } catch (error) {
+    console.error('计算存储使用量时出错:', error)
+  }
+
+  return {
+    used,
+    total,
+    percentage: (used / total) * 100
+  }
+}
+
+/**
+ * 清理旧会话数据（保留最近的 N 个会话）
+ */
+export function cleanupOldSessions(keepCount: number = 10): void {
+  try {
+    const data = getStorageData()
+    if (!data || !data.state || !Array.isArray(data.state.sessions)) {
+      return
+    }
+
+    const sessions = data.state.sessions
+    if (sessions.length <= keepCount) {
+      return
+    }
+
+    // 按更新时间排序，保留最新的 N 个
+    const sortedSessions = [...sessions].sort((a, b) => {
+      const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+      const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+      return dateB - dateA
+    })
+
+    const sessionsToKeep = sortedSessions.slice(0, keepCount)
+    const removedCount = sessions.length - keepCount
+
+    data.state.sessions = sessionsToKeep
+
+    // 如果当前会话被删除，清除它
+    if (data.state.currentSession &&
+        !sessionsToKeep.find(s => s.id === data.state.currentSession.id)) {
+      data.state.currentSession = null
+      data.state.messages = []
+      data.state.currentSessionStructures = []
+      data.state.currentSessionFiles = []
+      data.state.currentSessionPhononImages = []
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    console.log(`🧹 清理了 ${removedCount} 个旧会话，保留最新的 ${keepCount} 个`)
+  } catch (error) {
+    console.error('清理旧会话时出错:', error)
+  }
+}
+
+/**
+ * 智能存储管理：当接近配额时自动清理
+ */
+export function smartStorageManagement(): void {
+  try {
+    const usage = getStorageUsage()
+    console.log(`📊 存储使用情况: ${(usage.used / 1024).toFixed(2)} KB / ${(usage.total / 1024).toFixed(2)} KB (${usage.percentage.toFixed(1)}%)`)
+
+    // 如果使用超过 80%，开始清理
+    if (usage.percentage > 80) {
+      console.warn('⚠️ 存储使用超过 80%，开始清理...')
+
+      // 先清理旧会话
+      cleanupOldSessions(5)
+
+      const newUsage = getStorageUsage()
+      console.log(`📊 清理后使用情况: ${(newUsage.used / 1024).toFixed(2)} KB / ${(newUsage.total / 1024).toFixed(2)} KB (${newUsage.percentage.toFixed(1)}%)`)
+
+      // 如果还是超过 90%，清除所有数据
+      if (newUsage.percentage > 90) {
+        console.error('❌ 存储空间严重不足，清除所有数据')
+        clearAllStorage()
+      }
+    }
+  } catch (error) {
+    console.error('智能存储管理时出错:', error)
+  }
+}
+
+/**
  * 初始化存储
  * 在应用启动时调用
  */
@@ -216,6 +336,9 @@ export function initStorage(): void {
   console.log('🚀 初始化存储系统...')
 
   try {
+    // 检查存储使用情况
+    smartStorageManagement()
+
     // 只修复侧边栏状态，不清除其他数据
     const data = getStorageData()
     if (data && data.state && typeof data.state.sidebarOpen !== 'boolean') {
@@ -225,6 +348,11 @@ export function initStorage(): void {
     console.log('✅ 存储系统初始化完成')
   } catch (error) {
     console.error('初始化存储时出错:', error)
+    // 如果是配额错误，清除所有数据
+    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+      console.error('❌ 存储配额超限，清除所有数据')
+      clearAllStorage()
+    }
   }
 }
 
