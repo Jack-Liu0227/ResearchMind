@@ -87,35 +87,46 @@ def get_download_url(file_path: str) -> str:
     import os
     import re
 
+    original_path = file_path
+    logger.info(f"[get_download_url] Input path: {original_path}")
+
     # 规范化文件路径：移除 ./ 前缀，转换反斜杠为正斜杠
     file_path = file_path.replace('\\', '/').lstrip('./')
 
     # 🆕 处理绝对路径（Windows: D:/..., Linux: /home/...）
     # 提取相对于 paper_search 目录的路径
     if re.match(r'^[A-Za-z]:', file_path):  # Windows 绝对路径
+        logger.info(f"[get_download_url] Detected Windows absolute path")
         # 查找 mcp_servers/paper_search/ 或 paper_search/ 部分
         if 'mcp_servers/paper_search/' in file_path:
             file_path = file_path.split('mcp_servers/paper_search/', 1)[1]
+            logger.info(f"[get_download_url] Extracted after 'mcp_servers/paper_search/': {file_path}")
         elif 'paper_search/' in file_path:
             file_path = file_path.split('paper_search/', 1)[1]
+            logger.info(f"[get_download_url] Extracted after 'paper_search/': {file_path}")
         else:
             # 如果找不到 paper_search，尝试提取文件名
-            logging.warning(f"⚠️ Absolute path without paper_search directory: {file_path}")
+            logger.warning(f"[get_download_url] Absolute path without paper_search directory: {file_path}")
             file_path = os.path.basename(file_path)
     elif file_path.startswith('/'):  # Unix 绝对路径
+        logger.info(f"[get_download_url] Detected Unix absolute path")
         if 'mcp_servers/paper_search/' in file_path:
             file_path = file_path.split('mcp_servers/paper_search/', 1)[1]
+            logger.info(f"[get_download_url] Extracted after 'mcp_servers/paper_search/': {file_path}")
         elif 'paper_search/' in file_path:
             file_path = file_path.split('paper_search/', 1)[1]
+            logger.info(f"[get_download_url] Extracted after 'paper_search/': {file_path}")
         else:
-            logging.warning(f"⚠️ Absolute path without paper_search directory: {file_path}")
+            logger.warning(f"[get_download_url] Absolute path without paper_search directory: {file_path}")
             file_path = os.path.basename(file_path)
 
     # 移除前缀 "mcp_servers/paper_search/" 如果存在
     if file_path.startswith('mcp_servers/paper_search/'):
         file_path = file_path[len('mcp_servers/paper_search/'):]
+        logger.info(f"[get_download_url] Removed 'mcp_servers/paper_search/' prefix: {file_path}")
     elif file_path.startswith('paper_search/'):
         file_path = file_path[len('paper_search/'):]
+        logger.info(f"[get_download_url] Removed 'paper_search/' prefix: {file_path}")
 
     normalized = file_path.lstrip('/')
 
@@ -127,7 +138,9 @@ def get_download_url(file_path: str) -> str:
 
     # 返回相对路径：/api/download/...
     # 前端会转换为完整 URL，Nginx 会转发到后端的 /api/download/...
-    return f"/api/download/{normalized}"
+    result = f"/api/download/{normalized}"
+    logger.info(f"[get_download_url] Final URL: {result}")
+    return result
 from typing import List, Dict, Any, Optional
 
 from fastmcp import FastMCP
