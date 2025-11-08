@@ -65,87 +65,61 @@ def get_api_base_url() -> str:
 
 def get_download_url(file_path: str) -> str:
     """
-    生成文件下载 URL
+    生成文件下载 URL（简化版本，参考热导率数据的处理方式）
 
-    返回以 /api 开头的相对路径（浏览器会使用当前域名解析）
-    这样可以支持直接访问和通过反向代理两种部署方式。
+    策略：只使用相对于 paper_search 目录的路径，避免复杂的绝对路径解析。
 
-    参考 ImageHandler 的实现逻辑。
+    Args:
+        file_path: 文件路径（可以是绝对路径或相对路径）
 
-    Nginx 配置示例:
-    location /api/ {
-        proxy_pass http://backend_api/;
-    }
+    Returns:
+        相对 URL 路径，例如: /api/download/papers/session_xxx/file.csv
 
     流程：
-    1. 后端返回: /api/download/{file_path}
+    1. 后端返回: /api/download/{relative_path}
     2. 前端 resolveFileUrl 转换为完整 URL
-    3. 前端请求: http://localhost:50001/api/download/{file_path}
-    4. Nginx 转发到 http://127.0.0.1:50002/api/download/{file_path}
-    5. FastAPI /api/download 挂载点处理
+    3. 前端请求: http://domain:port/api/download/{relative_path}
+    4. FastAPI /api/download 挂载点处理（挂载到 mcp_servers/paper_search/）
     """
     import os
-    import re
 
-    original_path = file_path
-    logger.info(f"[get_download_url] Input path: {original_path}")
+    logger.info(f"[get_download_url] Input: {file_path}")
 
-    # 规范化文件路径：移除 ./ 前缀，转换反斜杠为正斜杠
-    file_path = file_path.replace('\\', '/').lstrip('./')
+    # 🔧 策略：提取相对于 paper_search 目录的路径
+    # 规范化路径分隔符
+    normalized_path = file_path.replace('\\', '/')
 
-    # 🆕 处理绝对路径（Windows: D:/..., Linux: /home/..., /root/...）
-    # 提取相对于 paper_search 目录的路径
-    if re.match(r'^[A-Za-z]:', file_path):  # Windows 绝对路径
-        logger.info(f"[get_download_url] Detected Windows absolute path")
-        # 查找 mcp_servers/paper_search/ 或 paper_search/ 部分
-        if 'mcp_servers/paper_search/' in file_path:
-            file_path = file_path.split('mcp_servers/paper_search/', 1)[1]
-            logger.info(f"[get_download_url] Extracted after 'mcp_servers/paper_search/': {file_path}")
-        elif 'paper_search/' in file_path:
-            file_path = file_path.split('paper_search/', 1)[1]
-            logger.info(f"[get_download_url] Extracted after 'paper_search/': {file_path}")
-        else:
-            # 如果找不到 paper_search，尝试提取文件名
-            logger.warning(f"[get_download_url] Absolute path without paper_search directory: {file_path}")
-            file_path = os.path.basename(file_path)
-    elif file_path.startswith('/'):  # Unix 绝对路径
-        logger.info(f"[get_download_url] Detected Unix absolute path")
-        # 🔧 优先查找 mcp_servers/paper_search/ 标记
-        if 'mcp_servers/paper_search/' in file_path:
-            file_path = file_path.split('mcp_servers/paper_search/', 1)[1]
-            logger.info(f"[get_download_url] Extracted after 'mcp_servers/paper_search/': {file_path}")
-        elif 'paper_search/' in file_path:
-            file_path = file_path.split('paper_search/', 1)[1]
-            logger.info(f"[get_download_url] Extracted after 'paper_search/': {file_path}")
-        # 🔧 处理 /root/... 或其他绝对路径，但包含 papers/ 目录
-        elif '/papers/' in file_path:
-            # 提取 papers/ 之后的部分（这是相对于 paper_search 目录的路径）
-            file_path = 'papers/' + file_path.split('/papers/', 1)[1]
-            logger.info(f"[get_download_url] Extracted after '/papers/': {file_path}")
-        else:
-            logger.warning(f"[get_download_url] Absolute path without recognizable markers: {file_path}")
-            file_path = os.path.basename(file_path)
+    # 方法1: 查找 'mcp_servers/paper_search/' 标记并提取后面的部分
+    if 'mcp_servers/paper_search/' in normalized_path:
+        relative_path = normalized_path.split('mcp_servers/paper_search/', 1)[1]
+        logger.info(f"[get_download_url] Extracted via 'mcp_servers/paper_search/': {relative_path}")
+    # 方法2: 查找 'paper_search/' 标记并提取后面的部分
+    elif 'paper_search/' in normalized_path:
+        relative_path = normalized_path.split('paper_search/', 1)[1]
+        logger.info(f"[get_download_url] Extracted via 'paper_search/': {relative_path}")
+    # 方法3: 查找 'papers/' 目录（paper_search 的子目录）
+    elif '/papers/' in normalized_path:
+        relative_path = 'papers/' + normalized_path.split('/papers/', 1)[1]
+        logger.info(f"[get_download_url] Extracted via '/papers/': {relative_path}")
+    # 方法4: 如果已经是相对路径，直接使用
+    elif not normalized_path.startswith('/') and not normalized_path[1:3] == ':/':
+        relative_path = normalized_path.lstrip('./')
+        logger.info(f"[get_download_url] Using as relative path: {relative_path}")
+    # 方法5: 无法识别，只使用文件名
+    else:
+        relative_path = os.path.basename(normalized_path)
+        logger.warning(f"[get_download_url] Could not extract relative path, using filename only: {relative_path}")
 
-    # 移除前缀 "mcp_servers/paper_search/" 如果存在
-    if file_path.startswith('mcp_servers/paper_search/'):
-        file_path = file_path[len('mcp_servers/paper_search/'):]
-        logger.info(f"[get_download_url] Removed 'mcp_servers/paper_search/' prefix: {file_path}")
-    elif file_path.startswith('paper_search/'):
-        file_path = file_path[len('paper_search/'):]
-        logger.info(f"[get_download_url] Removed 'paper_search/' prefix: {file_path}")
+    # 清理路径：移除前导斜杠和重复的前缀
+    relative_path = relative_path.lstrip('/')
+    if relative_path.startswith('api/download/'):
+        relative_path = relative_path[len('api/download/'):]
+    elif relative_path.startswith('download/'):
+        relative_path = relative_path[len('download/'):]
 
-    normalized = file_path.lstrip('/')
-
-    # 避免重复的 download 或 api/download 前缀
-    if normalized.startswith('api/download/'):
-        normalized = normalized[len('api/download/'):]
-    elif normalized.startswith('download/'):
-        normalized = normalized[len('download/'):]
-
-    # 返回相对路径：/api/download/...
-    # 前端会转换为完整 URL，Nginx 会转发到后端的 /api/download/...
-    result = f"/api/download/{normalized}"
-    logger.info(f"[get_download_url] Final URL: {result}")
+    # 构造最终 URL
+    result = f"/api/download/{relative_path}"
+    logger.info(f"[get_download_url] Output: {result}")
     return result
 from typing import List, Dict, Any, Optional
 
