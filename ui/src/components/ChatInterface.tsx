@@ -273,7 +273,25 @@ const ChatInterface: React.FC = () => {
         const form = new FormData()
         nonCifFiles.forEach(f => form.append('files', f))
 
-        const uploadUrl = resolveFileUrl('/upload?type=documents')
+        // 🆕 添加 session_id 和 client_id 参数，以便后端通过 WebSocket 发送 file_metadata
+        const sessionId = (sessionToUse || currentSession)?.id
+        const clientId = wsService.getClientId()
+
+        let uploadUrl = resolveFileUrl('/upload?type=documents')
+        if (sessionId) {
+          uploadUrl += `&session_id=${encodeURIComponent(sessionId)}`
+        }
+        if (clientId) {
+          uploadUrl += `&client_id=${encodeURIComponent(clientId)}`
+        }
+
+        console.log('📤 Uploading documents:', {
+          fileCount: nonCifFiles.length,
+          sessionId,
+          clientId,
+          uploadUrl
+        })
+
         const resp = await fetch(uploadUrl, { method: 'POST', body: form })
         if (!resp.ok) {
           const text = await resp.text()
@@ -281,6 +299,8 @@ const ChatInterface: React.FC = () => {
         }
 
         const data = await resp.json()
+        console.log('✅ Upload response:', data)
+
         const uploaded = Array.isArray(data.uploaded_files) ? data.uploaded_files : []
 
         // 推送所有返回的文件到会话文件列表
@@ -300,6 +320,7 @@ const ChatInterface: React.FC = () => {
         })
 
         if (data.csv_download_url) {
+          console.log('📄 Adding CSV summary file:', data.csv_download_url)
           addToCurrentSessionFiles({
             id: `csv:${Date.now()}`,
             type: 'csv',

@@ -507,6 +507,154 @@ async def relax_structure(
 
 
 @app.tool
+async def calculate_phonon_from_directory(
+    cif_directory: str,
+    device: str = "cuda",
+    supercell_matrix: Optional[List[int]] = None,
+    amplitude: float = 0.01,
+    find_prim: bool = False,
+    session_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    批量计算文件夹中所有 CIF 文件的声子谱。
+
+    ⚠️ 推荐：当有多个弛豫后的 CIF 文件需要计算声子谱时，使用此工具批量计算。
+
+    Args:
+        cif_directory: 包含 CIF 文件的文件夹路径（绝对路径或相对于项目根目录）
+                      例如: "mcp_servers/simulation/cif/session_xxx/relax"
+        device: 计算设备 ('cuda' 或 'cpu')
+        supercell_matrix: 超胞矩阵 (默认: [4, 4, 4])
+        amplitude: 位移幅度 (默认: 0.01 Å)
+        find_prim: 是否在计算前寻找原胞
+        session_id: 会话 ID（可选，用于结果文件命名）
+
+    Returns:
+        Dict 包含：
+        - success: 是否成功
+        - total: 总结构数
+        - completed: 成功计算的数量
+        - failed: 失败的数量
+        - results: 每个结构的计算结果列表
+        - summary: 结果摘要
+
+    Example:
+        result = await calculate_phonon_from_directory(
+            cif_directory="mcp_servers/simulation/cif/session_xxx/relax",
+            supercell_matrix=[4, 4, 4]
+        )
+    """
+    if not MATTERSIM_AVAILABLE:
+        return {
+            "success": False,
+            "error": "MatterSim not available. Please install mattersim package."
+        }
+
+    try:
+        # Validate directory exists
+        cif_dir = Path(cif_directory)
+        if not cif_dir.exists():
+            return {
+                "success": False,
+                "error": f"Directory not found: {cif_directory}",
+                "timestamp": datetime.now().isoformat()
+            }
+
+        if not cif_dir.is_dir():
+            return {
+                "success": False,
+                "error": f"Path is not a directory: {cif_directory}",
+                "timestamp": datetime.now().isoformat()
+            }
+
+        # Find all CIF files in directory
+        cif_files = list(cif_dir.glob('*.cif')) + list(cif_dir.glob('*.CIF'))
+
+        if not cif_files:
+            return {
+                "success": False,
+                "error": f"No CIF files found in directory: {cif_directory}",
+                "total": 0,
+                "timestamp": datetime.now().isoformat()
+            }
+
+        logger.info(f"📁 Found {len(cif_files)} CIF files for phonon calculation in {cif_directory}")
+
+        # Calculate phonon for each CIF file
+        results = []
+        completed = 0
+        failed = 0
+
+        for i, cif_file in enumerate(cif_files, 1):
+            logger.info(f"🔄 Processing {i}/{len(cif_files)}: {cif_file.name}")
+
+            try:
+                cif_content = cif_file.read_text(encoding='utf-8')
+
+                # Call phonon calculation implementation
+                from modules.mattersim_energy import calculate_phonon_impl
+
+                # Determine output directory for phonon results
+                phonon_dir = Path(__file__).parent / "phonon_results"
+                phonon_dir.mkdir(parents=True, exist_ok=True)
+
+                result = calculate_phonon_impl(
+                    cif_content=cif_content,
+                    cif_filename=cif_file.name,
+                    device=device,
+                    supercell_matrix=supercell_matrix or [4, 4, 4],
+                    amplitude=amplitude,
+                    find_prim=find_prim,
+                    output_dir=str(phonon_dir)
+                )
+
+                if result.get("success"):
+                    completed += 1
+                    logger.info(f"✅ Completed {i}/{len(cif_files)}: {cif_file.name}")
+                else:
+                    failed += 1
+                    logger.warning(f"❌ Failed {i}/{len(cif_files)}: {cif_file.name} - {result.get('error', 'Unknown error')}")
+
+                results.append({
+                    "filename": cif_file.name,
+                    "index": i,
+                    **result
+                })
+
+            except Exception as e:
+                failed += 1
+                logger.error(f"❌ Error processing {cif_file.name}: {e}")
+                results.append({
+                    "filename": cif_file.name,
+                    "index": i,
+                    "success": False,
+                    "error": str(e)
+                })
+
+        return {
+            "success": completed > 0,
+            "total": len(cif_files),
+            "completed": completed,
+            "failed": failed,
+            "results": results,
+            "summary": {
+                "total_structures": len(cif_files),
+                "successful": completed,
+                "failed": failed,
+                "success_rate": f"{(completed/len(cif_files)*100):.1f}%" if cif_files else "0%"
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error in batch phonon calculation from directory: {e}")
+        return {
+            "success": False,
+            "error": f"Batch phonon calculation failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.tool
 async def calculate_phonon(
     session_id: str,
     cif_filename: str,
@@ -516,7 +664,7 @@ async def calculate_phonon(
     find_prim: bool = False
 ) -> Dict[str, Any]:
     """
-    Calculate phonon dispersion using MatterSim.
+    Calculate phonon dispersion using MatterSim for a single CIF file.
 
     Results are saved as image files and returned with URLs for frontend display.
 
@@ -524,6 +672,8 @@ async def calculate_phonon(
     1. 用户上传原始 CIF 文件
     2. 调用 relax_structure() 进行结构弛豫
     3. 使用弛豫后的 CIF 文件名调用此函数计算声子谱
+
+    ⚠️ 批量计算：如果需要计算多个 CIF 文件的声子谱，请使用 calculate_phonon_from_directory 工具
 
     正确的调用顺序：
 
@@ -895,78 +1045,213 @@ def _validate_cif_content(cif_content: str, filename: str) -> Dict[str, Any]:
 
 @app.tool
 async def calculate_kappa_from_cif(
-    cif_content,  # Can be str or List[Dict]
-    cif_filename: str = "material.cif",
+    cif_path: str,
     method: str = "kappa_p",
     temperature: float = 300.0,
     session_id: Optional[str] = None,
     keep_files: bool = False
 ) -> Dict[str, Any]:
     """
-    Calculate thermal conductivity from CIF file content.
-    Supports both single CIF and batch calculation of multiple CIFs.
+    Calculate thermal conductivity from a single CIF file.
 
-    This is the MAIN tool for thermal conductivity calculations from CIF files.
-    It supports both Kappa-P (physics-based) and Kappa-MTP (ML-based) methods.
+    This tool calculates thermal conductivity for a SINGLE CIF file.
+    For multiple files, use calculate_kappa_from_directory instead.
 
     Args:
-        cif_content: SINGLE CIF: string content of CIF file (as string or base64)
-                    BATCH: list of dicts with structure:
-                    [{"cifContent": "...", "formula": "NaCl", "id": "struct1"}, ...]
-        cif_filename: Name of the CIF file (default: "material.cif", used only for single CIF)
+        cif_path: Path to the CIF file (absolute or relative to project root)
         method: Calculation method - "kappa_p" or "kappa_mtp" (default: "kappa_p")
         temperature: Temperature in Kelvin (default: 300K)
         session_id: Optional session identifier used to isolate intermediate files
         keep_files: Whether to keep generated CIF files for inspection
 
     Returns:
-        SINGLE: Dict containing:
+        Dict containing:
         - thermal_conductivity: {value, unit}
         - results_file: Path to CSV file with full calculation results
         - key_metrics: Summary of key values (kappa, temperature, method, num_atoms)
 
-        BATCH: Dict containing:
-        - results: List of individual results (optimized, no full_results field)
-        - summary: Statistics and thermal conductivities
-        - batch_results_file: Path to CSV file with complete batch results
-
-        ⚠️ TOKEN OPTIMIZATION: Full calculation results are saved to CSV files (~80% reduction).
-        Use results_file or batch_results_file to access complete data.
-
     Examples:
-        # Single CIF
-        result = await calculate_kappa_from_cif("data_crystal\\n...", method="kappa_p")
-        
-        # Batch CIFs
-        structures = [
-            {"cifContent": "data_NaCl\\n...", "formula": "NaCl", "id": "1"},
-            {"cifContent": "data_GaN\\n...", "formula": "GaN", "id": "2"}
-        ]
-        result = await calculate_kappa_from_cif(structures, method="kappa_p")
-    """
-    working_dir_path = _build_kappa_working_dir(session_id, prefix="single")
-    if working_dir_path:
-        logger.info(
-            "Using session-scoped working directory for thermal conductivity",
-            session_id=session_id,
-            working_dir=str(working_dir_path)
+        result = await calculate_kappa_from_cif(
+            cif_path="mcp_servers/simulation/cif/session_xxx/relax/NaCl_relaxed.cif",
+            method="kappa_p"
         )
-    elif session_id and SESSION_MANAGER_AVAILABLE:
-        logger.warning("Session ID provided but failed to build working directory", session_id=session_id)
+    """
+    try:
+        # Validate CIF file exists
+        cif_file = Path(cif_path)
+        if not cif_file.exists():
+            return {
+                "error": f"CIF file not found: {cif_path}",
+                "timestamp": datetime.now().isoformat()
+            }
 
-    result = calculate_kappa_from_cif_impl(
-        cif_content=cif_content,
-        cif_filename=cif_filename,
-        method=method,
-        temperature=temperature,
-        working_dir=str(working_dir_path) if working_dir_path else None,
-        keep_files=keep_files
-    )
+        if not cif_file.suffix.lower() == '.cif':
+            return {
+                "error": f"File is not a CIF file: {cif_path}",
+                "timestamp": datetime.now().isoformat()
+            }
 
-    if keep_files and working_dir_path:
-        result["working_directory"] = str(working_dir_path)
+        # Read CIF content
+        with open(cif_file, 'r', encoding='utf-8') as f:
+            cif_content = f.read()
 
-    return result
+        working_dir_path = _build_kappa_working_dir(session_id, prefix="single")
+        if working_dir_path:
+            logger.info(
+                "Using session-scoped working directory for thermal conductivity",
+                session_id=session_id,
+                working_dir=str(working_dir_path)
+            )
+        elif session_id and SESSION_MANAGER_AVAILABLE:
+            logger.warning("Session ID provided but failed to build working directory", session_id=session_id)
+
+        result = calculate_kappa_from_cif_impl(
+            cif_content=cif_content,
+            cif_filename=cif_file.name,
+            method=method,
+            temperature=temperature,
+            working_dir=str(working_dir_path) if working_dir_path else None,
+            keep_files=keep_files
+        )
+
+        if keep_files and working_dir_path:
+            result["working_directory"] = str(working_dir_path)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error calculating kappa from CIF: {e}")
+        return {
+            "error": f"Calculation failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.tool
+async def calculate_kappa_from_directory(
+    cif_directory: str,
+    method: str = "kappa_p",
+    temperature: float = 300.0,
+    session_id: Optional[str] = None,
+    keep_files: bool = False
+) -> Dict[str, Any]:
+    """
+    批量计算文件夹中所有 CIF 文件的热导率。
+
+    ⚠️ 推荐：当有多个 CIF 文件需要计算热导率时，将它们放在同一文件夹中，使用此工具批量计算。
+
+    Args:
+        cif_directory: 包含 CIF 文件的文件夹路径（绝对路径或相对于项目根目录）
+        method: 计算方法 - "kappa_p" 或 "kappa_mtp" (默认: "kappa_p")
+        temperature: 温度（开尔文，默认: 300K)
+        session_id: 会话 ID，用于隔离临时文件（可选）
+        keep_files: 是否保留中间生成的 CIF 文件（默认: False）
+
+    Returns:
+        Dict 包含：
+        - success: 是否成功
+        - total: 总结构数
+        - completed: 成功计算的数量
+        - failed: 失败的数量
+        - results: 每个结构的计算结果列表
+        - summary: 结果摘要
+        - batch_results_file: 批量结果 CSV 文件路径
+
+    Example:
+        result = await calculate_kappa_from_directory(
+            cif_directory="mcp_servers/simulation/cif/session_xxx/relax",
+            method="kappa_p"
+        )
+    """
+    try:
+        # Validate directory exists
+        cif_dir = Path(cif_directory)
+        if not cif_dir.exists():
+            return {
+                "success": False,
+                "error": f"Directory not found: {cif_directory}",
+                "timestamp": datetime.now().isoformat()
+            }
+
+        if not cif_dir.is_dir():
+            return {
+                "success": False,
+                "error": f"Path is not a directory: {cif_directory}",
+                "timestamp": datetime.now().isoformat()
+            }
+
+        # Find all CIF files in directory
+        cif_files = list(cif_dir.glob('*.cif')) + list(cif_dir.glob('*.CIF'))
+
+        if not cif_files:
+            return {
+                "success": False,
+                "error": f"No CIF files found in directory: {cif_directory}",
+                "total": 0,
+                "timestamp": datetime.now().isoformat()
+            }
+
+        logger.info(f"📁 Found {len(cif_files)} CIF files in {cif_directory}")
+
+        # Build structures list from CIF files
+        structures = []
+        for cif_file in cif_files:
+            try:
+                with open(cif_file, 'r', encoding='utf-8') as f:
+                    cif_content = f.read()
+
+                # Extract formula from filename or CIF content
+                formula = cif_file.stem
+
+                structures.append({
+                    "cifContent": cif_content,
+                    "formula": formula,
+                    "id": cif_file.stem,
+                    "source_file": str(cif_file)
+                })
+            except Exception as e:
+                logger.error(f"Error reading CIF file {cif_file}: {e}")
+                continue
+
+        if not structures:
+            return {
+                "success": False,
+                "error": "Failed to read any CIF files from directory",
+                "total": len(cif_files),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        # Use batch calculation
+        working_dir_path = _build_kappa_working_dir(session_id, prefix="batch")
+        if working_dir_path:
+            logger.info(
+                "Using session-scoped batch working directory",
+                session_id=session_id,
+                working_dir=str(working_dir_path)
+            )
+        elif session_id and SESSION_MANAGER_AVAILABLE:
+            logger.warning("Session ID provided but failed to build batch working directory", session_id=session_id)
+
+        batch_result = calculate_kappa_from_cif_impl(
+            cif_content=structures,
+            method=method,
+            temperature=temperature,
+            working_dir=str(working_dir_path) if working_dir_path else None,
+            keep_files=keep_files
+        )
+
+        if keep_files and working_dir_path:
+            batch_result["working_directory"] = str(working_dir_path)
+
+        return batch_result
+
+    except Exception as e:
+        logger.error(f"Error in batch calculation from directory: {e}")
+        return {
+            "success": False,
+            "error": f"Batch calculation failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
 
 
 @app.tool
@@ -978,9 +1263,10 @@ async def batch_calculate_kappa(
     keep_files: bool = False
 ) -> Dict[str, Any]:
     """
-    批量计算多个结构的热导率 - 这是处理多个结构的主要工具。
+    批量计算多个结构的热导率（从结构列表）。
 
-    ⚠️ 重要：当有多个结构需要计算热导率时，必须使用此工具而不是多次调用单个计算工具。
+    ⚠️ 注意：如果 CIF 文件已经保存在文件夹中，推荐使用 calculate_kappa_from_directory 工具。
+    此工具适用于动态生成的结构数据。
 
     Args:
         structures: 结构列表，每个结构必须包含：

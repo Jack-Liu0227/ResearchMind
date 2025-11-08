@@ -580,16 +580,25 @@ class HTTPServer:
                     detail=f"Upload failed: {str(e)}"
                 )
 
+        from fastapi import Query
+
         @self.app.post("/api/upload/documents")
         async def upload_documents(
             files: List[UploadFile] = File(...),
-            session_id: Optional[str] = None,
-            topic: Optional[str] = None,
+            session_id: Optional[str] = Query(None),
+            topic: Optional[str] = Query(None),
+            client_id: Optional[str] = Query(None),
         ):
             """Upload and ingest documents (PDF/DOC/TXT/MD) into paper entries.
 
             Uses paper_search ingestion to extract text (PDF via PyPDF2 if available),
             persists session metadata, and returns CSV + per-file download links.
+
+            Args:
+                files: Files to upload
+                session_id: Session ID (optional, will be generated if not provided)
+                topic: Topic for the session (optional)
+                client_id: Client ID for WebSocket notification (optional)
             """
             if not files:
                 raise HTTPException(status_code=400, detail="No files provided")
@@ -620,6 +629,8 @@ class HTTPServer:
                     session_id = "upload_" + uuid.uuid4().hex[:8]
                 topic = topic or "uploaded_documents"
 
+                logger.info(f"📤 Processing document upload: {len(norm_files)} files, session_id={session_id}")
+
                 result = ingest_uploaded_documents(files=norm_files, session_id=session_id, topic=topic)
                 if result.get("status") != "success":
                     raise HTTPException(status_code=500, detail=result.get("error", "Ingestion failed"))
@@ -632,12 +643,21 @@ class HTTPServer:
                     "uploaded_files": [],
                 }
 
+                # Build file metadata for WebSocket notification
+                file_metadata: Dict[str, Any] = {}
+
                 csv_path = (result.get("csv_result") or {}).get("file_path")
                 if csv_path:
                     try:
-                        payload["csv_download_url"] = get_download_url(csv_path)
+                        csv_url = get_download_url(csv_path)
+                        payload["csv_download_url"] = csv_url
                         payload["csv_file_path"] = csv_path
-                    except Exception:
+                        # Add to file_metadata for WebSocket
+                        file_metadata["csv_download_url"] = csv_url
+                        file_metadata["csv_file_path"] = csv_path
+                        logger.info(f"📄 Generated CSV summary: {csv_url}")
+                    except Exception as e:
+                        logger.warning(f"Failed to generate CSV download URL: {e}")
                         payload["csv_file_path"] = csv_path
 
                 for item in result.get("uploaded_files", []):
@@ -655,6 +675,30 @@ class HTTPServer:
                         "download_url": download_url,
                     })
 
+                # 🆕 Send file_metadata via WebSocket if client_id is provided
+                if client_id and file_metadata:
+                    try:
+                        from services.websocket_server import WebSocketServer
+                        ws_server = WebSocketServer.get_instance()
+                        if ws_server:
+                            websocket = ws_server.connected_clients.get(client_id)
+                            if websocket:
+                                from services.message_handler import MessageHandler
+                                await MessageHandler.send_message(websocket, "file_metadata", {
+                                    "agentId": "upload",
+                                    "sessionId": session_id,
+                                    "metadata": file_metadata,
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                                logger.info(f"✅ Sent file_metadata via WebSocket to client {client_id}")
+                            else:
+                                logger.warning(f"⚠️ WebSocket not found for client {client_id}")
+                        else:
+                            logger.warning("⚠️ WebSocket server instance not available")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to send file_metadata via WebSocket: {e}")
+
+                logger.info(f"✅ Document upload completed: {len(payload['uploaded_files'])} files processed")
                 return payload
             except HTTPException:
                 raise

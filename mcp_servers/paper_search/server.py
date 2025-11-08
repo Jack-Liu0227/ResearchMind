@@ -59,7 +59,7 @@ def get_download_url(file_path: str) -> str:
 
     参考 ImageHandler 的实现逻辑。
 
-    Nginx 配置示例：
+    Nginx 配置示例:
     location /api/ {
         proxy_pass http://backend_api/;
     }
@@ -71,9 +71,32 @@ def get_download_url(file_path: str) -> str:
     4. Nginx 转发到 http://127.0.0.1:50002/api/download/{file_path}
     5. FastAPI /api/download 挂载点处理
     """
+    import os
+    import re
 
     # 规范化文件路径：移除 ./ 前缀，转换反斜杠为正斜杠
     file_path = file_path.replace('\\', '/').lstrip('./')
+
+    # 🆕 处理绝对路径（Windows: D:/..., Linux: /home/...）
+    # 提取相对于 paper_search 目录的路径
+    if re.match(r'^[A-Za-z]:', file_path):  # Windows 绝对路径
+        # 查找 mcp_servers/paper_search/ 或 paper_search/ 部分
+        if 'mcp_servers/paper_search/' in file_path:
+            file_path = file_path.split('mcp_servers/paper_search/', 1)[1]
+        elif 'paper_search/' in file_path:
+            file_path = file_path.split('paper_search/', 1)[1]
+        else:
+            # 如果找不到 paper_search，尝试提取文件名
+            logging.warning(f"⚠️ Absolute path without paper_search directory: {file_path}")
+            file_path = os.path.basename(file_path)
+    elif file_path.startswith('/'):  # Unix 绝对路径
+        if 'mcp_servers/paper_search/' in file_path:
+            file_path = file_path.split('mcp_servers/paper_search/', 1)[1]
+        elif 'paper_search/' in file_path:
+            file_path = file_path.split('paper_search/', 1)[1]
+        else:
+            logging.warning(f"⚠️ Absolute path without paper_search directory: {file_path}")
+            file_path = os.path.basename(file_path)
 
     # 移除前缀 "mcp_servers/paper_search/" 如果存在
     if file_path.startswith('mcp_servers/paper_search/'):

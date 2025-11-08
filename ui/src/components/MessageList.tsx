@@ -16,6 +16,7 @@ import { CsvViewer, MarkdownViewer } from './FileViewer'
 import { API_CONFIG } from '../constants'
 import { resolveFileUrl } from '../utils/apiClient'
 import MessageBillingBadge from './MessageBillingBadge'
+import { ToolExecutionCard } from './ToolExecutionCard'
 
 /**
  * Tool Calls 折叠显示组件
@@ -197,6 +198,30 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
         url: resolvedCsvUrl,
         filename: metadata.kappa_batch_csv_path ? metadata.kappa_batch_csv_path.split('/').pop() : '批量热导率计算结果.csv',
         content: typeof metadata.kappa_batch_csv_content === 'string' ? metadata.kappa_batch_csv_content : undefined
+      })
+    }
+
+    // 🆕 声子色散数据 CSV 文件
+    if (metadata.phonon_dispersion_csv_url) {
+      const resolvedCsvUrl = resolveFileUrl(metadata.phonon_dispersion_csv_url)
+      console.log('📄 Found Phonon Dispersion CSV URL:', metadata.phonon_dispersion_csv_url, '->', resolvedCsvUrl)
+      links.push({
+        type: 'csv',
+        url: resolvedCsvUrl,
+        filename: metadata.phonon_dispersion_csv_path ? metadata.phonon_dispersion_csv_path.split('/').pop() : '声子色散数据.csv',
+        content: typeof metadata.phonon_dispersion_csv_content === 'string' ? metadata.phonon_dispersion_csv_content : undefined
+      })
+    }
+
+    // 🆕 声子态密度数据 CSV 文件
+    if (metadata.phonon_dos_csv_url) {
+      const resolvedCsvUrl = resolveFileUrl(metadata.phonon_dos_csv_url)
+      console.log('📄 Found Phonon DOS CSV URL:', metadata.phonon_dos_csv_url, '->', resolvedCsvUrl)
+      links.push({
+        type: 'csv',
+        url: resolvedCsvUrl,
+        filename: metadata.phonon_dos_csv_path ? metadata.phonon_dos_csv_path.split('/').pop() : '声子态密度数据.csv',
+        content: typeof metadata.phonon_dos_csv_content === 'string' ? metadata.phonon_dos_csv_content : undefined
       })
     }
 
@@ -533,6 +558,24 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
       }
     }
   }, [message, isUser, setCurrentStructure, setCurrentSessionStructures])
+
+  // 🆕 如果是工具执行消息，使用专门的工具执行卡片组件
+  if (message.type === 'tool_execution' && message.toolExecution) {
+    return (
+      <div className="flex justify-center mb-6">
+        <div className="w-full max-w-[80%]">
+          <ToolExecutionCard
+            toolName={message.toolExecution.toolName}
+            input={message.toolExecution.input}
+            output={message.toolExecution.output}
+            status={message.toolExecution.status}
+            timestamp={ensureValidTimestamp(message.timestamp).toISOString()}
+            error={message.toolExecution.error}
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-6`}>

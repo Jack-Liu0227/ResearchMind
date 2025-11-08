@@ -23,16 +23,24 @@ export interface ToolCall {
 export interface Message {
   id: string
   content: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool'  // 🆕 添加 'tool' 角色用于工具执行消息
   timestamp: Date
   agentId?: string
   agentName?: string
-  type?: 'text' | 'structure' | 'analysis' | 'error'
+  type?: 'text' | 'structure' | 'analysis' | 'error' | 'tool_execution'  // 🆕 添加 'tool_execution' 类型
   toolCalls?: ToolCall[]  // 工具调用记录
   billing?: {  // 计费信息
     tokens?: number  // 本次对话的 tokens
     photons?: number  // 本次对话的光子
     model_name?: string  // 使用的模型
+  }
+  // 🆕 工具执行信息（用于 type === 'tool_execution' 的消息）
+  toolExecution?: {
+    toolName: string
+    input?: Record<string, any>
+    output?: Record<string, any>
+    status: 'pending' | 'success' | 'error'
+    error?: string
   }
   metadata?: {
     structureData?: CrystalStructure

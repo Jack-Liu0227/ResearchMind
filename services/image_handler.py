@@ -152,9 +152,10 @@ class ImageHandler:
             # Extract filename from path
             filename = Path(path).name
 
-            # 🔧 优化：使用简洁的 /api/images/phonon 路径
+            # 🔧 优化：使用相对路径（不包含 /api 前缀）
+            # 前端的 resolveFileUrl() 会自动添加 /api 前缀
             # FastAPI 挂载点：/api/images/phonon -> mcp_servers/simulation/phonon_results
-            url = f"/api/images/phonon/{filename}"
+            url = f"/images/phonon/{filename}"
 
             # Check if file exists
             available = os.path.exists(path)

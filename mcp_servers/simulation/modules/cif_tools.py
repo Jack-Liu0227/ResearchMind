@@ -308,15 +308,22 @@ def calculate_kappa_from_cif_impl(
                     # ⚠️ TOKEN OPTIMIZATION: Save full results to CSV file
                     # 🔧 修复：将 CSV 保存到持久化目录，避免临时目录被删除
                     results_csv_path = None
+                    results_csv_url = None
                     try:
                         # 创建持久化目录
                         persistent_dir = Path(__file__).parent.parent / "thermal_conductivity_results"
                         persistent_dir.mkdir(parents=True, exist_ok=True)
 
                         # 保存到持久化目录
-                        results_csv_path = persistent_dir / f"kappa_results_{calc_id}.csv"
+                        results_csv_filename = f"kappa_results_{calc_id}.csv"
+                        results_csv_path = persistent_dir / results_csv_filename
                         result_df.to_csv(results_csv_path, index=False)
+
+                        # 🆕 生成前端可访问的下载 URL
+                        results_csv_url = f"/files/thermal_conductivity/{results_csv_filename}"
+
                         logger.info(f"💾 Saved full kappa results to persistent directory: {results_csv_path}")
+                        logger.info(f"🔗 Generated download URL: {results_csv_url}")
                     except Exception as e:
                         logger.warning(f"Failed to save results CSV: {e}")
 
@@ -333,6 +340,9 @@ def calculate_kappa_from_cif_impl(
                         "calculation_mode": "real",
                         # ⚠️ TOKEN OPTIMIZATION: Return file path instead of full DataFrame (~80% reduction)
                         "results_file": str(results_csv_path) if results_csv_path else None,
+                        # 🆕 添加下载 URL 供前端使用
+                        "results_csv_url": results_csv_url,
+                        "results_csv_path": str(results_csv_path) if results_csv_path else None,
                         "key_metrics": {
                             "kappa_value": round(kappa_value, 2),
                             "temperature": temperature,
@@ -456,23 +466,36 @@ def _calculate_kappa_batch(
             cif_content = structure.get("cifContent")
             if not cif_content and isinstance(structure.get("metadata"), dict):
                 cif_content = structure["metadata"].get("cifData")
-            
-            if not cif_content:
-                logger.warning(f"⚠️ Structure {i+1} ({formula}) has no CIF content, skipping")
+
+            # 🔧 递归提取 CIF 字符串（处理嵌套字典）
+            if isinstance(cif_content, dict):
+                # 尝试从字典中提取字符串内容
+                if "content" in cif_content:
+                    cif_content = cif_content["content"]
+                elif "data" in cif_content:
+                    cif_content = cif_content["data"]
+                elif "text" in cif_content:
+                    cif_content = cif_content["text"]
+                else:
+                    logger.warning(f"⚠️ Structure {i+1} ({formula}) has dict cifContent but no recognized key")
+                    cif_content = None
+
+            if not cif_content or not isinstance(cif_content, str):
+                logger.warning(f"⚠️ Structure {i+1} ({formula}) has no valid CIF content, skipping")
                 results.append({
                     "structure_id": structure_id,
                     "formula": formula,
                     "index": i + 1,
                     "success": False,
-                    "error": "No CIF content available"
+                    "error": f"No CIF content available (type: {type(cif_content).__name__})"
                 })
                 failed += 1
                 continue
-            
+
             try:
                 # Handle base64 encoded content if needed
                 try:
-                    if not str(cif_content).strip().startswith('data_'):
+                    if not cif_content.strip().startswith('data_'):
                         decoded = base64.b64decode(cif_content).decode('utf-8')
                         cif_content = decoded
                 except Exception:
@@ -534,6 +557,7 @@ def _calculate_kappa_batch(
                 # ⚠️ TOKEN OPTIMIZATION: Save batch results to CSV file
                 # 🔧 修复：将 CSV 保存到持久化目录，避免临时目录被删除
                 batch_results_csv = None
+                batch_results_csv_url = None
                 try:
                     batch_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
@@ -542,9 +566,15 @@ def _calculate_kappa_batch(
                     persistent_dir.mkdir(parents=True, exist_ok=True)
 
                     # 保存到持久化目录
-                    batch_results_csv = persistent_dir / f"batch_kappa_results_{batch_timestamp}.csv"
+                    batch_results_csv_filename = f"batch_kappa_results_{batch_timestamp}.csv"
+                    batch_results_csv = persistent_dir / batch_results_csv_filename
                     result_df.to_csv(batch_results_csv, index=False)
+
+                    # 🆕 生成前端可访问的下载 URL
+                    batch_results_csv_url = f"/files/thermal_conductivity/{batch_results_csv_filename}"
+
                     logger.info(f"💾 Saved batch kappa results to persistent directory: {batch_results_csv}")
+                    logger.info(f"🔗 Generated download URL: {batch_results_csv_url}")
                 except Exception as e:
                     logger.warning(f"Failed to save batch results CSV: {e}")
 
@@ -701,6 +731,9 @@ def _calculate_kappa_batch(
             "summary": summary,
             # ⚠️ TOKEN OPTIMIZATION: Full batch results saved to CSV file
             "batch_results_file": str(batch_results_csv) if batch_results_csv else None,
+            # 🆕 添加下载 URL 供前端使用
+            "batch_results_csv_url": batch_results_csv_url,
+            "batch_results_csv_path": str(batch_results_csv) if batch_results_csv else None,
             "timestamp": datetime.now().isoformat()
         }
         

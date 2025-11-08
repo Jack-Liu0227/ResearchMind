@@ -238,6 +238,39 @@ class DataProcessor:
 
                 logger.info(f"📄 Found batch thermal conductivity results CSV: {csv_url}")
 
+            # 🆕 处理声子计算结果的 CSV 文件
+            # 声子色散数据
+            if 'phonon_dispersion_csv' in data and data['phonon_dispersion_csv']:
+                csv_path = data['phonon_dispersion_csv']
+                filename = os.path.basename(csv_path)
+                # 转换为前端可访问的 URL
+                csv_url = f"/api/images/phonon/{filename}"
+                file_metadata['phonon_dispersion_csv_url'] = csv_url
+                file_metadata['phonon_dispersion_csv_path'] = csv_path
+
+                # 读取 CSV 内容用于内联展示
+                inline_csv = DataProcessor._read_text_file(csv_path)
+                if inline_csv is not None:
+                    file_metadata['phonon_dispersion_csv_content'] = inline_csv
+
+                logger.info(f"📄 Found phonon dispersion CSV: {csv_url}")
+
+            # 声子态密度数据
+            if 'phonon_dos_csv' in data and data['phonon_dos_csv']:
+                csv_path = data['phonon_dos_csv']
+                filename = os.path.basename(csv_path)
+                # 转换为前端可访问的 URL
+                csv_url = f"/api/images/phonon/{filename}"
+                file_metadata['phonon_dos_csv_url'] = csv_url
+                file_metadata['phonon_dos_csv_path'] = csv_path
+
+                # 读取 CSV 内容用于内联展示
+                inline_csv = DataProcessor._read_text_file(csv_path)
+                if inline_csv is not None:
+                    file_metadata['phonon_dos_csv_content'] = inline_csv
+
+                logger.info(f"📄 Found phonon DOS CSV: {csv_url}")
+
             # If we found any file links, send them as metadata
             if file_metadata:
                 logger.info(f"📄 Sending file metadata: {file_metadata}")

@@ -107,7 +107,29 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
       setCsvData(parsed)
     } catch (err) {
       console.error('❌ Failed to load CSV:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load CSV')
+      console.error('❌ Error details:', {
+        url,
+        resolvedUrl: resolveFileUrl(url),
+        filename,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined
+      })
+
+      // 提供更友好的错误信息
+      let errorMessage = 'Failed to load CSV'
+      if (err instanceof Error) {
+        if (err.message.includes('404')) {
+          errorMessage = 'CSV file not found (404). The file may have been moved or deleted.'
+        } else if (err.message.includes('403')) {
+          errorMessage = 'Access denied (403). You may not have permission to access this file.'
+        } else if (err.message.includes('500')) {
+          errorMessage = 'Server error (500). Please try again later.'
+        } else {
+          errorMessage = err.message
+        }
+      }
+
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }

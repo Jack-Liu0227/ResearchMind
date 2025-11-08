@@ -169,9 +169,25 @@ class AgentCoordinator:
                     upload_dir = base_dir / actual_session_id / "uploads"
                     upload_dir.mkdir(parents=True, exist_ok=True)
 
+                    # 🆕 导入文件名清理函数，确保与 MCP 工具使用相同的文件名
+                    import re
+
+                    def _sanitize_filename(filename: str) -> str:
+                        """清理文件名，与 uploaded_documents.py 保持一致"""
+                        sanitized = re.sub(r'[<>:"/\\|?*]+', "_", filename)
+                        sanitized = re.sub(r'[\s_]+', "_", sanitized)
+                        sanitized = sanitized.strip("_")
+                        if not sanitized:
+                            sanitized = "uploaded_document"
+                        if len(sanitized) > 200:
+                            sanitized = sanitized[:200]
+                        return sanitized
+
                     saved_files = []
                     for att in attachments:
-                        filename = att.get('filename', 'document.txt')
+                        original_filename = att.get('filename', 'document.txt')
+                        # 🆕 使用清理后的文件名，避免与 MCP 工具重复保存
+                        filename = _sanitize_filename(original_filename)
 
                         # 处理 base64 编码的文件
                         if att.get('encoding') == 'base64':
@@ -179,17 +195,29 @@ class AgentCoordinator:
                             try:
                                 file_bytes = base64.b64decode(content_b64)
                                 file_path = upload_dir / filename
+
+                                # 🆕 如果文件已存在，添加序号避免覆盖
+                                if file_path.exists():
+                                    base_name = file_path.stem
+                                    suffix = file_path.suffix
+                                    counter = 1
+                                    while file_path.exists():
+                                        file_path = upload_dir / f"{base_name}_{counter}{suffix}"
+                                        counter += 1
+                                    logger.info(f"File already exists, using new name: {file_path.name}")
+
                                 file_path.write_bytes(file_bytes)
 
                                 saved_files.append({
-                                    'filename': filename,
+                                    'filename': original_filename,  # 保留原始文件名用于显示
+                                    'saved_filename': filename,  # 保存的文件名
                                     'path': str(file_path),
                                     'size': len(file_bytes),
                                     'mime_type': att.get('mime_type', 'application/octet-stream')
                                 })
-                                logger.info(f"💾 Saved base64 file: {filename} ({len(file_bytes)} bytes) -> {file_path}")
+                                logger.info(f"💾 Saved base64 file: {original_filename} -> {file_path.name} ({len(file_bytes)} bytes)")
                             except Exception as e:
-                                logger.error(f"❌ Failed to save base64 file {filename}: {e}")
+                                logger.error(f"❌ Failed to save base64 file {original_filename}: {e}")
                                 continue
 
                         # 处理纯文本文件（如 CIF 文件）
@@ -198,17 +226,29 @@ class AgentCoordinator:
                             if text_content:
                                 try:
                                     file_path = upload_dir / filename
+
+                                    # 🆕 如果文件已存在，添加序号避免覆盖
+                                    if file_path.exists():
+                                        base_name = file_path.stem
+                                        suffix = file_path.suffix
+                                        counter = 1
+                                        while file_path.exists():
+                                            file_path = upload_dir / f"{base_name}_{counter}{suffix}"
+                                            counter += 1
+                                        logger.info(f"File already exists, using new name: {file_path.name}")
+
                                     file_path.write_text(text_content, encoding='utf-8')
 
                                     saved_files.append({
-                                        'filename': filename,
+                                        'filename': original_filename,  # 保留原始文件名用于显示
+                                        'saved_filename': filename,  # 保存的文件名
                                         'path': str(file_path),
                                         'size': len(text_content.encode('utf-8')),
                                         'mime_type': att.get('mime_type', 'text/plain')
                                     })
-                                    logger.info(f"💾 Saved text file: {filename} ({len(text_content)} chars) -> {file_path}")
+                                    logger.info(f"💾 Saved text file: {original_filename} -> {file_path.name} ({len(text_content)} chars)")
                                 except Exception as e:
-                                    logger.error(f"❌ Failed to save text file {filename}: {e}")
+                                    logger.error(f"❌ Failed to save text file {original_filename}: {e}")
                                     continue
 
                     if saved_files:
@@ -597,20 +637,47 @@ class AgentCoordinator:
                                 if session_key in self.current_tool_calls:
                                     self.current_tool_calls[session_key] = []
 
-            # Handle tool calls
-            if hasattr(event, 'tool_calls') and event.tool_calls:
-                for tool_call in event.tool_calls:
-                    logger.info(f"🔧 Tool called: {tool_call}")
-                    if hasattr(tool_call, 'name'):
-                        # 发送工具调用状态到前端
-                        tool_name = tool_call.name
+            # Handle tool calls - Try multiple ways to get tool calls from the event
+            tool_calls = None
 
+            # Method 1: Direct attribute access
+            if hasattr(event, 'tool_calls') and event.tool_calls:
+                tool_calls = event.tool_calls
+                logger.info(f"🔧 Found tool_calls via attribute: {len(tool_calls)} calls")
+
+            # Method 2: get_function_calls() method (Google ADK)
+            elif hasattr(event, 'get_function_calls'):
+                try:
+                    function_calls = event.get_function_calls()
+                    if function_calls:
+                        tool_calls = function_calls
+                        logger.info(f"🔧 Found tool_calls via get_function_calls(): {len(tool_calls)} calls")
+                except Exception as e:
+                    logger.debug(f"get_function_calls() failed: {e}")
+
+            # Process tool calls if found
+            if tool_calls:
+                for tool_call in tool_calls:
+                    logger.info(f"🔧 Tool called: {tool_call}")
+                    logger.info(f"🔧 Tool call type: {type(tool_call)}")
+                    logger.info(f"🔧 Tool call attributes: {dir(tool_call)}")
+
+                    # Extract tool name
+                    tool_name = None
+                    if hasattr(tool_call, 'name'):
+                        tool_name = tool_call.name
+                    elif hasattr(tool_call, 'function') and hasattr(tool_call.function, 'name'):
+                        tool_name = tool_call.function.name
+
+                    if tool_name:
                         # 提取工具调用参数
                         tool_input = {}
                         if hasattr(tool_call, 'args'):
                             tool_input = tool_call.args if isinstance(tool_call.args, dict) else {}
                         elif hasattr(tool_call, 'input'):
                             tool_input = tool_call.input if isinstance(tool_call.input, dict) else {}
+                        elif hasattr(tool_call, 'function') and hasattr(tool_call.function, 'args'):
+                            tool_input = tool_call.function.args if isinstance(tool_call.function.args, dict) else {}
 
                         # 记录工具调用信息
                         # 使用与 process_chat_message() 相同的 session_key 格式
@@ -625,6 +692,17 @@ class AgentCoordinator:
                             "status": "pending"
                         }
                         self.current_tool_calls[session_key].append(tool_call_record)
+
+                        # 🆕 发送独立的工具执行消息到前端
+                        logger.info(f"🔧 发送工具执行消息 (pending): {tool_name}")
+                        await MessageHandler.send_message(websocket, "tool_execution", {
+                            "agentId": agent_id,
+                            "sessionId": session_id,
+                            "toolName": tool_name,
+                            "input": tool_input,
+                            "status": "pending",
+                            "timestamp": tool_call_record["timestamp"]
+                        })
 
                         # 根据工具名称生成更友好的提示信息
                         tool_message = self._get_tool_friendly_message(tool_name)
@@ -789,13 +867,33 @@ class AgentCoordinator:
                         # 更新工具调用记录的输出
                         # 使用与 process_chat_message() 相同的 session_key 格式
                         session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
+                        tool_name = None
+                        tool_input = None
+                        tool_timestamp = None
+
                         if session_key in self.current_tool_calls and self.current_tool_calls[session_key]:
                             # 找到最后一个pending状态的tool call并更新
                             for tool_call_record in reversed(self.current_tool_calls[session_key]):
                                 if tool_call_record.get("status") == "pending":
                                     tool_call_record["output"] = result_data
                                     tool_call_record["status"] = "success"
+                                    tool_name = tool_call_record.get("name")
+                                    tool_input = tool_call_record.get("input")
+                                    tool_timestamp = tool_call_record.get("timestamp")
                                     break
+
+                        # 🆕 发送工具执行成功消息到前端
+                        if tool_name:
+                            logger.info(f"🔧 发送工具执行消息 (success): {tool_name}")
+                            await MessageHandler.send_message(websocket, "tool_execution", {
+                                "agentId": agent_id,
+                                "sessionId": session_id,
+                                "toolName": tool_name,
+                                "input": tool_input,
+                                "output": result_data,
+                                "status": "success",
+                                "timestamp": tool_timestamp or datetime.now().isoformat()
+                            })
 
                         # 工具结果处理完成后，发送thinking状态
                         await MessageHandler.send_message(websocket, "status", {

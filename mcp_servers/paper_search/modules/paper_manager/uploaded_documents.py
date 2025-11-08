@@ -135,25 +135,92 @@ def _process_single_file(
 
     file_bytes: Optional[bytes] = None
     text_content = ""
+    file_already_exists = target_path.exists()
 
-    if encoding == "base64":
-        try:
-            file_bytes = base64.b64decode(content, validate=False)
-        except Exception as exc:
-            logger.warning("Failed to decode base64 content; treating as text", filename=filename, error=str(exc))
-            file_bytes = None
-    elif _looks_like_base64(content):
-        try:
-            file_bytes = base64.b64decode(content, validate=False)
-        except Exception:
-            file_bytes = None
+    # 🆕 如果文件已存在，检查是否需要重新保存
+    if file_already_exists:
+        logger.info(f"📄 File already exists: {target_path.name}, checking if re-save is needed...")
 
-    if file_bytes is not None:
+        # 如果是 base64 编码，解码后比较内容
+        if encoding == "base64":
+            try:
+                file_bytes = base64.b64decode(content, validate=False)
+                existing_bytes = target_path.read_bytes()
+
+                # 如果内容完全相同，跳过保存，直接提取文本
+                if file_bytes == existing_bytes:
+                    logger.info(f"✅ File content identical, skipping save: {target_path.name}")
+                    text_content = _extract_text_from_binary(file_bytes, safe_name, mime_type)
+                    file_bytes = None  # 标记为不需要保存
+                else:
+                    # 内容不同，添加序号保存新文件
+                    logger.info(f"⚠️ File content different, saving as new file...")
+                    base_name = target_path.stem
+                    suffix = target_path.suffix
+                    counter = 1
+                    while target_path.exists():
+                        target_path = uploads_dir / f"{base_name}_{counter}{suffix}"
+                        counter += 1
+                    logger.info(f"Using new name: {target_path.name}")
+            except Exception as exc:
+                logger.warning("Failed to decode base64 content; treating as text", filename=filename, error=str(exc))
+                file_bytes = None
+        elif _looks_like_base64(content):
+            try:
+                file_bytes = base64.b64decode(content, validate=False)
+                existing_bytes = target_path.read_bytes()
+
+                if file_bytes == existing_bytes:
+                    logger.info(f"✅ File content identical, skipping save: {target_path.name}")
+                    text_content = _extract_text_from_binary(file_bytes, safe_name, mime_type)
+                    file_bytes = None
+                else:
+                    base_name = target_path.stem
+                    suffix = target_path.suffix
+                    counter = 1
+                    while target_path.exists():
+                        target_path = uploads_dir / f"{base_name}_{counter}{suffix}"
+                        counter += 1
+                    logger.info(f"Using new name: {target_path.name}")
+            except Exception:
+                file_bytes = None
+        else:
+            # 文本文件，比较内容
+            existing_text = target_path.read_text(encoding="utf-8", errors="ignore")
+            if content == existing_text:
+                logger.info(f"✅ File content identical, skipping save: {target_path.name}")
+                text_content = content
+            else:
+                base_name = target_path.stem
+                suffix = target_path.suffix
+                counter = 1
+                while target_path.exists():
+                    target_path = uploads_dir / f"{base_name}_{counter}{suffix}"
+                    counter += 1
+                logger.info(f"Using new name: {target_path.name}")
+    else:
+        # 文件不存在，正常解码
+        if encoding == "base64":
+            try:
+                file_bytes = base64.b64decode(content, validate=False)
+            except Exception as exc:
+                logger.warning("Failed to decode base64 content; treating as text", filename=filename, error=str(exc))
+                file_bytes = None
+        elif _looks_like_base64(content):
+            try:
+                file_bytes = base64.b64decode(content, validate=False)
+            except Exception:
+                file_bytes = None
+
+    # 只有在需要保存时才写入文件
+    if file_bytes is not None and not text_content:
         target_path.write_bytes(file_bytes)
         text_content = _extract_text_from_binary(file_bytes, safe_name, mime_type)
-    else:
+        logger.info(f"💾 Saved binary file: {target_path.name}")
+    elif not text_content:
         target_path.write_text(content, encoding="utf-8", errors="ignore")
         text_content = content
+        logger.info(f"💾 Saved text file: {target_path.name}")
 
     if not text_content.strip():
         text_content = f"用户上传的文件（{filename}）已保存，暂未自动提取文本内容。"

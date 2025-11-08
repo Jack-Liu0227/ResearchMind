@@ -66,25 +66,44 @@ const normalizeDownloadPath = (value: string): string => {
 }
 
 const buildDownloadUrl = (file: SessionFile): string | undefined => {
+  console.log('🔗 buildDownloadUrl - input file:', {
+    id: file.id,
+    type: file.type,
+    name: file.name,
+    downloadUrl: file.downloadUrl,
+    filePath: file.filePath
+  })
+
   const rawDownload = file.downloadUrl?.trim()
   if (rawDownload) {
-    return resolveFileUrl(normalizeDownloadPath(rawDownload))
+    const result = resolveFileUrl(normalizeDownloadPath(rawDownload))
+    console.log('🔗 buildDownloadUrl - using downloadUrl:', rawDownload, '->', result)
+    return result
   }
 
   const normalized = sanitizeRelativePath(file.filePath)
   if (!normalized) {
+    console.warn('⚠️ buildDownloadUrl - no valid path found for file:', file)
     return undefined
   }
 
+  console.log('🔗 buildDownloadUrl - normalized filePath:', normalized)
+
   if (normalized.startsWith('api/')) {
-    return resolveFileUrl(normalizeDownloadPath(`/${normalized}`))
+    const result = resolveFileUrl(normalizeDownloadPath(`/${normalized}`))
+    console.log('🔗 buildDownloadUrl - api/ path:', result)
+    return result
   }
 
   if (normalized.startsWith('download/')) {
-    return resolveFileUrl(normalizeDownloadPath(`/${normalized}`))
+    const result = resolveFileUrl(normalizeDownloadPath(`/${normalized}`))
+    console.log('🔗 buildDownloadUrl - download/ path:', result)
+    return result
   }
 
-  return resolveFileUrl(normalizeDownloadPath(`/download/${normalized}`))
+  const result = resolveFileUrl(normalizeDownloadPath(`/download/${normalized}`))
+  console.log('🔗 buildDownloadUrl - default /download/ path:', result)
+  return result
 }
 
 const extractFileName = (value?: string, fallback = 'data-file') => {
@@ -520,6 +539,18 @@ interface FilesTabProps {
 
 const FilesTab: React.FC<FilesTabProps> = ({ files }) => {
   const [previewKey, setPreviewKey] = useState<string | null>(null)
+
+  console.log('📁 FilesTab - rendering with files:', files.length)
+  files.forEach((file, index) => {
+    console.log(`📁 File ${index}:`, {
+      id: file.id,
+      type: file.type,
+      name: file.name,
+      downloadUrl: file.downloadUrl,
+      filePath: file.filePath
+    })
+  })
+
   if (!files.length) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-gray-500">
@@ -550,18 +581,28 @@ const FilesTab: React.FC<FilesTabProps> = ({ files }) => {
   }
 
   const handleOpen = (file: SessionFile, key: string) => {
+    console.log('👁️ handleOpen - file:', file, 'key:', key)
     const url = buildDownloadUrl(file)
+    console.log('👁️ handleOpen - built URL:', url)
+
     if (!url) {
+      console.error('❌ handleOpen - no URL available for file:', file)
       toast.error('No downloadable link available')
       return
     }
+
     // Inline preview for CSV/MD within panel; otherwise open new tab
     const type = (file.type || '').toLowerCase()
-    if (type.startsWith('csv') || type.startsWith('md')) {
+    console.log('👁️ handleOpen - file type:', type)
+
+    if (type.startsWith('csv') || type.startsWith('md') || type === 'csv' || type === 'md') {
+      console.log('👁️ handleOpen - opening inline preview for:', type)
       setPreviewKey(key)
       return
     }
+
     const finalUrl = resolveFileUrl(url)
+    console.log('👁️ handleOpen - opening in new tab:', finalUrl)
     window.open(finalUrl, '_blank')
   }
 
@@ -637,11 +678,26 @@ const FilesTab: React.FC<FilesTabProps> = ({ files }) => {
           </div>
           {previewKey === key && url && (
             <div className="mt-2">
-              {file.type.toLowerCase().startsWith('csv') ? (
-                <CsvViewer url={url} filename={displayName} defaultExpanded={true} />
-              ) : file.type.toLowerCase().startsWith('md') ? (
-                <MarkdownViewer url={url} filename={displayName} defaultExpanded={true} />
-              ) : null}
+              {(() => {
+                const fileType = (file.type || '').toLowerCase()
+                console.log('📄 Rendering preview for file:', {
+                  key,
+                  type: fileType,
+                  url,
+                  displayName
+                })
+
+                if (fileType.startsWith('csv') || fileType === 'csv') {
+                  console.log('📊 Rendering CsvViewer for:', displayName)
+                  return <CsvViewer url={url} filename={displayName} defaultExpanded={true} />
+                } else if (fileType.startsWith('md') || fileType === 'md') {
+                  console.log('📝 Rendering MarkdownViewer for:', displayName)
+                  return <MarkdownViewer url={url} filename={displayName} defaultExpanded={true} />
+                } else {
+                  console.warn('⚠️ Unknown file type for preview:', fileType)
+                  return null
+                }
+              })()}
             </div>
           )}
           </React.Fragment>

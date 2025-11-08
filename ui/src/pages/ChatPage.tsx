@@ -147,6 +147,21 @@ const ChatPage: React.FC = () => {
       '批量热导率计算结果'
     )
 
+    // 🆕 声子计算结果 CSV 文件
+    pushFile(
+      'csv',
+      metadata.phonon_dispersion_csv_url,
+      metadata.phonon_dispersion_csv_path,
+      '声子色散数据'
+    )
+
+    pushFile(
+      'csv',
+      metadata.phonon_dos_csv_url,
+      metadata.phonon_dos_csv_path,
+      '声子态密度数据'
+    )
+
     return files
   }
 
@@ -546,6 +561,21 @@ const ChatPage: React.FC = () => {
               images.forEach((image: any) => {
                 addToCurrentSessionPhononImages(image)
               })
+
+              // 🆕 将图片附加到最后一条 assistant 消息
+              const state = useAppStore.getState()
+              const msgs = state.messages
+              const assistantMsgs = msgs.filter(m => m.role === 'assistant')
+              const lastAssistant = assistantMsgs[assistantMsgs.length - 1]
+              if (lastAssistant) {
+                updateMessage(lastAssistant.id, {
+                  metadata: {
+                    ...(lastAssistant.metadata || {}),
+                    images: images
+                  }
+                })
+              }
+
               toast.success(`已加载 ${images.length} 个声子谱图片`)
             }, 100)
             return
@@ -563,24 +593,105 @@ const ChatPage: React.FC = () => {
           addToCurrentSessionPhononImages(image)
         })
 
-        toast.success(`已加载 ${images.length} 个声子谱图片`)
+        // 🆕 将图片附加到最后一条 assistant 消息的 metadata 中，以便在对话界面显示
+        const storeState = useAppStore.getState()
+        const allMessages = storeState.messages
+        const assistantMessages = allMessages.filter(m => m.role === 'assistant')
+        const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]
+
+        if (lastAssistantMessage) {
+          console.log('🖼️ 将图片附加到 assistant 消息:', lastAssistantMessage.id)
+          updateMessage(lastAssistantMessage.id, {
+            metadata: {
+              ...(lastAssistantMessage.metadata || {}),
+              images: images
+            }
+          })
+          toast.success(`已加载 ${images.length} 个声子谱图片`)
+        } else {
+          console.warn('⚠️ 未找到 assistant 消息，无法附加图片到对话')
+          toast.success(`已加载 ${images.length} 个声子谱图片，请在右侧面板查看`)
+        }
 
         // 不自动显示全屏，让用户在右侧面板查看
         // setShowPhononVisualization(true)
+      } else if (message.type === 'tool_execution' && message.data) {
+        // 🆕 处理工具执行消息
+        console.log('🔧 收到工具执行消息:', message.data)
+        console.log('🔧 消息类型:', message.type)
+        console.log('🔧 当前消息列表长度:', useAppStore.getState().messages.length)
 
-        // 将图片数据添加到当前消息的metadata中，并触发重新渲染
-        const currentState = useAppStore.getState()
-        const currentMessage = currentState.messages[currentState.messages.length - 1]
-        if (currentMessage) {
-          // 使用updateMessage方法确保触发重新渲染
-          updateMessage(currentMessage.id, {
-            metadata: {
-              ...currentMessage.metadata,
-              images: images as any
-            }
+        const toolExecutionData = message.data
+        const toolMessageId = `tool_${toolExecutionData.toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+        // 检查是否已存在该工具的消息（用于更新状态）
+        const storeState = useAppStore.getState()
+        const existingToolMessage = storeState.messages.find(
+          m => m.type === 'tool_execution' &&
+               m.toolExecution?.toolName === toolExecutionData.toolName &&
+               m.toolExecution?.status === 'pending'
+        )
+
+        if (existingToolMessage && toolExecutionData.status !== 'pending') {
+          // 更新现有的工具执行消息
+          console.log('🔧 更新工具执行状态:', existingToolMessage.id, toolExecutionData.status)
+          updateMessage(existingToolMessage.id, {
+            toolExecution: {
+              toolName: toolExecutionData.toolName,
+              input: toolExecutionData.input,
+              output: toolExecutionData.output,
+              status: toolExecutionData.status,
+              error: toolExecutionData.error
+            },
+            metadata: toolExecutionData.output || {}
           })
+
+          // 如果工具执行成功且生成了文件，添加到会话文件列表
+          if (toolExecutionData.status === 'success' && toolExecutionData.output) {
+            const generatedFiles = createSessionFilesFromMetadata(toolExecutionData.output, existingToolMessage.id)
+            generatedFiles.forEach((file) => addToCurrentSessionFiles(file))
+          }
+        } else {
+          // 创建新的工具执行消息
+          console.log('🔧 创建新的工具执行消息:', toolMessageId)
+          const toolMessage = {
+            id: toolMessageId,
+            content: `工具调用: ${toolExecutionData.toolName}`,
+            role: 'tool' as const,
+            timestamp: new Date(toolExecutionData.timestamp || Date.now()),
+            agentId: toolExecutionData.agentId,
+            type: 'tool_execution' as const,
+            toolExecution: {
+              toolName: toolExecutionData.toolName,
+              input: toolExecutionData.input,
+              output: toolExecutionData.output,
+              status: toolExecutionData.status,
+              error: toolExecutionData.error
+            },
+            metadata: toolExecutionData.output || {}
+          }
+
+          console.log('🔧 添加工具执行消息到消息列表')
+          addMessage(toolMessage)
+
+          // 验证消息是否被正确添加
+          setTimeout(() => {
+            const updatedState = useAppStore.getState()
+            const addedMessage = updatedState.messages.find(m => m.id === toolMessageId)
+            console.log('🔧 验证消息添加:', {
+              messageId: toolMessageId,
+              found: !!addedMessage,
+              type: addedMessage?.type,
+              totalMessages: updatedState.messages.length
+            })
+          }, 100)
+
+          // 如果工具执行成功且生成了文件，添加到会话文件列表
+          if (toolExecutionData.status === 'success' && toolExecutionData.output) {
+            const generatedFiles = createSessionFilesFromMetadata(toolExecutionData.output, toolMessageId)
+            generatedFiles.forEach((file) => addToCurrentSessionFiles(file))
+          }
         }
-        toast.success(`已加载 ${images.length} 个声子谱图片，请在右侧面板查看`)
       } else if ((message.type as any) === 'file_metadata' && message.data?.metadata) {
         // 处理文件元数据（CSV和MD文件链接）
         console.log('📄 收到文件元数据:', message.data.metadata)
@@ -625,6 +736,8 @@ const ChatPage: React.FC = () => {
           if (message.data.metadata.md_download_url) fileTypes.push('Markdown')
           if (message.data.metadata.kappa_results_csv_url) fileTypes.push('热导率结果')
           if (message.data.metadata.kappa_batch_csv_url) fileTypes.push('批量热导率结果')
+          if (message.data.metadata.phonon_dispersion_csv_url) fileTypes.push('声子色散数据')
+          if (message.data.metadata.phonon_dos_csv_url) fileTypes.push('声子态密度数据')
           if (fileTypes.length > 0) {
             console.log('📄 显示toast提示:', fileTypes)
             toast.success(`已生成${fileTypes.join('和')}文件，可在消息中查看和下载`, {

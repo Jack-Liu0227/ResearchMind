@@ -74,16 +74,58 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
 
       // 处理相对路径 URL
       const resolvedUrl = resolveFileUrl(url)
-      const response = await fetch(resolvedUrl)
+      console.log('📝 MarkdownViewer - Loading from URL:', resolvedUrl)
+      console.log('📝 MarkdownViewer - Original URL:', url)
+      console.log('📝 MarkdownViewer - Filename:', filename)
+
+      const response = await fetch(resolvedUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'text/markdown, text/plain, */*'
+        }
+      })
+
+      console.log('📝 MarkdownViewer - Response status:', response.status, response.statusText)
+      console.log('📝 MarkdownViewer - Response headers:', {
+        'content-type': response.headers.get('content-type'),
+        'content-length': response.headers.get('content-length')
+      })
+
       if (!response.ok) {
-        throw new Error(`Failed to load Markdown: ${response.statusText}`)
+        console.error(`❌ Markdown load failed: ${response.status} ${response.statusText}`)
+        throw new Error(`Failed to load Markdown: ${response.status} ${response.statusText}`)
       }
 
       const text = await response.text()
+      console.log(`📝 MarkdownViewer - Markdown loaded successfully, size: ${text.length} bytes`)
+      console.log(`📝 MarkdownViewer - Content preview (first 200 chars):`, text.substring(0, 200))
+
       setContent(text)
     } catch (err) {
-      console.error('Failed to load Markdown:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load Markdown')
+      console.error('❌ Failed to load Markdown:', err)
+      console.error('❌ Error details:', {
+        url,
+        resolvedUrl: resolveFileUrl(url),
+        filename,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined
+      })
+
+      // 提供更友好的错误信息
+      let errorMessage = 'Failed to load Markdown'
+      if (err instanceof Error) {
+        if (err.message.includes('404')) {
+          errorMessage = 'Markdown file not found (404). The file may have been moved or deleted.'
+        } else if (err.message.includes('403')) {
+          errorMessage = 'Access denied (403). You may not have permission to access this file.'
+        } else if (err.message.includes('500')) {
+          errorMessage = 'Server error (500). Please try again later.'
+        } else {
+          errorMessage = err.message
+        }
+      }
+
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }

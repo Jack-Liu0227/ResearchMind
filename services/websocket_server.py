@@ -23,11 +23,14 @@ logger = logging.getLogger(__name__)
 
 class WebSocketServer:
     """WebSocket server for ResearchMind"""
-    
+
+    # 全局实例（用于从HTTP端点访问WebSocket连接）
+    _instance: Optional['WebSocketServer'] = None
+
     def __init__(self, agent_coordinator: AgentCoordinator):
         """
         Initialize WebSocket server
-        
+
         Args:
             agent_coordinator: Agent coordinator instance
         """
@@ -35,6 +38,19 @@ class WebSocketServer:
         self.message_handler = MessageHandler()
         self.connected_clients: Dict[str, Any] = {}
         self.client_sessions: Dict[str, Dict] = {}
+
+        # 设置全局实例
+        WebSocketServer._instance = self
+
+    @classmethod
+    def get_instance(cls) -> Optional['WebSocketServer']:
+        """
+        获取全局WebSocket服务器实例
+
+        Returns:
+            WebSocket服务器实例，如果未初始化则返回None
+        """
+        return cls._instance
     
     async def start(self):
         """Start WebSocket server"""
@@ -73,9 +89,25 @@ class WebSocketServer:
 
         Args:
             websocket: WebSocket connection
-            path: Connection path
+            path: Connection path (e.g., /ws/client_xxx)
         """
-        client_id = str(uuid.uuid4())
+        # Extract client_id from path (e.g., /ws/client_xxx -> client_xxx)
+        # If not provided, generate a new one
+        client_id = None
+        if path:
+            # Path format: /ws/client_xxx or /client_xxx
+            parts = path.strip('/').split('/')
+            if len(parts) >= 2 and parts[0] == 'ws':
+                client_id = parts[1]
+            elif len(parts) == 1 and parts[0] != 'ws':
+                client_id = parts[0]
+
+        if not client_id or client_id == 'ws':
+            client_id = str(uuid.uuid4())
+            logger.info(f"🆕 Generated new client_id: {client_id}")
+        else:
+            logger.info(f"📦 Using client_id from URL: {client_id}")
+
         self.connected_clients[client_id] = websocket
         self.client_sessions[client_id] = {
             "connected_at": datetime.now().isoformat(),
