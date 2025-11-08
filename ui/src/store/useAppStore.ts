@@ -53,6 +53,11 @@ interface AppState {
   showPhononVisualization: boolean
   phononDisplayMode: 'fullscreen' | 'bottom' | 'panel'
 
+  // 🆕 UI 配置：控制对话框中的文件展示
+  uiConfig: {
+    showFilesInChat: boolean  // 是否在对话框中显示 CSV/图片等文件（右侧边栏始终显示）
+  }
+
   // Settings and connectivity
   settings: UserSettings
   connected: boolean
@@ -95,6 +100,8 @@ interface AppState {
   clearCurrentSessionPhononImages: () => void
   setShowPhononVisualization: (show: boolean) => void
   setPhononDisplayMode: (mode: 'fullscreen' | 'bottom' | 'panel') => void
+
+  setShowFilesInChat: (show: boolean) => void
 
   updateSettings: (settings: Partial<UserSettings>) => void
 
@@ -186,6 +193,10 @@ export const useAppStore = create<AppState>()(
       currentSessionPhononImages: [],
       showPhononVisualization: false,
       phononDisplayMode: 'fullscreen',
+
+      uiConfig: {
+        showFilesInChat: true,  // 默认显示文件
+      },
 
       settings: defaultSettings,
 
@@ -426,6 +437,15 @@ export const useAppStore = create<AppState>()(
 
       setShowPhononVisualization: (show) => set({ showPhononVisualization: show }),
       setPhononDisplayMode: (mode) => set({ phononDisplayMode: mode }),
+
+      setShowFilesInChat: (show) => {
+        set((state) => ({
+          uiConfig: {
+            ...state.uiConfig,
+            showFilesInChat: show,
+          },
+        }))
+      },
 
       updateSettings: (settings) => set({ settings: { ...get().settings, ...settings } }),
 

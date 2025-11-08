@@ -17,7 +17,9 @@ const SettingsPage: React.FC = () => {
     setCurrentStructure,
     setShowPhononVisualization,
     agents,
-    setCurrentAgent
+    setCurrentAgent,
+    uiConfig,
+    setShowFilesInChat
   } = useAppStore()
   const [localSettings, setLocalSettings] = useState(settings)
   const [isLoading, setIsLoading] = useState(false)
@@ -264,6 +266,34 @@ const SettingsPage: React.FC = () => {
                         autoSave: newValue
                       })
                       toast.success(newValue ? '已启用自动保存' : '已禁用自动保存')
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                </label>
+              </div>
+
+              <div className="border-t border-gray-200"></div>
+
+              {/* 🆕 对话框文件展示设置 */}
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
+                    对话框中显示文件
+                    <Info className="w-4 h-4 ml-1 text-gray-400" />
+                  </label>
+                  <p className="text-sm text-gray-500 mt-1">
+                    在对话框中显示 CSV、图片等文件（右侧边栏始终显示所有数据）
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={uiConfig.showFilesInChat}
+                    onChange={(e) => {
+                      const newValue = e.target.checked
+                      setShowFilesInChat(newValue)
+                      toast.success(newValue ? '已在对话框中显示文件' : '已隐藏对话框中的文件')
                     }}
                     className="sr-only peer"
                   />

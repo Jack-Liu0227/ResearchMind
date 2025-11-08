@@ -39,7 +39,7 @@ async def classify_user_request(query: str) -> Dict[str, Any]:
     try:
         # Format prompt
         prompt = format_classify_prompt(query)
-        
+
         # Call LLM
         response = await litellm.acompletion(
             model=os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash'),
@@ -47,7 +47,9 @@ async def classify_user_request(query: str) -> Dict[str, Any]:
                 {"role": "system", "content": "You are a research request classifier."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3
+            temperature=0.3,
+            api_key=os.getenv('OPENAI_API_KEY'),  # 🔧 显式传递 API Key
+            api_base=os.getenv('OPENAI_BASE_URL')  # 🔧 显式传递 API Base URL
         )
         
         # Parse response
@@ -113,7 +115,9 @@ async def generate_research_plan(user_intent: str, max_steps: int = 3) -> Dict[s
                 {"role": "system", "content": "You are a search query optimization specialist for academic databases."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3  # Lower temperature for more consistent query generation
+            temperature=0.3,  # Lower temperature for more consistent query generation
+            api_key=os.getenv('OPENAI_API_KEY'),  # 🔧 显式传递 API Key
+            api_base=os.getenv('OPENAI_BASE_URL')  # 🔧 显式传递 API Base URL
         )
 
         # Parse response

@@ -63,8 +63,11 @@ async def analyze_paper_content(
         if content:
             content_excerpt = content[:2000]  # 取前2000字符
 
-        # 使用LLM分析
+        # 使用LLM分析（带重试机制）
         model = os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')
+        api_key = os.getenv('OPENAI_API_KEY')
+        api_base = os.getenv('OPENAI_BASE_URL')
+
         prompt = format_paper_summary_prompt(
             title=title,
             authors=authors,
@@ -72,16 +75,42 @@ async def analyze_paper_content(
             content_excerpt=content_excerpt
         )
 
-        # 使用 asyncio 包装同步的 completion 调用
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: completion(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
-        )
+        # 重试机制：最多尝试 3 次
+        max_retries = 3
+        retry_delay = 2  # 秒
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                # 使用 asyncio 包装同步的 completion 调用，添加超时
+                loop = asyncio.get_event_loop()
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: completion(
+                            model=model,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0.3,
+                            timeout=30,  # 30秒超时
+                            api_key=api_key,  # 🔧 显式传递 API Key
+                            api_base=api_base  # 🔧 显式传递 API Base URL
+                        )
+                    ),
+                    timeout=35  # 总超时 35 秒
+                )
+                break  # 成功则跳出重试循环
+
+            except (asyncio.TimeoutError, Exception) as e:
+                last_error = e
+                error_type = type(e).__name__
+                logger.warning(f'Attempt {attempt + 1}/{max_retries} failed for paper {paper_id}: {error_type} - {str(e)}')
+
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    # 最后一次尝试失败，抛出异常
+                    raise Exception(f'Failed after {max_retries} attempts: {str(last_error)}')
 
         analysis_text = response.choices[0].message.content.strip()
 
@@ -287,6 +316,8 @@ async def _condense_abstract_to_chinese_async(abstract_en: str) -> str:
         from prompts import format_translate_abstract_prompt
 
         model = os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')
+        api_key = os.getenv('OPENAI_API_KEY')
+        api_base = os.getenv('OPENAI_BASE_URL')
         prompt = format_translate_abstract_prompt(abstract_en)
 
         # 使用 asyncio 包装同步的 completion 调用
@@ -296,7 +327,9 @@ async def _condense_abstract_to_chinese_async(abstract_en: str) -> str:
             lambda: completion(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
+                temperature=0.3,
+                api_key=api_key,  # 🔧 显式传递 API Key
+                api_base=api_base  # 🔧 显式传递 API Base URL
             )
         )
 
@@ -367,12 +400,16 @@ def _condense_abstract_to_chinese(abstract_en: str) -> str:
         from prompts import format_translate_abstract_prompt
 
         model = os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')
+        api_key = os.getenv('OPENAI_API_KEY')
+        api_base = os.getenv('OPENAI_BASE_URL')
         prompt = format_translate_abstract_prompt(abstract_en)
 
         response = completion(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
+            temperature=0.3,
+            api_key=api_key,  # 🔧 显式传递 API Key
+            api_base=api_base  # 🔧 显式传递 API Base URL
         )
 
         translation = response.choices[0].message.content.strip()

@@ -50,7 +50,9 @@ async def double_check_results(
             model=os.getenv('MODEL_USE', 'gemini/gemini-2.0-flash'),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            api_key=os.getenv('OPENAI_API_KEY'),  # 🔧 显式传递 API Key
+            api_base=os.getenv('OPENAI_BASE_URL')  # 🔧 显式传递 API Base URL
         )
 
         result = json.loads(response.choices[0].message.content)
@@ -95,7 +97,9 @@ async def reflect_on_results(
             model=os.getenv('MODEL_USE', 'gemini/gemini-2.0-flash'),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            api_key=os.getenv('OPENAI_API_KEY'),  # 🔧 显式传递 API Key
+            api_base=os.getenv('OPENAI_BASE_URL')  # 🔧 显式传递 API Base URL
         )
 
         result = json.loads(response.choices[0].message.content)
@@ -230,7 +234,9 @@ Respond in JSON format:
             model=os.getenv('MODEL_USE', 'gemini/gemini-2.0-flash'),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            api_key=os.getenv('OPENAI_API_KEY'),  # 🔧 显式传递 API Key
+            api_base=os.getenv('OPENAI_BASE_URL')  # 🔧 显式传递 API Base URL
         )
 
         result = json.loads(response.choices[0].message.content)

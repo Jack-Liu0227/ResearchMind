@@ -668,16 +668,24 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
               </div>
             )}
 
-            {/* 计算结果图片展示 */}
+            {/* 计算结果图片展示（受 uiConfig.showFilesInChat 控制） */}
             {(() => {
+              // 🔧 从 store 获取配置
+              const showFilesInChat = useAppStore.getState().uiConfig.showFilesInChat
+
+              // 如果配置为不显示，则跳过
+              if (!showFilesInChat) {
+                return null
+              }
+
               // 从消息内容和metadata中提取图片数据
               let imageData = extractImageData(message.content)
-              
+
               // 检查metadata中是否有图片数据
               if (message.metadata?.images && Array.isArray(message.metadata.images)) {
                 imageData = [...imageData, ...message.metadata.images]
               }
-              
+
               if (imageData.length === 0) return null
 
               return (
@@ -834,11 +842,22 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
               </div>
             )}
 
-            {/* CSV和Markdown文件展示 */}
+            {/* CSV和Markdown文件展示（受 uiConfig.showFilesInChat 控制） */}
             {(() => {
+              // 🔧 从 store 获取配置
+              const showFilesInChat = useAppStore.getState().uiConfig.showFilesInChat
+
               console.log('📄 MessageItem - message.metadata:', message.metadata)
+              console.log('📄 MessageItem - showFilesInChat:', showFilesInChat)
+
               const fileLinks = extractFileLinks(message.content, message.metadata)
               console.log('📄 MessageItem - fileLinks:', fileLinks)
+
+              // 如果配置为不显示，则跳过
+              if (!showFilesInChat) {
+                console.log('📄 MessageItem - files hidden by config')
+                return null
+              }
 
               if (fileLinks.length === 0) {
                 console.log('📄 MessageItem - no file links found')
