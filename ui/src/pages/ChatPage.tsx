@@ -692,6 +692,34 @@ const ChatPage: React.FC = () => {
             generatedFiles.forEach((file) => addToCurrentSessionFiles(file))
           }
         }
+      } else if ((message.type as any) === 'file_data' && message.data?.files) {
+        // 🆕 处理独立的文件数据消息（热导率 CSV、批量计算结果等）
+        console.log('📄 收到文件数据:', message.data.files)
+        const files = message.data.files
+
+        if (Array.isArray(files)) {
+          files.forEach((fileData: any) => {
+            const file: SessionFile = {
+              id: fileData.id || `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              type: fileData.type || 'csv',
+              name: fileData.name || fileData.filename || '数据文件',
+              downloadUrl: fileData.downloadUrl || fileData.url,
+              filePath: fileData.filePath,
+              inlineContent: fileData.inlineContent,
+              sourceMessageId: messages[messages.length - 1]?.id,
+              createdAt: fileData.createdAt || Date.now(),
+              extra: fileData.extra || {}
+            }
+
+            console.log('📄 添加文件到右侧面板:', file.name)
+            addToCurrentSessionFiles(file)
+          })
+
+          toast.success(`已生成 ${files.length} 个数据文件，可在右侧面板查看`, {
+            duration: 4000,
+            icon: '📄'
+          })
+        }
       } else if ((message.type as any) === 'file_metadata' && message.data?.metadata) {
         // 处理文件元数据（CSV和MD文件链接）
         console.log('📄 收到文件元数据:', message.data.metadata)

@@ -211,6 +211,17 @@ class DataProcessor:
                 csv_path = data['results_file']
                 filename = os.path.basename(csv_path)
 
+                # 🔧 提取 CIF 文件名用于更清晰的显示
+                cif_filename = data.get('cif_filename', '')
+                method = data.get('method', 'unknown')
+                kappa_value = data.get('thermal_conductivity', {}).get('value', 'N/A')
+
+                # 生成更清晰的文件名：包含 CIF 名称、方法和热导率值
+                if cif_filename:
+                    display_name = f"{cif_filename} - {method} (κ={kappa_value} W/m·K)"
+                else:
+                    display_name = f"热导率结果 - {filename}"
+
                 # 🔧 修复：从路径中提取 session_id 生成正确的 URL
                 # 路径格式: session_data/simulation/{session_id}/thermal_conductivity/file.csv
                 # URL 格式: /api/files/thermal_conductivity/{session_id}/thermal_conductivity/file.csv
@@ -245,14 +256,16 @@ class DataProcessor:
                     "files": [{
                         "id": f"kappa_{filename}",
                         "type": "csv",
-                        "name": f"热导率结果 - {filename}",
+                        "name": display_name,
                         "downloadUrl": csv_url,
                         "filePath": csv_path,
                         "inlineContent": inline_csv,
                         "createdAt": datetime.now().timestamp() * 1000,
                         "extra": {
                             "category": "thermal_conductivity",
-                            "method": data.get('method', 'unknown')
+                            "cif_filename": cif_filename,
+                            "method": method,
+                            "kappa_value": kappa_value
                         }
                     }],
                     "agentId": agent_id,
