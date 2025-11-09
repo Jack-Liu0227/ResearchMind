@@ -123,11 +123,12 @@ def _get_cif_file_path(session_id: str, cif_filename: str) -> Optional[Path]:
     获取 CIF 文件路径（统一存储）
 
     优先级：
-    1. session_data/simulation/{session_id}/relaxed/{cif_filename}
+    1. session_data/simulation/{session_id}/relaxed_structures/{cif_filename}
     2. session_data/simulation/{session_id}/cif/{cif_filename}
     3. session_data/simulation/{session_id}/uploads/{cif_filename}
-    4. 旧路径（向后兼容）: mcp_servers/simulation/cif/{session_id}/relax/{cif_filename}
-    5. 旧路径（向后兼容）: mcp_servers/simulation/cif/{session_id}/uploads/{cif_filename}
+    4. session_data/simulation/{session_id}/generated_structures/**/{cif_filename}  # 🆕 支持生成的结构（递归查找）
+    5. 旧路径（向后兼容）: mcp_servers/simulation/cif/{session_id}/relax/{cif_filename}
+    6. 旧路径（向后兼容）: mcp_servers/simulation/cif/{session_id}/uploads/{cif_filename}
 
     Args:
         session_id: 会话ID
@@ -136,23 +137,36 @@ def _get_cif_file_path(session_id: str, cif_filename: str) -> Optional[Path]:
     Returns:
         CIF文件路径，如果不存在返回None
     """
-    # 尝试新的统一存储路径
+    # 尝试新的统一存储路径（直接查找）
     for data_type in ["relaxed_structures", "cif", "uploads"]:
         try:
             storage_path = get_session_storage_path(session_id, data_type, create=False)
             cif_path = storage_path / cif_filename
             if cif_path.exists():
-                logger.info(f"Found CIF file in unified storage: {cif_path}")
+                logger.info(f"✅ Found CIF file in unified storage ({data_type}): {cif_path}")
                 return cif_path
         except Exception as e:
             logger.debug(f"Failed to check {data_type}: {e}")
+
+    # 🔧 特殊处理 generated_structures：递归查找子目录
+    # 因为生成的结构保存在 generated/{composition}_{generation_id}/generated/ 或 processed/ 下
+    try:
+        generated_base = get_session_storage_path(session_id, "generated_structures", create=False)
+        if generated_base.exists():
+            # 使用 glob 递归查找文件
+            for cif_path in generated_base.rglob(cif_filename):
+                if cif_path.is_file():
+                    logger.info(f"✅ Found CIF file in generated_structures (recursive): {cif_path}")
+                    return cif_path
+    except Exception as e:
+        logger.debug(f"Failed to check generated_structures: {e}")
 
     # 尝试旧路径（向后兼容）
     simulation_cif_dir = Path(__file__).parent / "cif"
     for subdir in ["relax", "uploads"]:
         cif_path = simulation_cif_dir / session_id / subdir / cif_filename
         if cif_path.exists():
-            logger.warning(f"Found CIF file in legacy path: {cif_path}")
+            logger.warning(f"⚠️ Found CIF file in legacy path: {cif_path}")
             return cif_path
 
     return None

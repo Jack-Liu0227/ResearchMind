@@ -50,14 +50,14 @@ SIMULATION_AGENT_INSTRUCTION = """You are a computational materials scientist wi
 
 ### 单一材料完整分析
 - **从化学式到声子谱**:
-  1. `generate_crystal_structure(composition)`
-  2. `relax_structure(cif_content)` (推荐)
-  3. `calculate_phonon(relaxed_cif_content)`
+  1. `generate_crystal_structure(composition, session_id=session_id)` → 返回生成的 CIF 文件名（如 `sample_1.cif`）
+  2. `relax_structure(session_id=session_id, cif_filename="sample_1.cif")` → 🆕 直接使用生成的文件名，无需复制
+  3. `calculate_phonon(session_id=session_id, cif_filename="relaxed_*.cif")`
 
 - **从化学式到能量属性**:
-  1. `generate_crystal_structure(composition)`
-  2. `relax_structure(cif_content)` (推荐)
-  3. `calculate_energy_from_cif(relaxed_cif_content)`
+  1. `generate_crystal_structure(composition, session_id=session_id)`
+  2. `relax_structure(session_id=session_id, cif_filename="sample_1.cif")` → 🆕 直接使用生成的文件名
+  3. `calculate_energy_from_cif(session_id=session_id, cif_filename="relaxed_*.cif")`
 
 ### 快速计算 (跳过弛豫)
 - **直接计算热导率**:
@@ -110,9 +110,18 @@ SIMULATION_AGENT_INSTRUCTION = """You are a computational materials scientist wi
 ## 可用工具
 
 ### 结构生成与处理
-- `generate_crystal_structure(composition, num_structures=1)`: 根据化学式生成晶体结构, 可指定生成数量
-- `extract_and_validate_cif(message_parts)`: 从用户消息中提取并验证 CIF 文件
-- `relax_structure(cif_content, optimizer="BFGS", max_steps=500, fmax=0.01)`: 对晶体结构进行几何优化
+- `generate_crystal_structure(composition, session_id, num_structures=1)`: 根据化学式生成晶体结构, 可指定生成数量
+  - 🔴 session_id 是必需参数
+  - 返回生成的 CIF 文件名列表（如 `["sample_1.cif", "sample_2.cif"]`）
+  - 文件保存在 `session_data/simulation/{session_id}/generated/{composition}_{generation_id}/generated/` 或 `processed/` 下
+- `extract_and_validate_cif(session_id, filename)`: 从用户上传的文件中提取并验证 CIF
+- `relax_structure(session_id, cif_filename, optimizer="BFGS", max_steps=500, fmax=0.01)`: 对晶体结构进行几何优化
+  - 🔴 session_id 是必需参数
+  - 🆕 cif_filename 可以是生成的文件名（如 `sample_1.cif`），系统会自动在以下目录中查找：
+    1. `relaxed_structures/` - 已弛豫的结构
+    2. `cif/` - 用户上传的结构
+    3. `generated_structures/**/*` - 生成的结构（递归查找）
+  - 无需手动复制文件到上传目录
 
 ### 性质计算
 - `calculate_phonon(session_id, cif_filename, supercell_matrix=[4,4,4])`: 计算声子谱和声子态密度
