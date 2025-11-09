@@ -206,7 +206,8 @@ def calculate_kappa_from_cif_impl(
     method: str = "kappa_p",
     temperature: float = 300.0,
     working_dir: str = None,
-    keep_files: bool = False
+    keep_files: bool = False,
+    session_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Calculate thermal conductivity from CIF file content.
@@ -316,16 +317,11 @@ def calculate_kappa_from_cif_impl(
                         sys.path.insert(0, str(PathLib(__file__).parent.parent.parent))
                         from shared.storage_manager import get_session_storage_path, get_file_url
 
-                        # 从 working_dir 提取 session_id（如果可能）
-                        session_id = "default"
-                        if working_dir and "session_" in str(working_dir):
-                            import re
-                            match = re.search(r'session_([^/\\]+)', str(working_dir))
-                            if match:
-                                session_id = match.group(1)
+                        # 使用传入的 session_id，如果没有则使用 "default"
+                        effective_session_id = session_id or "default"
 
                         persistent_dir = get_session_storage_path(
-                            session_id=session_id,
+                            session_id=effective_session_id,
                             data_type="thermal_conductivity",
                             create=True
                         )
@@ -336,7 +332,7 @@ def calculate_kappa_from_cif_impl(
                         result_df.to_csv(results_csv_path, index=False)
 
                         # 🆕 生成前端可访问的下载 URL
-                        results_csv_url = get_file_url(results_csv_path, "thermal_conductivity")
+                        results_csv_url = get_file_url(results_csv_path, "thermal_conductivity", session_id=effective_session_id)
 
                         logger.info(f"💾 Saved full kappa results to persistent directory: {results_csv_path}")
                         logger.info(f"🔗 Generated download URL: {results_csv_url}")
@@ -587,16 +583,11 @@ def _calculate_kappa_batch(
                     sys.path.insert(0, str(PathLib(__file__).parent.parent.parent))
                     from shared.storage_manager import get_session_storage_path, get_file_url
 
-                    # 从 working_dir 提取 session_id（如果可能）
-                    session_id = "default"
-                    if working_dir and "session_" in str(working_dir):
-                        import re
-                        match = re.search(r'session_([^/\\]+)', str(working_dir))
-                        if match:
-                            session_id = match.group(1)
+                    # 使用传入的 session_id，如果没有则使用 "default"
+                    effective_session_id = session_id or "default"
 
                     persistent_dir = get_session_storage_path(
-                        session_id=session_id,
+                        session_id=effective_session_id,
                         data_type="thermal_conductivity",
                         create=True
                     )
@@ -607,7 +598,7 @@ def _calculate_kappa_batch(
                     result_df.to_csv(batch_results_csv, index=False)
 
                     # 🆕 生成前端可访问的下载 URL
-                    batch_results_csv_url = get_file_url(batch_results_csv, "thermal_conductivity")
+                    batch_results_csv_url = get_file_url(batch_results_csv, "thermal_conductivity", session_id=effective_session_id)
 
                     logger.info(f"💾 Saved batch kappa results to persistent directory: {batch_results_csv}")
                     logger.info(f"🔗 Generated download URL: {batch_results_csv_url}")

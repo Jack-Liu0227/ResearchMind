@@ -1148,7 +1148,8 @@ async def calculate_kappa_from_cif(
             method=method,
             temperature=temperature,
             working_dir=str(working_dir_path) if working_dir_path else None,
-            keep_files=keep_files
+            keep_files=keep_files,
+            session_id=session_id
         )
 
         if keep_files and working_dir_path:
@@ -1274,7 +1275,8 @@ async def calculate_kappa_from_directory(
             method=method,
             temperature=temperature,
             working_dir=str(working_dir_path) if working_dir_path else None,
-            keep_files=keep_files
+            keep_files=keep_files,
+            session_id=session_id
         )
 
         if keep_files and working_dir_path:
@@ -1354,7 +1356,8 @@ async def batch_calculate_kappa(
         method=method,
         temperature=temperature,
         working_dir=str(working_dir_path) if working_dir_path else None,
-        keep_files=keep_files
+        keep_files=keep_files,
+        session_id=session_id
     )
 
     if keep_files and working_dir_path:
