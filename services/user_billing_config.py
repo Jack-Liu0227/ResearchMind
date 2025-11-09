@@ -130,19 +130,33 @@ class UserBillingConfigManager:
                         client_name: str = "ResearchMind") -> bool:
         """
         保存用户的 Bohrium 配置
-        
+
         Args:
             user_id: 用户 ID（可以是 session_id 或真实用户 ID）
             access_key: Bohrium AccessKey
             sku_id: Bohrium SKU ID
             client_name: 客户端名称
-            
+
         Returns:
             是否保存成功
         """
         try:
+            # 🔧 验证 access_key 格式（防止保存错误数据）
+            if not access_key or not isinstance(access_key, str):
+                logger.error(f"❌ 无效的 access_key: 类型={type(access_key)}, 值={access_key[:50] if access_key else 'None'}")
+                return False
+
+            # 检查 access_key 是否包含异常字符（如换行符、日志前缀等）
+            if '\n' in access_key or '[后端]' in access_key or 'Traceback' in access_key:
+                logger.error(f"❌ access_key 包含异常字符，拒绝保存: {access_key[:100]}")
+                return False
+
+            # 检查 access_key 长度（Bohrium AccessKey 通常是 32 位十六进制字符串）
+            if len(access_key) < 16 or len(access_key) > 128:
+                logger.warning(f"⚠️ access_key 长度异常: {len(access_key)} 字符")
+
             config = {
-                'access_key': access_key,
+                'access_key': access_key.strip(),  # 去除首尾空格
                 'sku_id': sku_id,
                 'client_name': client_name,
                 'updated_at': str(Path(__file__).stat().st_mtime)
@@ -155,9 +169,9 @@ class UserBillingConfigManager:
             # 🔒 生产模式：简化日志
             verbose = os.getenv('PHOTON_BILLING_VERBOSE', 'false').lower() == 'true'
             if verbose:
-                logger.info(f"✅ 已保存用户 {user_id[:8]}... 的计费配置")
+                logger.info(f"✅ 已保存用户 {user_id[:8]}... 的计费配置 (AK: {access_key[:8]}...{access_key[-4:]})")
             else:
-                logger.info("✅ 已保存用户计费配置")
+                logger.info(f"✅ 已保存用户计费配置 (AK: {access_key[:8]}...{access_key[-4:]})")
             return True
 
         except Exception as e:
