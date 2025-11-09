@@ -110,9 +110,9 @@ class AgentCoordinator:
             # 记录消息开始时的计费状态（用于计算本条消息的增量）
             from services.user_billing_config import get_billing_context_manager
             context_manager = get_billing_context_manager()
-            # 使用 session_id 作为对话 ID
+            # 使用 session_id 作为对话 ID 和 user_id（保持一致性）
             conversation_id = session_id or 'unknown'
-            user_id = client_id or 'unknown'
+            user_id = session_id or 'unknown'  # 🔧 修复：使用 session_id 而不是 client_id
             context = context_manager.get_or_create_context(conversation_id, user_id)
             start_snapshot = context.get_snapshot()
 
@@ -653,7 +653,7 @@ class AgentCoordinator:
 
                                     start_billing_info = self.message_start_billing.get(session_key, {})
                                     conversation_id = start_billing_info.get('conversation_id', session_id or 'unknown')
-                                    user_id = start_billing_info.get('user_id', client_id or 'unknown')
+                                    user_id = start_billing_info.get('user_id', session_id or 'unknown')  # 🔧 修复：使用 session_id 而不是 client_id
 
                                     context = context_manager.get_context(conversation_id)
                                     if context:
