@@ -16,14 +16,27 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# Import prompts
+# Import prompts - 使用相对导入避免模块冲突
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from prompts import (
-    format_classify_prompt,
-    format_research_plan_prompt
-)
+
+# 添加 paper_search 目录到 sys.path
+paper_search_dir = Path(__file__).parent.parent
+if str(paper_search_dir) not in sys.path:
+    sys.path.insert(0, str(paper_search_dir))
+
+# 使用绝对导入，明确指定模块路径
+try:
+    from prompts import (
+        format_classify_prompt,
+        format_research_plan_prompt
+    )
+except ImportError:
+    # 如果失败，尝试从 mcp_servers.paper_search 导入
+    from mcp_servers.paper_search.prompts import (
+        format_classify_prompt,
+        format_research_plan_prompt
+    )
 
 
 async def classify_user_request(query: str) -> Dict[str, Any]:
