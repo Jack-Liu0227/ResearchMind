@@ -594,9 +594,13 @@ async def calculate_phonon_from_directory(
                 # Call phonon calculation implementation
                 from modules.mattersim_energy import calculate_phonon_impl
 
-                # Determine output directory for phonon results
-                phonon_dir = Path(__file__).parent / "phonon_results"
-                phonon_dir.mkdir(parents=True, exist_ok=True)
+                # Determine output directory for phonon results - use unified storage
+                from shared.storage_manager import get_session_storage_path
+                phonon_dir = get_session_storage_path(
+                    session_id=session_id or "default",
+                    data_type="phonon_results",
+                    create=True
+                )
 
                 result = calculate_phonon_impl(
                     cif_content=cif_content,
@@ -769,11 +773,16 @@ async def calculate_phonon(
             "error": f"Failed to read CIF file: {str(e)}"
         }
 
-    # 确定图片保存目录（在调用 impl 之前）
+    # 确定图片保存目录（在调用 impl 之前）- 使用统一存储
     from pathlib import Path
-    # 统一使用 mcp_servers/simulation/phonon_results 目录
-    phonon_dir = Path(__file__).parent / "phonon_results"
-    phonon_dir.mkdir(parents=True, exist_ok=True)
+    from shared.storage_manager import get_session_storage_path
+
+    # 使用统一的 session_data 目录
+    phonon_dir = get_session_storage_path(
+        session_id=session_id or "default",
+        data_type="phonon_results",
+        create=True
+    )
     url_prefix = f"/images/phonon"
     logger.info(f"📁 Target phonon directory: {phonon_dir}")
 

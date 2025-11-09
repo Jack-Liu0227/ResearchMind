@@ -306,13 +306,26 @@ def calculate_kappa_from_cif_impl(
                     calc_id = f"calc_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
                     # ⚠️ TOKEN OPTIMIZATION: Save full results to CSV file
-                    # 🔧 修复：将 CSV 保存到持久化目录，避免临时目录被删除
+                    # 🔧 使用统一存储管理器
                     results_csv_path = None
                     results_csv_url = None
                     try:
-                        # 创建持久化目录
-                        persistent_dir = Path(__file__).parent.parent / "thermal_conductivity_results"
-                        persistent_dir.mkdir(parents=True, exist_ok=True)
+                        # 使用统一存储目录
+                        from shared.storage_manager import get_session_storage_path, get_file_url
+
+                        # 从 working_dir 提取 session_id（如果可能）
+                        session_id = "default"
+                        if working_dir and "session_" in str(working_dir):
+                            import re
+                            match = re.search(r'session_([^/\\]+)', str(working_dir))
+                            if match:
+                                session_id = match.group(1)
+
+                        persistent_dir = get_session_storage_path(
+                            session_id=session_id,
+                            data_type="thermal_conductivity",
+                            create=True
+                        )
 
                         # 保存到持久化目录
                         results_csv_filename = f"kappa_results_{calc_id}.csv"
@@ -320,7 +333,7 @@ def calculate_kappa_from_cif_impl(
                         result_df.to_csv(results_csv_path, index=False)
 
                         # 🆕 生成前端可访问的下载 URL
-                        results_csv_url = f"/files/thermal_conductivity/{results_csv_filename}"
+                        results_csv_url = get_file_url(results_csv_path, "thermal_conductivity")
 
                         logger.info(f"💾 Saved full kappa results to persistent directory: {results_csv_path}")
                         logger.info(f"🔗 Generated download URL: {results_csv_url}")
@@ -503,11 +516,15 @@ def _calculate_kappa_batch(
                 
                 # Normalize CIF content
                 cif_content = normalize_cif_content(cif_content)
-                
-                # Save CIF file
+
+                # 🔧 Save CIF file with unique naming to avoid conflicts
+                # Format: {formula}_{index}_{timestamp}_{uuid}.cif
+                import uuid
+                from datetime import datetime
                 safe_formula = re.sub(r'[^0-9A-Za-z_\-]+', '_', str(formula)) or f"structure_{i+1}"
-                safe_id = re.sub(r'[^0-9A-Za-z_\-]+', '_', str(structure_id))
-                cif_filename = f"{safe_formula}_{safe_id}.cif"
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                unique_id = str(uuid.uuid4())[:8]  # 使用前8位UUID
+                cif_filename = f"{safe_formula}_{i+1:03d}_{timestamp}_{unique_id}.cif"
                 cif_path = working_path / cif_filename
                 
                 with open(cif_path, 'w', encoding='utf-8') as f:
@@ -555,15 +572,28 @@ def _calculate_kappa_batch(
                     raise ValueError(f"Unknown method: {method}")
 
                 # ⚠️ TOKEN OPTIMIZATION: Save batch results to CSV file
-                # 🔧 修复：将 CSV 保存到持久化目录，避免临时目录被删除
+                # 🔧 使用统一存储管理器
                 batch_results_csv = None
                 batch_results_csv_url = None
                 try:
                     batch_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-                    # 创建持久化目录
-                    persistent_dir = Path(__file__).parent.parent / "thermal_conductivity_results"
-                    persistent_dir.mkdir(parents=True, exist_ok=True)
+                    # 使用统一存储目录
+                    from shared.storage_manager import get_session_storage_path, get_file_url
+
+                    # 从 working_dir 提取 session_id（如果可能）
+                    session_id = "default"
+                    if working_dir and "session_" in str(working_dir):
+                        import re
+                        match = re.search(r'session_([^/\\]+)', str(working_dir))
+                        if match:
+                            session_id = match.group(1)
+
+                    persistent_dir = get_session_storage_path(
+                        session_id=session_id,
+                        data_type="thermal_conductivity",
+                        create=True
+                    )
 
                     # 保存到持久化目录
                     batch_results_csv_filename = f"batch_kappa_results_{batch_timestamp}.csv"
@@ -571,7 +601,7 @@ def _calculate_kappa_batch(
                     result_df.to_csv(batch_results_csv, index=False)
 
                     # 🆕 生成前端可访问的下载 URL
-                    batch_results_csv_url = f"/files/thermal_conductivity/{batch_results_csv_filename}"
+                    batch_results_csv_url = get_file_url(batch_results_csv, "thermal_conductivity")
 
                     logger.info(f"💾 Saved batch kappa results to persistent directory: {batch_results_csv}")
                     logger.info(f"🔗 Generated download URL: {batch_results_csv_url}")

@@ -222,6 +222,26 @@ class DataProcessor:
 
                 logger.info(f"📄 Found thermal conductivity results CSV: {csv_url}")
 
+                # 🔧 同时发送为独立的文件数据，确保在右侧面板显示
+                await DataProcessor._send_message(websocket, "file_data", {
+                    "files": [{
+                        "id": f"kappa_{filename}",
+                        "type": "csv",
+                        "name": f"热导率结果 - {filename}",
+                        "downloadUrl": csv_url,
+                        "filePath": csv_path,
+                        "inlineContent": inline_csv,
+                        "createdAt": datetime.now().timestamp() * 1000,
+                        "extra": {
+                            "category": "thermal_conductivity",
+                            "method": data.get('method', 'unknown')
+                        }
+                    }],
+                    "agentId": agent_id,
+                    "sessionId": session_id,
+                    "timestamp": datetime.now().isoformat()
+                })
+
             # 批量热导率计算
             if 'batch_results_file' in data and data['batch_results_file']:
                 csv_path = data['batch_results_file']
@@ -237,6 +257,26 @@ class DataProcessor:
                     file_metadata['kappa_batch_csv_content'] = inline_csv
 
                 logger.info(f"📄 Found batch thermal conductivity results CSV: {csv_url}")
+
+                # 🔧 同时发送为独立的文件数据，确保在右侧面板显示
+                await DataProcessor._send_message(websocket, "file_data", {
+                    "files": [{
+                        "id": f"kappa_batch_{filename}",
+                        "type": "csv",
+                        "name": f"批量热导率结果 - {filename}",
+                        "downloadUrl": csv_url,
+                        "filePath": csv_path,
+                        "inlineContent": inline_csv,
+                        "createdAt": datetime.now().timestamp() * 1000,
+                        "extra": {
+                            "category": "thermal_conductivity_batch",
+                            "method": data.get('method', 'unknown')
+                        }
+                    }],
+                    "agentId": agent_id,
+                    "sessionId": session_id,
+                    "timestamp": datetime.now().isoformat()
+                })
 
             # 🆕 处理声子计算结果的 CSV 文件
             # 声子色散数据

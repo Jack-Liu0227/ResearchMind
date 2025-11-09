@@ -15,13 +15,18 @@ import structlog
 logger = structlog.get_logger()
 
 # 会话文件夹映射文件
-# Ensure saved files live under the mounted static directory so downloads work.
-# StaticFileService mounts mcp_servers/paper_search as /api/download (and /download for compatibility).
+# 🔧 使用统一的 session_data 目录
 # Note: Use absolute paths based on this module's location to ensure consistency
 # regardless of where the server is started from
 _MODULE_DIR = Path(__file__).parent.parent.parent  # mcp_servers/paper_search/
-SESSION_MAPPING_FILE = str(_MODULE_DIR / "session_folders.json")
-PAPER_DIR = str(_MODULE_DIR / "papers")
+_ROOT_DIR = _MODULE_DIR.parent.parent  # ResearchMind根目录
+SESSION_DATA_DIR = _ROOT_DIR / "session_data"
+SESSION_MAPPING_FILE = str(SESSION_DATA_DIR / "paper_sessions.json")
+PAPER_DIR = str(SESSION_DATA_DIR / "papers")
+
+# 确保目录存在
+SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
+Path(PAPER_DIR).mkdir(parents=True, exist_ok=True)
 
 
 class SessionFolderManager:
