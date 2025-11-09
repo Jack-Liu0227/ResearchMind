@@ -640,8 +640,8 @@ async def calculate_phonon_from_directory(
                 from modules.mattersim_energy import calculate_phonon_impl
 
                 # Determine output directory for phonon results - use unified storage
+                # 🔧 修复：移除重复的 Path 导入，避免覆盖全局 Path 变量
                 import sys
-                from pathlib import Path
                 sys.path.insert(0, str(Path(__file__).parent.parent))
                 from shared.storage_manager import get_session_storage_path
                 phonon_dir = get_session_storage_path(
