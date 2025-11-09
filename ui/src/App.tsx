@@ -4,6 +4,8 @@ import ChatPage from './pages/ChatPage'
 import SettingsPage from './pages/SettingsPage'
 import DiagnosticPage from './pages/DiagnosticPage'
 import AuthGatePage from './pages/AuthGatePage'
+import LoginPage from './pages/LoginPage'
+import UserProfilePage from './pages/UserProfilePage'
 
 import StorageValidator from './components/StorageValidator'
 import { useAutoSave } from './hooks/useAutoSave'
@@ -14,7 +16,7 @@ const routerFutureFlags = {
   v7_relativeSplatPath: true,
 } as const
 
-// 受保护的路由组件
+// 受保护的路由组件（基于 JWT Token）
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
 
@@ -24,16 +26,26 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   const checkAuth = async () => {
     try {
-      const sessionId = localStorage.getItem('researchmind_session_id') || `session_${Date.now()}`
-      localStorage.setItem('researchmind_session_id', sessionId)
+      const token = localStorage.getItem('auth_token')
 
-      // 检查是否有用户配置
-      const response = await fetch(`/api/billing/config/${sessionId}`)
+      if (!token) {
+        setIsAuthenticated(false)
+        return
+      }
+
+      // 验证 Token 是否有效
+      const response = await fetch('/api/auth/me', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
 
       if (response.ok) {
-        const result = await response.json()
-        setIsAuthenticated(result.has_config && !!result.config?.access_key_masked)
+        setIsAuthenticated(true)
       } else {
+        // Token 无效或过期，清除本地存储
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('user_info')
         setIsAuthenticated(false)
       }
     } catch (error) {
@@ -54,9 +66,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // 未认证，跳转到认证页面
+  // 未认证，跳转到登录页面
   if (!isAuthenticated) {
-    return <Navigate to="/auth" replace />
+    return <Navigate to="/login" replace />
   }
 
   // 已认证，显示内容
@@ -76,15 +88,15 @@ function App() {
         <div className="min-h-screen bg-gray-50">
           <Router future={routerFutureFlags}>
             <Routes>
-              {/* 认证页面 - 不需要认证 */}
+              {/* 公开页面 - 不需要认证 */}
+              <Route path="/login" element={<LoginPage />} />
               <Route path="/auth" element={<AuthGatePage />} />
-
-              {/* 诊断页面 - 不需要认证 */}
               <Route path="/diagnostic" element={<DiagnosticPage />} />
 
               {/* 受保护的页面 - 需要认证 */}
               <Route path="/" element={<ProtectedRoute><Layout><ChatPage /></Layout></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Layout><SettingsPage /></Layout></ProtectedRoute>} />
+              <Route path="/profile" element={<ProtectedRoute><Layout><UserProfilePage /></Layout></ProtectedRoute>} />
             </Routes>
           </Router>
         </div>

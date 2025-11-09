@@ -10,10 +10,17 @@ const api = axios.create({
   },
 })
 
-// 请求拦截器
+// 请求拦截器 - 自动添加 JWT Token
 api.interceptors.request.use(
   (config) => {
-    // 可以在这里添加认证token等
+    // 从 localStorage 获取 JWT Token
+    const token = localStorage.getItem('auth_token')
+
+    if (token) {
+      // 添加 Authorization 头
+      config.headers.Authorization = `Bearer ${token}`
+    }
+
     return config
   },
   (error) => {
@@ -21,13 +28,25 @@ api.interceptors.request.use(
   }
 )
 
-// 响应拦截器
+// 响应拦截器 - 处理 401 未授权错误
 api.interceptors.response.use(
   (response) => {
     return response.data
   },
   (error) => {
     console.error('API Error:', error)
+
+    // 如果是 401 未授权错误，清除 Token 并跳转到登录页
+    if (error.response?.status === 401) {
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('user_info')
+
+      // 如果不在登录页，跳转到登录页
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+
     return Promise.reject(error)
   }
 )

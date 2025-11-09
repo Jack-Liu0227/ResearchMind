@@ -113,6 +113,9 @@ class WebSocketService {
           // 启动心跳检测
           this.startHeartbeat()
 
+          // 🆕 发送 JWT Token 进行认证
+          this.sendAuthToken()
+
           // 自动发送用户的 Bohrium 配置（从 Cookie 读取）
           this.sendUserBohriumConfig()
 
@@ -265,6 +268,32 @@ class WebSocketService {
       this.ws.send(JSON.stringify(message))
     } else {
       console.warn('WebSocket is not connected')
+    }
+  }
+
+  /**
+   * 🆕 发送 JWT Token 进行认证
+   * 在 WebSocket 连接成功后立即调用
+   */
+  private sendAuthToken(): void {
+    try {
+      const token = localStorage.getItem('auth_token')
+
+      if (token) {
+        // 发送认证消息
+        this.send({
+          type: 'auth',
+          data: {
+            token,
+            timestamp: Date.now()
+          }
+        })
+        console.log('🔐 已发送 JWT Token 进行认证')
+      } else {
+        console.warn('⚠️ 未找到 JWT Token，跳过认证')
+      }
+    } catch (error) {
+      console.error('❌ 发送认证 Token 失败:', error)
     }
   }
 
