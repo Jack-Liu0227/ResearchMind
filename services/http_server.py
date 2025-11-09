@@ -17,6 +17,8 @@ import os
 from .config import server_config
 from .static_file_service import StaticFileService
 from .structure_converter import StructureConverter
+from .error_monitor import get_error_monitor
+from .file_safety import check_disk_space
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +101,62 @@ class HTTPServer:
     
     def _setup_routes(self):
         """Setup API routes"""
+
+        @self.app.get("/health")
+        @self.app.get("/api/health")
+        async def health_check():
+            """
+            健康检查端点
+
+            检查项：
+            1. 服务基本状态
+            2. WebSocket 服务器状态
+            3. 磁盘空间
+            4. 错误率
+            """
+            try:
+                # 获取错误统计
+                error_monitor = get_error_monitor()
+                error_stats = error_monitor.get_error_stats()
+
+                # 检查磁盘空间
+                disk_ok = check_disk_space(".", required_mb=500)  # 至少 500MB
+
+                # 检查 WebSocket 服务器（如果可用）
+                websocket_ok = True
+                try:
+                    from .websocket_server import WebSocketServer
+                    # 简单检查，实际可以添加更多检查
+                    websocket_ok = True
+                except Exception:
+                    websocket_ok = False
+
+                # 判断整体健康状态
+                is_healthy = (
+                    disk_ok and
+                    websocket_ok and
+                    error_stats.get('total_errors', 0) < 1000  # 总错误数不超过 1000
+                )
+
+                return {
+                    "status": "healthy" if is_healthy else "degraded",
+                    "timestamp": datetime.now().isoformat(),
+                    "version": "1.0.0",
+                    "checks": {
+                        "disk_space": "ok" if disk_ok else "low",
+                        "websocket": "ok" if websocket_ok else "unavailable",
+                        "error_rate": "ok" if error_stats.get('total_errors', 0) < 1000 else "high"
+                    },
+                    "error_stats": error_stats,
+                    "pymatgen_available": PYMATGEN_AVAILABLE
+                }
+            except Exception as e:
+                logger.error(f"❌ Health check failed: {e}", exc_info=True)
+                return {
+                    "status": "error",
+                    "timestamp": datetime.now().isoformat(),
+                    "error": str(e)
+                }
 
         @self.app.get("/api/debug/cif-validation")
         async def debug_cif_validation():

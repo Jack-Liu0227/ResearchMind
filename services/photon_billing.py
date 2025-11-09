@@ -160,35 +160,45 @@ class PhotonBillingService:
         photons_need_charge = photons_to_charge - charged_photons
 
         if self.config.BILLING_ENABLED and photons_need_charge > 0:
-            # 获取用户的计费配置
-            from .user_billing_config import get_config_manager
-            user_config_manager = get_config_manager()
-            user_config = user_config_manager.get_user_config(user_id)
+            # 🔒 将计费逻辑包装在 try-except 中，确保计费失败不阻塞主流程
+            try:
+                # 获取用户的计费配置
+                from .user_billing_config import get_config_manager
+                user_config_manager = get_config_manager()
+                user_config = user_config_manager.get_user_config(user_id)
 
-            # 🔍 添加详细日志，追踪扣费流程
-            logger.info(f"🔍 [计费追踪] user_id={user_id}, conversation_id={conversation_id}")
-            logger.info(f"🔍 [计费追踪] 用户配置: {user_config}")
+                # 🔍 添加详细日志，追踪扣费流程
+                logger.info(f"🔍 [计费追踪] user_id={user_id}, conversation_id={conversation_id}")
+                logger.info(f"🔍 [计费追踪] 用户配置: {user_config}")
 
-            # 使用用户配置的 AK 和 SKU，如果没有则使用默认配置
-            user_access_key = user_config.get('access_key') if user_config else None
-            user_sku_id = user_config.get('sku_id') if user_config else None
-            user_client_name = user_config.get('client_name') if user_config else None
+                # 使用用户配置的 AK 和 SKU，如果没有则使用默认配置
+                user_access_key = user_config.get('access_key') if user_config else None
+                user_sku_id = user_config.get('sku_id') if user_config else None
+                user_client_name = user_config.get('client_name') if user_config else None
 
-            # 🔍 记录使用的凭证（脱敏）
-            if user_access_key:
-                logger.info(f"🔍 [计费追踪] 使用用户 AK: {user_access_key[:8]}...{user_access_key[-4:]}")
-            else:
-                logger.warning(f"⚠️ [计费追踪] 未找到用户 AK，user_id={user_id}")
+                # 🔍 记录使用的凭证（脱敏）
+                if user_access_key:
+                    logger.info(f"🔍 [计费追踪] 使用用户 AK: {user_access_key[:8]}...{user_access_key[-4:]}")
+                else:
+                    logger.warning(f"⚠️ [计费追踪] 未找到用户 AK，user_id={user_id}")
 
-            # 调用扣费 API
-            charge_result = self.charge_photons(
-                photons=photons_need_charge,
-                session_id=conversation_id,
-                user_id=user_id,  # 🆕 传递 user_id 用于查找用户配置
-                user_access_key=user_access_key,
-                user_sku_id=user_sku_id,
-                user_client_name=user_client_name
-            )
+                # 调用扣费 API
+                charge_result = self.charge_photons(
+                    photons=photons_need_charge,
+                    session_id=conversation_id,
+                    user_id=user_id,  # 🆕 传递 user_id 用于查找用户配置
+                    user_access_key=user_access_key,
+                    user_sku_id=user_sku_id,
+                    user_client_name=user_client_name
+                )
+            except Exception as billing_error:
+                # 🔒 计费异常不应阻塞主流程，记录错误并继续
+                logger.error(f"❌ [计费异常] 扣费过程发生异常: {billing_error}", exc_info=True)
+                charge_result = {
+                    'success': False,
+                    'message': f'计费异常: {str(billing_error)}',
+                    'photons': photons_need_charge
+                }
 
             # 标记上下文为已扣费
             if charge_result.get('success'):
@@ -408,14 +418,35 @@ class PhotonBillingService:
                 logger.debug(f"📤 [计费] 请求头: {headers}")
                 logger.debug(f"📤 [计费] 请求体: {payload}")
 
-            # 🔒 生产模式：启用 SSL 验证
-            resp = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=30,
-                verify=True  # 启用 SSL 验证（生产模式）
-            )
+            # 🔒 生产模式：启用 SSL 验证，添加重试机制
+            max_retries = 3
+            retry_delay = 1  # 秒
+            last_error = None
+
+            for attempt in range(max_retries):
+                try:
+                    resp = requests.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=(10, 30),  # (连接超时, 读取超时)
+                        verify=True  # 启用 SSL 验证（生产模式）
+                    )
+                    break  # 成功则跳出重试循环
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ [计费] 请求失败（尝试 {attempt + 1}/{max_retries}），{retry_delay}秒后重试: {e}")
+                        import time
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # 指数退避
+                    else:
+                        logger.error(f"❌ [计费] 请求失败（已重试 {max_retries} 次）: {e}")
+                        raise
+            else:
+                # 如果循环正常结束（没有 break），说明所有重试都失败了
+                if last_error:
+                    raise last_error
 
             if resp.status_code == 200:
                 result = resp.json()

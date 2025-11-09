@@ -304,16 +304,45 @@ class AgentCoordinator:
             logger.info(f"🔍 [AGENT_COORDINATOR] 设置 session 上下文: session_id={session_id}, user_id={session_id}")
 
             # Google ADK API: run_async() 需要 user_id, session_id 和 new_message 参数
+            # 🔒 添加超时保护，防止 LLM 调用卡死
+            import asyncio
             event_count = 0
-            async for event in runner.run_async(
-                user_id=client_id,
-                session_id=session.id,
-                new_message=user_message
-            ):
-                event_count += 1
-                logger.info(f"🔍 [Event {event_count}] Type: {type(event).__name__}")
-                logger.info(f"🔍 [Event {event_count}] Attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
-                await self._handle_agent_event(event, agent_id, websocket, client_id, session_id)
+
+            try:
+                # 使用 asyncio.wait_for 为整个事件流添加超时（15 分钟）
+                async def process_events():
+                    nonlocal event_count
+                    async for event in runner.run_async(
+                        user_id=client_id,
+                        session_id=session.id,
+                        new_message=user_message
+                    ):
+                        event_count += 1
+                        logger.info(f"🔍 [Event {event_count}] Type: {type(event).__name__}")
+                        logger.info(f"🔍 [Event {event_count}] Attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
+
+                        # 🔒 为每个事件处理添加超时保护（5 分钟）
+                        try:
+                            await asyncio.wait_for(
+                                self._handle_agent_event(event, agent_id, websocket, client_id, session_id),
+                                timeout=300.0  # 5 分钟
+                            )
+                        except asyncio.TimeoutError:
+                            logger.error(f"❌ Event handling timeout for event {event_count}")
+                            await MessageHandler.send_error(
+                                websocket,
+                                f"事件处理超时（事件 {event_count}），继续处理下一个事件..."
+                            )
+
+                await asyncio.wait_for(process_events(), timeout=900.0)  # 15 分钟总超时
+
+            except asyncio.TimeoutError:
+                logger.error(f"❌ Agent processing timeout after {event_count} events")
+                await MessageHandler.send_error(
+                    websocket,
+                    "Agent 处理超时（15分钟），请稍后重试或减小任务规模"
+                )
+                return
 
             logger.info(f"✅ Agent {agent_id} completed - processed {event_count} events")
 

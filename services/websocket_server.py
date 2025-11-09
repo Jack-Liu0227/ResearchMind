@@ -17,6 +17,7 @@ from .config import server_config
 from .message_handler import MessageHandler
 from .agent_coordinator import AgentCoordinator
 from .session_manager import SessionManager
+from .error_monitor import get_error_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,12 @@ class WebSocketServer:
             # Handle messages
             async for message in websocket:
                 try:
+                    # 🔒 添加消息大小检查，防止解析超大消息导致内存溢出
+                    if len(message) > 50 * 1024 * 1024:  # 50MB
+                        logger.error(f"❌ Message too large from client {client_id}: {len(message)} bytes")
+                        await self.message_handler.send_error(websocket, "消息过大，请减小文件大小")
+                        continue
+
                     data = json.loads(message)
 
                     # Extract or create session_id
@@ -152,19 +159,51 @@ class WebSocketServer:
                         )
                         logger.info(f"🆕 Auto-created session: {session_id}")
 
-                    await self.message_handler.handle_message(
-                        client_id=client_id,
-                        websocket=websocket,
-                        data=data,
-                        agent_coordinator=self.agent_coordinator,
-                        session_id=session_id  # Pass session_id
+                    # 🔒 使用 asyncio.wait_for 添加超时保护，防止消息处理卡死
+                    import asyncio
+                    try:
+                        await asyncio.wait_for(
+                            self.message_handler.handle_message(
+                                client_id=client_id,
+                                websocket=websocket,
+                                data=data,
+                                agent_coordinator=self.agent_coordinator,
+                                session_id=session_id  # Pass session_id
+                            ),
+                            timeout=600.0  # 10 分钟超时（适应长时间计算任务）
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error(f"❌ Message handling timeout for client {client_id}, session {session_id}")
+                        await self.message_handler.send_error(
+                            websocket,
+                            "处理超时（10分钟），请稍后重试或减小任务规模"
+                        )
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Invalid JSON message from client {client_id}: {e}")
+                    # 🔒 记录错误到监控器
+                    get_error_monitor().record_error(
+                        error_type="json_decode_error",
+                        error_message=str(e),
+                        is_fatal=False,
+                        context={'client_id': client_id}
                     )
-                except json.JSONDecodeError:
-                    logger.error(f"❌ Invalid JSON message: {message}")
-                    await self.message_handler.send_error(websocket, "Invalid message format")
+                    try:
+                        await self.message_handler.send_error(websocket, "消息格式错误，请检查 JSON 格式")
+                    except Exception:
+                        pass  # 忽略发送错误消息时的异常
                 except Exception as e:
-                    logger.error(f"❌ Error processing message: {e}", exc_info=True)
-                    await self.message_handler.send_error(websocket, f"Error processing message: {str(e)}")
+                    logger.error(f"❌ Error processing message from client {client_id}: {e}", exc_info=True)
+                    # 🔒 记录错误到监控器
+                    get_error_monitor().record_error(
+                        error_type="message_processing_error",
+                        error_message=str(e),
+                        is_fatal=False,
+                        context={'client_id': client_id}
+                    )
+                    try:
+                        await self.message_handler.send_error(websocket, f"处理失败: {str(e)}")
+                    except Exception:
+                        pass  # 忽略发送错误消息时的异常
         
         except websockets.exceptions.ConnectionClosed as e:
             logger.info(f"🔌 Client disconnected: {client_id} (code: {e.code}, reason: {e.reason})")

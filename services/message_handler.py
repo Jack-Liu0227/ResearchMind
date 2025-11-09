@@ -275,8 +275,15 @@ class MessageHandler:
                 "timestamp": datetime.now().isoformat()
             }
 
-            await websocket.send(json.dumps(message))
+            # 🔒 添加超时保护，防止发送消息卡死
+            import asyncio
+            await asyncio.wait_for(
+                websocket.send(json.dumps(message)),
+                timeout=30.0  # 30 秒超时
+            )
             logger.debug(f"📤 [WebSocket] Sent {message_type}, data size: {len(json.dumps(data))} bytes")
+        except asyncio.TimeoutError:
+            logger.error(f"❌ Timeout sending {message_type} message (30s)")
         except Exception as e:
             logger.warning(f"⚠️ Failed to send {message_type} message: {e}")
     
