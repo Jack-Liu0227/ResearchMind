@@ -493,6 +493,11 @@ export const useAppStore = create<AppState>()(
           currentSessionPhononImages: [],
         })
 
+        // 🔧 修复：更新 localStorage 中的 session_id，确保计费配置查找正确
+        // 这样前端和后端使用的 session_id 就一致了
+        localStorage.setItem('researchmind_session_id', newSession.id)
+        console.log('🔧 [计费修复] 更新 localStorage session_id:', newSession.id)
+
         setTimeout(() => forceSaveState(get()), 100)
         return newSession
       },
