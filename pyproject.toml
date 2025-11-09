@@ -55,6 +55,9 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "alembic>=1.12.0",
     "redis>=5.0.0",
+    # Authentication and security
+    "python-jose[cryptography]>=3.3.0",  # JWT Token
+    "passlib[bcrypt]>=1.7.4",  # Password hashing
     # Utilities
     "python-dotenv>=1.0.0",
     "pydantic>=2.4.0",

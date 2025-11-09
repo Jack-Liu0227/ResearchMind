@@ -504,6 +504,14 @@ class HTTPServer:
         except Exception as e:
             logger.warning(f"⚠️ Failed to register billing routes: {e}")
 
+        # 🆕 注册新的用户认证 API
+        try:
+            from services.auth_api import router as auth_api_router
+            self.app.include_router(auth_api_router)
+            logger.info("✅ User authentication API registered")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to register auth API: {e}")
+
     def _setup_upload_endpoints(self):
         """Setup file upload endpoints"""
 
