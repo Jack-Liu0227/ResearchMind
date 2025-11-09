@@ -808,8 +808,13 @@ async def calculate_phonon(
         data_type="phonon_results",
         create=True
     )
-    url_prefix = f"/images/phonon"
+    # 🔧 修复：生成正确的 URL 前缀，包含 session_id 和 phonon_results 路径
+    # 挂载点: /api/images/phonon -> session_data/simulation/
+    # 文件路径: session_data/simulation/{session_id}/phonon_results/file.png
+    # URL: /api/images/phonon/{session_id}/phonon_results/file.png
+    url_prefix = f"/api/images/phonon/{session_id or 'default'}/phonon_results"
     logger.info(f"📁 Target phonon directory: {phonon_dir}")
+    logger.info(f"🔗 URL prefix: {url_prefix}")
 
     # 调用实现函数，传入目标目录以避免重复保存
     result = calculate_phonon_impl(
@@ -832,12 +837,12 @@ async def calculate_phonon(
         if dispersion_csv_path:
             csv_filename = Path(dispersion_csv_path).name
             dispersion_csv_url = f"{url_prefix}/{csv_filename}"
-            logger.info(f"📊 Phonon dispersion CSV: {csv_filename}")
+            logger.info(f"📊 Phonon dispersion CSV: {csv_filename} -> {dispersion_csv_url}")
 
         if dos_csv_path:
             csv_filename = Path(dos_csv_path).name
             dos_csv_url = f"{url_prefix}/{csv_filename}"
-            logger.info(f"📊 Phonon DOS CSV: {csv_filename}")
+            logger.info(f"📊 Phonon DOS CSV: {csv_filename} -> {dos_csv_url}")
 
         # 处理声子色散图
         if result.get("phonon_band_plot_path") and result.get("phonon_band_plot_available"):
@@ -855,7 +860,7 @@ async def calculate_phonon(
                 "dispersionCsvPath": dispersion_csv_url,
                 "dosCsvPath": dos_csv_url
             })
-            logger.info(f"📊 Phonon band plot: {filename}")
+            logger.info(f"📊 Phonon band plot: {filename} -> {url_prefix}/{filename}")
 
         # 处理声子态密度图
         if result.get("phonon_dos_plot_path") and result.get("phonon_dos_plot_available"):
@@ -873,7 +878,7 @@ async def calculate_phonon(
                 "dispersionCsvPath": dispersion_csv_url,
                 "dosCsvPath": dos_csv_url
             })
-            logger.info(f"📊 Phonon DOS plot: {filename}")
+            logger.info(f"📊 Phonon DOS plot: {filename} -> {url_prefix}/{filename}")
 
         # 添加图片数据到结果中
         if images:
@@ -1082,10 +1087,10 @@ def _validate_cif_content(cif_content: str, filename: str) -> Dict[str, Any]:
 
 @app.tool
 async def calculate_kappa_from_cif(
+    session_id: str,
     cif_path: str,
     method: str = "kappa_p",
     temperature: float = 300.0,
-    session_id: Optional[str] = None,
     keep_files: bool = False
 ) -> Dict[str, Any]:
     """
@@ -1094,22 +1099,28 @@ async def calculate_kappa_from_cif(
     This tool calculates thermal conductivity for a SINGLE CIF file.
     For multiple files, use calculate_kappa_from_directory instead.
 
+    ⚠️ 重要：session_id 是必需参数，用于隔离不同会话的计算结果。
+    这确保了多个用户或多次计算不会相互覆盖文件。
+
     Args:
+        session_id: Session ID (required) - identifies which session's calculation this belongs to
+                   ⚠️ 必须提供，用于文件隔离和结果存储
         cif_path: Path to the CIF file (absolute or relative to project root)
         method: Calculation method - "kappa_p" or "kappa_mtp" (default: "kappa_p")
         temperature: Temperature in Kelvin (default: 300K)
-        session_id: Optional session identifier used to isolate intermediate files
         keep_files: Whether to keep generated CIF files for inspection
 
     Returns:
         Dict containing:
         - thermal_conductivity: {value, unit}
         - results_file: Path to CSV file with full calculation results
+        - results_csv_url: URL to download the CSV file
         - key_metrics: Summary of key values (kappa, temperature, method, num_atoms)
 
     Examples:
         result = await calculate_kappa_from_cif(
-            cif_path="mcp_servers/simulation/cif/session_xxx/relax/NaCl_relaxed.cif",
+            session_id="session_1234567890_abcdef",
+            cif_path="session_data/simulation/session_1234567890_abcdef/cif/NaCl.cif",
             method="kappa_p"
         )
     """
@@ -1167,10 +1178,10 @@ async def calculate_kappa_from_cif(
 
 @app.tool
 async def calculate_kappa_from_directory(
+    session_id: str,
     cif_directory: str,
     method: str = "kappa_p",
     temperature: float = 300.0,
-    session_id: Optional[str] = None,
     keep_files: bool = False
 ) -> Dict[str, Any]:
     """
@@ -1178,11 +1189,14 @@ async def calculate_kappa_from_directory(
 
     ⚠️ 推荐：当有多个 CIF 文件需要计算热导率时，将它们放在同一文件夹中，使用此工具批量计算。
 
+    ⚠️ 重要：session_id 是必需参数，用于隔离不同会话的计算结果。
+
     Args:
+        session_id: Session ID (required) - identifies which session's calculation this belongs to
+                   ⚠️ 必须提供，用于文件隔离和结果存储
         cif_directory: 包含 CIF 文件的文件夹路径（绝对路径或相对于项目根目录）
         method: 计算方法 - "kappa_p" 或 "kappa_mtp" (默认: "kappa_p")
         temperature: 温度（开尔文，默认: 300K)
-        session_id: 会话 ID，用于隔离临时文件（可选）
         keep_files: 是否保留中间生成的 CIF 文件（默认: False）
 
     Returns:
@@ -1194,6 +1208,7 @@ async def calculate_kappa_from_directory(
         - results: 每个结构的计算结果列表
         - summary: 结果摘要
         - batch_results_file: 批量结果 CSV 文件路径
+        - batch_results_csv_url: 批量结果 CSV 文件的下载 URL
 
     Example:
         result = await calculate_kappa_from_directory(
@@ -1295,10 +1310,10 @@ async def calculate_kappa_from_directory(
 
 @app.tool
 async def batch_calculate_kappa(
+    session_id: str,
     structures: List[Dict[str, Any]],
     method: str = "kappa_p",
     temperature: float = 300.0,
-    session_id: Optional[str] = None,
     keep_files: bool = False
 ) -> Dict[str, Any]:
     """
@@ -1307,14 +1322,17 @@ async def batch_calculate_kappa(
     ⚠️ 注意：如果 CIF 文件已经保存在文件夹中，推荐使用 calculate_kappa_from_directory 工具。
     此工具适用于动态生成的结构数据。
 
+    ⚠️ 重要：session_id 是必需参数，用于隔离不同会话的计算结果。
+
     Args:
+        session_id: Session ID (required) - identifies which session's calculation this belongs to
+                   ⚠️ 必须提供，用于文件隔离和结果存储
         structures: 结构列表，每个结构必须包含：
                    - cifContent 或 metadata.cifData: CIF 文件内容
                    - formula: 化学式（用于命名）
                    - id: 结构ID（可选）
         method: 计算方法 - "kappa_p" 或 "kappa_mtp" (默认: "kappa_p")
         temperature: 温度（开尔文，默认: 300K)
-        session_id: 会话 ID，用于隔离临时文件（可选）
         keep_files: 是否保留中间生成的 CIF 文件（默认: False）
 
     Returns:
@@ -1325,13 +1343,18 @@ async def batch_calculate_kappa(
         - failed: 失败的数量
         - results: 每个结构的计算结果列表
         - summary: 结果摘要
+        - batch_results_csv_url: 批量结果 CSV 文件的下载 URL
 
     Example:
         structures = [
             {"cifContent": "...", "formula": "NaCl", "id": "struct1"},
             {"cifContent": "...", "formula": "GaN", "id": "struct2"}
         ]
-        result = await batch_calculate_kappa(structures, method="kappa_p")
+        result = await batch_calculate_kappa(
+            session_id="session_1234567890_abcdef",
+            structures=structures,
+            method="kappa_p"
+        )
     """
     logger.info(
         "🔄 Starting batch thermal conductivity calculation",
