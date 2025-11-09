@@ -56,12 +56,16 @@ except ImportError as e:
 async def start_http_server(http_server: HTTPServer):
     """Start HTTP server"""
     import uvicorn
-    
+
     config = uvicorn.Config(
         http_server.get_app(),
         host=server_config.HTTP_HOST,
         port=server_config.HTTP_PORT,
-        log_level="info"
+        log_level="info",
+        timeout_keep_alive=300,  # 5 分钟 keep-alive，适应长时间计算任务
+        timeout_graceful_shutdown=30,  # 优雅关闭超时 30 秒
+        limit_concurrency=100,  # 最大并发连接数
+        backlog=2048  # TCP backlog 队列大小
     )
     server = uvicorn.Server(config)
     await server.serve()

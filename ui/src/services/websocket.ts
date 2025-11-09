@@ -55,6 +55,10 @@ class WebSocketService {
   private connectionHandlers: ConnectionHandler[] = []
   private clientId: string
   private isConnecting = false // 防止重复连接的标志
+  private heartbeatInterval: number | null = null // 心跳定时器
+  private heartbeatTimeout: number | null = null // 心跳超时定时器
+  private readonly HEARTBEAT_INTERVAL = 30000 // 30秒发送一次心跳
+  private readonly HEARTBEAT_TIMEOUT = 10000 // 10秒内未收到响应则认为连接断开
 
   constructor(url?: string) {
     this.url = url || API_CONFIG.WS_URL
@@ -106,6 +110,9 @@ class WebSocketService {
           this.reconnectAttempts = 0
           this.notifyConnectionHandlers(true)
 
+          // 启动心跳检测
+          this.startHeartbeat()
+
           // 自动发送用户的 Bohrium 配置（从 Cookie 读取）
           this.sendUserBohriumConfig()
 
@@ -115,6 +122,13 @@ class WebSocketService {
         this.ws.onmessage = (event) => {
           try {
             const message: WebSocketMessage = JSON.parse(event.data)
+
+            // 处理心跳响应
+            if (message.type === 'pong') {
+              this.resetHeartbeatTimeout()
+              return
+            }
+
             this.notifyMessageHandlers(message)
           } catch (error) {
             console.error('Failed to parse WebSocket message:', error)
@@ -127,7 +141,10 @@ class WebSocketService {
           console.log('🔧 Reconnect attempts:', this.reconnectAttempts, '/', this.maxReconnectAttempts)
           this.isConnecting = false
           this.notifyConnectionHandlers(false)
-          
+
+          // 停止心跳检测
+          this.stopHeartbeat()
+
           // 只有在非正常关闭且未达到最大重试次数时才重连
           if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
             console.log('🔄 Schedule reconnect...')
@@ -152,10 +169,58 @@ class WebSocketService {
   disconnect(): void {
     if (this.ws) {
       console.log('🔌 正在断开WebSocket连接...')
+      this.stopHeartbeat()
       this.ws.close(1000, 'Client disconnect')
       this.ws = null
       this.isConnecting = false
       this.notifyConnectionHandlers(false)
+    }
+  }
+
+  /**
+   * 启动心跳检测
+   */
+  private startHeartbeat(): void {
+    console.log('💓 启动心跳检测')
+    this.stopHeartbeat() // 先清除旧的定时器
+
+    this.heartbeatInterval = window.setInterval(() => {
+      if (this.isConnected) {
+        console.log('💓 发送心跳 ping')
+        this.send({ type: 'ping', data: { timestamp: Date.now() } })
+
+        // 设置心跳超时检测
+        this.heartbeatTimeout = window.setTimeout(() => {
+          console.warn('💔 心跳超时，连接可能已断开')
+          // 主动关闭连接，触发重连
+          this.ws?.close(1006, 'Heartbeat timeout')
+        }, this.HEARTBEAT_TIMEOUT)
+      }
+    }, this.HEARTBEAT_INTERVAL)
+  }
+
+  /**
+   * 停止心跳检测
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      console.log('💓 停止心跳检测')
+      clearInterval(this.heartbeatInterval)
+      this.heartbeatInterval = null
+    }
+    if (this.heartbeatTimeout) {
+      clearTimeout(this.heartbeatTimeout)
+      this.heartbeatTimeout = null
+    }
+  }
+
+  /**
+   * 重置心跳超时定时器
+   */
+  private resetHeartbeatTimeout(): void {
+    if (this.heartbeatTimeout) {
+      clearTimeout(this.heartbeatTimeout)
+      this.heartbeatTimeout = null
     }
   }
 
