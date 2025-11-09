@@ -165,10 +165,20 @@ class PhotonBillingService:
             user_config_manager = get_config_manager()
             user_config = user_config_manager.get_user_config(user_id)
 
+            # 🔍 添加详细日志，追踪扣费流程
+            logger.info(f"🔍 [计费追踪] user_id={user_id}, conversation_id={conversation_id}")
+            logger.info(f"🔍 [计费追踪] 用户配置: {user_config}")
+
             # 使用用户配置的 AK 和 SKU，如果没有则使用默认配置
             user_access_key = user_config.get('access_key') if user_config else None
             user_sku_id = user_config.get('sku_id') if user_config else None
             user_client_name = user_config.get('client_name') if user_config else None
+
+            # 🔍 记录使用的凭证（脱敏）
+            if user_access_key:
+                logger.info(f"🔍 [计费追踪] 使用用户 AK: {user_access_key[:8]}...{user_access_key[-4:]}")
+            else:
+                logger.warning(f"⚠️ [计费追踪] 未找到用户 AK，user_id={user_id}")
 
             # 调用扣费 API
             charge_result = self.charge_photons(
@@ -310,12 +320,17 @@ class PhotonBillingService:
         client_name = None
         source = None
 
+        # 🔍 记录扣费请求参数
+        logger.info(f"🔍 [扣费请求] user_id={user_id}, session_id={session_id}, photons={photons}")
+        logger.info(f"🔍 [扣费请求] user_access_key={'已提供' if user_access_key else '未提供'}")
+
         # 1. 优先使用参数传入的用户 AK（从 Cookie 获取）
         if user_access_key:
             access_key = user_access_key
             sku_id = user_sku_id or self.config.BOHRIUM_SKU_ID
             client_name = user_client_name or self.config.BOHRIUM_CLIENT_NAME
             source = "来自用户 Cookie"
+            logger.info(f"✅ [扣费] 使用来自 Cookie 的 AK: {access_key[:8]}...{access_key[-4:]}")
 
         # 2. 尝试从用户配置文件读取（使用 user_id）
         if not access_key and user_id:
@@ -323,29 +338,35 @@ class PhotonBillingService:
                 from .user_billing_config import get_config_manager
                 config_manager = get_config_manager()
                 user_config = config_manager.get_user_config(user_id)
+                logger.info(f"🔍 [扣费] 从配置文件读取 user_id={user_id} 的配置: {user_config}")
                 if user_config.get('access_key'):
                     access_key = user_config.get('access_key')
                     sku_id = user_config.get('sku_id')
                     client_name = user_config.get('client_name', self.config.BOHRIUM_CLIENT_NAME)
                     source = "用户配置文件"
+                    logger.info(f"✅ [扣费] 使用来自配置文件的 AK: {access_key[:8]}...{access_key[-4:]}")
             except Exception as e:
                 logger.debug(f"📝 [计费] 未找到用户配置: {e}")
 
         # 3. 如果没有找到用户凭证，返回错误
         if not access_key:
-            logger.error("❌ [计费] 未配置用户 AccessKey，请前往设置页面配置您的 Bohrium 凭证")
+            logger.error(f"❌ [计费] 未配置用户 AccessKey (user_id={user_id})，请前往设置页面配置您的 Bohrium 凭证")
             return {
                 'success': False,
                 'message': '未配置 Bohrium AccessKey，请前往设置页面配置您的凭证',
                 'error_code': 'NO_ACCESS_KEY',
-                'photons': photons
+                'photons': photons,
+                'user_id': user_id  # 🔍 返回 user_id 用于调试
             }
 
         # 🔒 生产模式：仅记录关键信息，不输出敏感数据
-        if self.config.VERBOSE_LOGGING:
-            logger.info(f"💳 [计费] 使用 AccessKey 来源: {source} (AK: {access_key[:8]}...{access_key[-4:]}, Client: {client_name})")
-        else:
-            logger.info(f"💳 [计费] 使用 AccessKey 来源: {source}")
+        # 🔍 始终记录 AK 来源和脱敏后的 AK，用于追踪扣费问题
+        logger.info(
+            f"💳 [计费] 使用 AccessKey 来源: {source} | "
+            f"AK: {access_key[:8]}...{access_key[-4:]} | "
+            f"user_id: {user_id} | "
+            f"session_id: {session_id[:8]}..."
+        )
 
         # 生成唯一的 bizNo（使用时间戳 + 随机数，确保不超过 int 范围）
         # 使用毫秒时间戳的后 10 位 + 4 位随机数

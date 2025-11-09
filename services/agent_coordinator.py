@@ -297,9 +297,11 @@ class AgentCoordinator:
             user_message = types.Content(role='user', parts=parts)
 
             # 设置线程本地存储的 session 上下文，供 callbacks 使用
+            # 🔴 修复：使用 session_id 作为 user_id，而不是 client_id
+            # session_id 是用户的真实标识（与计费配置关联），client_id 只是 WebSocket 连接标识
             from agents.callbacks import set_current_session_context
-            set_current_session_context(session_id or 'unknown', client_id)
-            logger.info(f"🔍 [AGENT_COORDINATOR] 设置 session 上下文: session_id={session_id}, user_id={client_id}")
+            set_current_session_context(session_id or 'unknown', session_id or 'unknown')
+            logger.info(f"🔍 [AGENT_COORDINATOR] 设置 session 上下文: session_id={session_id}, user_id={session_id}")
 
             # Google ADK API: run_async() 需要 user_id, session_id 和 new_message 参数
             event_count = 0
