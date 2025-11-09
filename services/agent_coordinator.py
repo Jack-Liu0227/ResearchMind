@@ -80,7 +80,7 @@ class AgentCoordinator:
 
             # Create or get session
             if session_key not in self.session_services:
-                await self._create_session(session_key, client_id, adk_agent)
+                await self._create_session(session_key, client_id, adk_agent, session_id)
 
             session = self.adk_sessions[session_key]
             runner = self.runners[session_key]
@@ -536,7 +536,8 @@ class AgentCoordinator:
         self,
         session_key: str,
         client_id: str,
-        adk_agent: Any
+        adk_agent: Any,
+        session_id: Optional[str] = None
     ) -> None:
         """Create new session for agent"""
         logger.info(f"🆕 Creating new session: {session_key}")
@@ -544,12 +545,20 @@ class AgentCoordinator:
         session_service = InMemorySessionService()
         self.session_services[session_key] = session_service
 
+        # 🔧 修复：在 state 中传递 session_id，供 Google ADK 的 instruction 模板使用
+        # Google ADK 的 instructions_utils.inject_session_state() 会查找 state 中的变量
+        # 并替换 instruction 中的 {+variable_name+} 模板
+        initial_state = {}
+        if session_id:
+            initial_state['session_id'] = session_id
+            logger.info(f"🔍 [SESSION_STATE] 设置 session_id={session_id} 到 ADK session state")
+
         # Create ADK Session
         session = await session_service.create_session(
             app_name="ResearchMind",
             user_id=client_id,
             session_id=f"session_{session_key}",
-            state={}
+            state=initial_state
         )
         self.adk_sessions[session_key] = session
 
