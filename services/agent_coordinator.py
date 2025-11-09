@@ -545,10 +545,15 @@ class AgentCoordinator:
         session_service = InMemorySessionService()
         self.session_services[session_key] = session_service
 
-        # 🔧 修复：在 state 中传递 session_id，供 Google ADK 的 instruction 模板使用
+        # 🔧 修复：在 state 中传递变量，供 Google ADK 的 instruction 模板使用
         # Google ADK 的 instructions_utils.inject_session_state() 会查找 state 中的变量
         # 并替换 instruction 中的 {+variable_name+} 模板
-        initial_state = {}
+        initial_state = {
+            # 提供常用的上下文变量，避免 KeyError
+            'composition': '',  # 化学式（simulation_agent 可能用到）
+            'topic': '',  # 研究主题（deep_research_agent 可能用到）
+            'query': '',  # 查询关键词
+        }
         if session_id:
             initial_state['session_id'] = session_id
             logger.info(f"🔍 [SESSION_STATE] 设置 session_id={session_id} 到 ADK session state")
