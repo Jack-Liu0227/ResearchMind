@@ -105,24 +105,26 @@ class UserBillingConfigManager:
     def __init__(self, config_dir: str = "user_configs"):
         """
         初始化配置管理器
-        
+
         Args:
             config_dir: 配置文件存储目录
         """
         self.config_dir = Path(config_dir)
         self.config_dir.mkdir(exist_ok=True)
-        
-        # 默认配置（开发者的 AK，作为后备）
+
+        # 🔧 移除开发者默认 AccessKey 后备机制
+        # 强制所有用户必须配置自己的 Bohrium AccessKey
         self.default_config = {
-            'access_key': os.getenv('BOHRIUM_ACCESS_KEY', ''),
-            'sku_id': os.getenv('BOHRIUM_SKU_ID', '10048'),
-            'client_name': 'ResearchMind'
+            'access_key': '',  # 不再从环境变量读取开发者 AK
+            'sku_id': os.getenv('BOHRIUM_SKU_ID', '10048'),  # SKU ID 可以保留默认值
+            'client_name': 'ResearchMind'  # 客户端名称保留默认值
         }
 
         # 🔒 生产模式：简化日志
         verbose = os.getenv('PHOTON_BILLING_VERBOSE', 'false').lower() == 'true'
         if verbose:
             logger.info(f"💎 用户计费配置管理器已初始化 - 配置目录: {self.config_dir}")
+            logger.info("⚠️ 已禁用开发者默认 AccessKey 后备机制，所有用户必须配置自己的 AK")
         else:
             logger.info("💎 用户计费配置管理器已初始化")
     
@@ -186,7 +188,7 @@ class UserBillingConfigManager:
             user_id: 用户 ID
 
         Returns:
-            用户配置，如果不存在则返回默认配置
+            用户配置，如果不存在则返回空配置（access_key 为空字符串）
         """
         config_file = self.config_dir / f"{user_id}.json"
 
@@ -199,9 +201,9 @@ class UserBillingConfigManager:
             except Exception as e:
                 logger.error(f"❌ 读取用户配置失败: {e}", exc_info=True)
 
-        # 返回默认配置
-        logger.debug(f"📖 用户 {user_id[:8]}... 未配置，使用默认配置")
-        return self.default_config.copy()
+        # 🔧 返回空配置（不再提供开发者 AK 作为后备）
+        logger.warning(f"⚠️ 用户 {user_id[:8]}... 未配置 Bohrium AccessKey，请前往设置页面配置")
+        return self.default_config.copy()  # access_key 为空字符串
 
     def has_user_config(self, user_id: str) -> bool:
         """检查用户是否已配置"""
