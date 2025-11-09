@@ -1102,7 +1102,7 @@ def _validate_cif_content(cif_content: str, filename: str) -> Dict[str, Any]:
 @app.tool
 async def calculate_kappa_from_cif(
     session_id: str,
-    cif_path: str,
+    cif_filename: str,
     method: str = "kappa_p",
     temperature: float = 300.0,
     keep_files: bool = False
@@ -1113,13 +1113,21 @@ async def calculate_kappa_from_cif(
     This tool calculates thermal conductivity for a SINGLE CIF file.
     For multiple files, use calculate_kappa_from_directory instead.
 
-    ⚠️ 重要：session_id 是必需参数，用于隔离不同会话的计算结果。
-    这确保了多个用户或多次计算不会相互覆盖文件。
+    ⚠️ 重要工作流程：
+    1. 用户上传原始 CIF 文件 或 使用 CrystaLLM 生成结构
+    2. （可选）调用 relax_structure() 进行结构弛豫
+    3. 使用文件名调用此函数计算热导率
+
+    ⚠️ 支持的文件来源：
+    - 上传的 CIF 文件（cif/ 目录）
+    - 弛豫后的结构（relaxed/ 目录）
+    - CrystaLLM 生成的结构（generated/ 目录，递归查找）
 
     Args:
         session_id: Session ID (required) - identifies which session's calculation this belongs to
                    ⚠️ 必须提供，用于文件隔离和结果存储
-        cif_path: Path to the CIF file (absolute or relative to project root)
+        cif_filename: CIF filename in the session directory (e.g., "Na4Cl4.cif", "relaxed_NaCl_20251109.cif")
+                     ⚠️ 只需要文件名，系统会自动在多个目录中查找
         method: Calculation method - "kappa_p" or "kappa_mtp" (default: "kappa_p")
         temperature: Temperature in Kelvin (default: 300K)
         keep_files: Whether to keep generated CIF files for inspection
@@ -1132,30 +1140,36 @@ async def calculate_kappa_from_cif(
         - key_metrics: Summary of key values (kappa, temperature, method, num_atoms)
 
     Examples:
+        # 计算上传的文件
         result = await calculate_kappa_from_cif(
             session_id="session_1234567890_abcdef",
-            cif_path="session_data/simulation/session_1234567890_abcdef/cif/NaCl.cif",
+            cif_filename="NaCl.cif",
+            method="kappa_p"
+        )
+
+        # 计算生成的结构（自动在 generated/ 目录递归查找）
+        result = await calculate_kappa_from_cif(
+            session_id="session_1234567890_abcdef",
+            cif_filename="Na4Cl4.cif",  # 系统会自动找到 generated/Na4Cl4_xxx/processed/Na4Cl4.cif
             method="kappa_p"
         )
     """
     try:
-        # Validate CIF file exists
-        cif_file = Path(cif_path)
-        if not cif_file.exists():
+        # 🔧 使用统一的文件查找逻辑（支持 generated/ 目录递归查找）
+        cif_path = _get_cif_file_path(session_id, cif_filename)
+
+        if not cif_path:
             return {
-                "error": f"CIF file not found: {cif_path}",
+                "success": False,
+                "error": f"CIF file not found: {cif_filename}. Please ensure the file exists in session {session_id}. "
+                        f"Supported locations: cif/, relaxed/, uploads/, generated/ (recursive)",
                 "timestamp": datetime.now().isoformat()
             }
 
-        if not cif_file.suffix.lower() == '.cif':
-            return {
-                "error": f"File is not a CIF file: {cif_path}",
-                "timestamp": datetime.now().isoformat()
-            }
+        logger.info(f"📂 Found CIF file for kappa calculation: {cif_path}")
 
         # Read CIF content
-        with open(cif_file, 'r', encoding='utf-8') as f:
-            cif_content = f.read()
+        cif_content = cif_path.read_text(encoding='utf-8')
 
         working_dir_path = _build_kappa_working_dir(session_id, prefix="single")
         if working_dir_path:
@@ -1169,7 +1183,7 @@ async def calculate_kappa_from_cif(
 
         result = calculate_kappa_from_cif_impl(
             cif_content=cif_content,
-            cif_filename=cif_file.name,
+            cif_filename=cif_path.name,  # 🔧 使用 Path 对象的 name 属性
             method=method,
             temperature=temperature,
             working_dir=str(working_dir_path) if working_dir_path else None,
