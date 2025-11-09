@@ -93,9 +93,10 @@ class StaticFileService:
         logger.info(f"✅ Static files: /api/download -> {paper_search_dir}")
         logger.info(f"✅ Static files: /download -> {paper_search_dir}")
 
+        # 🔧 使用统一的 session_data 目录结构
         # Phonon results directory - mount second (specific)
-        # 声子谱图片和 CSV 文件
-        phonon_dir = server_config.PHONON_RESULTS_DIR
+        # 声子谱图片和 CSV 文件 - 使用 session_data/simulation/*/phonon_results
+        phonon_dir = os.path.join(server_config.SESSION_DATA_DIR, "simulation")
         # 🔧 确保目录存在，如果不存在则创建
         if not os.path.exists(phonon_dir):
             os.makedirs(phonon_dir, exist_ok=True)
@@ -109,7 +110,8 @@ class StaticFileService:
         logger.info(f"✅ Static files: /api/images/phonon -> {phonon_dir}")
 
         # 🆕 Thermal conductivity results directory - mount for CSV files
-        thermal_conductivity_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "simulation", "thermal_conductivity_results")
+        # 使用 session_data/simulation/*/thermal_conductivity
+        thermal_conductivity_dir = os.path.join(server_config.SESSION_DATA_DIR, "simulation")
         # 🔧 确保目录存在，如果不存在则创建
         if not os.path.exists(thermal_conductivity_dir):
             os.makedirs(thermal_conductivity_dir, exist_ok=True)
@@ -139,9 +141,9 @@ class StaticFileService:
         # Note: /api/structures/relaxed mount removed (directory never existed)
         # All relaxed structures now use session-isolated paths: /api/structures/{session_id}/relax/
 
-        # Simulation CIF structures directory (会话隔离的弛豫结构文件) - mount before general structures
-        # This serves files from mcp_servers/simulation/cif/{session_id}/structures/
-        simulation_cif_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "simulation", "cif")
+        # 🔧 Simulation CIF structures directory (会话隔离的弛豫结构文件)
+        # 使用 session_data/simulation/*/cif
+        simulation_cif_dir = os.path.join(server_config.SESSION_DATA_DIR, "simulation")
         # 🔧 确保目录存在，如果不存在则创建
         if not os.path.exists(simulation_cif_dir):
             os.makedirs(simulation_cif_dir, exist_ok=True)

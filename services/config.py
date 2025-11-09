@@ -67,9 +67,12 @@ class ServerConfig:
 
     # Static Files
     STATIC_FILES_ROOT = os.path.abspath(os.path.dirname(__file__) + "/..")
+    # 🔧 使用统一的 session_data 目录
+    SESSION_DATA_DIR = os.path.join(STATIC_FILES_ROOT, "session_data")
+    # 保留旧路径用于向后兼容（已废弃，将在未来版本移除）
     PHONON_RESULTS_DIR = os.path.join(STATIC_FILES_ROOT, "mcp_servers", "simulation", "phonon_results")
     GENERATED_STRUCTURES_DIR = os.path.join(STATIC_FILES_ROOT, "mcp_servers", "simulation", "crystallm", "generated_structures")
-    # Note: RELAXED_STRUCTURES_DIR removed - all relaxed structures use session-isolated paths
+    # Note: 所有新数据应使用 session_data/ 目录结构
 
     # Logging
     LOG_LEVEL = os.getenv("RESEARCHMIND_LOG_LEVEL", "INFO")
