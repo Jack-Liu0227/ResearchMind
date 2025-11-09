@@ -99,7 +99,8 @@ class PhotonBillingService:
         user_id: str,
         tokens: int,
         model: str = "unknown",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        fallback_user_id: str = None
     ) -> Dict[str, Any]:
         """
         使用隔离上下文记录 token 使用（推荐方法）
@@ -113,10 +114,11 @@ class PhotonBillingService:
 
         Args:
             conversation_id: 对话 ID
-            user_id: 用户 ID
+            user_id: 用户 ID（通常是 session_id）
             tokens: 使用的 token 数量
             model: 使用的模型名称
             metadata: 额外的元数据
+            fallback_user_id: 回退用户 ID（可选，通常是 client_id，用于查找旧配置）
 
         Returns:
             包含本次使用和累计统计的字典
@@ -189,7 +191,8 @@ class PhotonBillingService:
                     user_id=user_id,  # 🆕 传递 user_id 用于查找用户配置
                     user_access_key=user_access_key,
                     user_sku_id=user_sku_id,
-                    user_client_name=user_client_name
+                    user_client_name=user_client_name,
+                    fallback_user_id=fallback_user_id  # 🔧 传递 fallback_user_id 用于回退查找配置
                 )
             except Exception as billing_error:
                 # 🔒 计费异常不应阻塞主流程，记录错误并继续
@@ -296,7 +299,8 @@ class PhotonBillingService:
         user_id: str = None,
         user_access_key: str = None,
         user_sku_id: str = None,
-        user_client_name: str = None
+        user_client_name: str = None,
+        fallback_user_id: str = None
     ) -> Dict[str, Any]:
         """
         实际扣除光子（调用 Bohrium API）
@@ -304,15 +308,17 @@ class PhotonBillingService:
         参考 Flask 示例的逻辑：
         1. 优先使用用户提供的 AK 和 Client Name（从 Cookie 获取）
         2. 回退到用户配置文件（使用 user_id 查找）
-        3. 最后回退到开发者的 AK（用于测试和未认证用户）
+        3. 如果没有找到，尝试使用 fallback_user_id 查找配置
+        4. 最后返回错误（不再提供开发者 AK 作为后备）
 
         Args:
             photons: 要扣除的光子数
             session_id: 会话 ID（用于生成唯一的 bizNo）
-            user_id: 用户 ID（用于查找用户配置文件）
+            user_id: 用户 ID（用于查找用户配置文件，通常是 session_id）
             user_access_key: 用户的 AccessKey（可选，优先级最高，从 Cookie 的 appAccessKey 获取）
             user_sku_id: 用户的 SKU ID（可选）
             user_client_name: 用户的 Client Name（可选，从 Cookie 的 clientName 获取）
+            fallback_user_id: 回退用户 ID（可选，通常是 client_id，用于查找旧配置）
 
         Returns:
             扣费结果
@@ -342,12 +348,16 @@ class PhotonBillingService:
             source = "来自用户 Cookie"
             logger.info(f"✅ [扣费] 使用来自 Cookie 的 AK: {access_key[:8]}...{access_key[-4:]}")
 
-        # 2. 尝试从用户配置文件读取（使用 user_id）
+        # 2. 尝试从用户配置文件读取（使用 user_id，支持回退到 fallback_user_id）
         if not access_key and user_id:
             try:
                 from .user_billing_config import get_config_manager
                 config_manager = get_config_manager()
-                user_config = config_manager.get_user_config(user_id)
+
+                # 🔧 支持回退查找：优先查找 user_id，如果没有则查找 fallback_user_id
+                fallback_ids = [fallback_user_id] if fallback_user_id else []
+                user_config = config_manager.get_user_config(user_id, fallback_user_ids=fallback_ids)
+
                 logger.info(f"🔍 [扣费] 从配置文件读取 user_id={user_id} 的配置: {user_config}")
                 if user_config.get('access_key'):
                     access_key = user_config.get('access_key')

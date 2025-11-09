@@ -15,17 +15,19 @@ logger = logging.getLogger(__name__)
 _thread_local = threading.local()
 
 
-def set_current_session_context(session_id: str, user_id: str):
+def set_current_session_context(session_id: str, user_id: str, client_id: str = None):
     """设置当前线程的 session 上下文（由 agent_coordinator 调用）"""
     _thread_local.session_id = session_id
     _thread_local.user_id = user_id
+    _thread_local.client_id = client_id  # 🔧 保存 client_id 作为回退查找配置的依据
 
 
 def get_current_session_context():
     """获取当前线程的 session 上下文（由 callbacks 调用）"""
     return (
         getattr(_thread_local, 'session_id', 'unknown'),
-        getattr(_thread_local, 'user_id', None)
+        getattr(_thread_local, 'user_id', None),
+        getattr(_thread_local, 'client_id', None)  # 🔧 返回 client_id
     )
 
 
@@ -192,10 +194,10 @@ def record_llm_usage(
         if total_tokens > 0:
             billing_service = get_billing_service()
 
-            # 从线程本地存储获取 session_id 和 user_id
+            # 从线程本地存储获取 session_id、user_id 和 client_id
             # 这些值由 agent_coordinator 在调用 run_async() 前设置
-            session_id, user_id = get_current_session_context()
-            logger.info(f"🔍 [BILLING CALLBACK] session_id={session_id}, user_id={user_id}")
+            session_id, user_id, client_id = get_current_session_context()
+            logger.info(f"🔍 [BILLING CALLBACK] session_id={session_id}, user_id={user_id}, client_id={client_id}")
 
             # 使用隔离的计费方法
             # 如果没有 user_id，使用 'unknown' 作为默认值
@@ -208,7 +210,8 @@ def record_llm_usage(
                     'agent_name': agent_name,
                     'prompt_tokens': prompt_tokens,
                     'completion_tokens': completion_tokens
-                }
+                },
+                fallback_user_id=client_id  # 🔧 传递 client_id 作为回退查找配置的依据
             )
 
             # 记录日志

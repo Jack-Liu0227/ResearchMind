@@ -120,7 +120,8 @@ class AgentCoordinator:
                 'total_tokens': start_snapshot.get('total_tokens', 0),
                 'total_photons': start_snapshot.get('total_photons', 0.0),
                 'conversation_id': conversation_id,  # 保存 conversation_id 供后续使用
-                'user_id': user_id
+                'user_id': user_id,
+                'client_id': client_id  # 🔧 保存 client_id 作为回退查找配置的依据
             }
             logger.info(f"💎 [消息计费] 消息开始时计费状态:")
             logger.info(f"  session_key={session_key}")
@@ -299,9 +300,10 @@ class AgentCoordinator:
             # 设置线程本地存储的 session 上下文，供 callbacks 使用
             # 🔴 修复：使用 session_id 作为 user_id，而不是 client_id
             # session_id 是用户的真实标识（与计费配置关联），client_id 只是 WebSocket 连接标识
+            # 🔧 同时传递 client_id 作为回退查找配置的依据
             from agents.callbacks import set_current_session_context
-            set_current_session_context(session_id or 'unknown', session_id or 'unknown')
-            logger.info(f"🔍 [AGENT_COORDINATOR] 设置 session 上下文: session_id={session_id}, user_id={session_id}")
+            set_current_session_context(session_id or 'unknown', session_id or 'unknown', client_id)
+            logger.info(f"🔍 [AGENT_COORDINATOR] 设置 session 上下文: session_id={session_id}, user_id={session_id}, client_id={client_id}")
 
             # Google ADK API: run_async() 需要 user_id, session_id 和 new_message 参数
             # 🔒 添加超时保护，防止 LLM 调用卡死

@@ -180,16 +180,18 @@ class UserBillingConfigManager:
             logger.error(f"❌ 保存用户配置失败: {e}", exc_info=True)
             return False
     
-    def get_user_config(self, user_id: str) -> Dict[str, str]:
+    def get_user_config(self, user_id: str, fallback_user_ids: list = None) -> Dict[str, str]:
         """
-        获取用户的 Bohrium 配置
+        获取用户的 Bohrium 配置（支持回退查找）
 
         Args:
-            user_id: 用户 ID
+            user_id: 用户 ID（优先查找）
+            fallback_user_ids: 回退查找的用户 ID 列表（可选）
 
         Returns:
             用户配置，如果不存在则返回空配置（access_key 为空字符串）
         """
+        # 1. 优先查找当前 user_id 的配置
         config_file = self.config_dir / f"{user_id}.json"
 
         if config_file.exists():
@@ -201,7 +203,23 @@ class UserBillingConfigManager:
             except Exception as e:
                 logger.error(f"❌ 读取用户配置失败: {e}", exc_info=True)
 
-        # 🔧 返回空配置（不再提供开发者 AK 作为后备）
+        # 2. 如果没有找到，尝试回退查找
+        if fallback_user_ids:
+            for fallback_id in fallback_user_ids:
+                if not fallback_id:
+                    continue
+
+                fallback_file = self.config_dir / f"{fallback_id}.json"
+                if fallback_file.exists():
+                    try:
+                        with open(fallback_file, 'r', encoding='utf-8') as f:
+                            config = json.load(f)
+                            logger.info(f"📖 使用回退配置: {fallback_id[:8]}... (原始 user_id: {user_id[:8]}...)")
+                            return config
+                    except Exception as e:
+                        logger.error(f"❌ 读取回退配置失败: {e}", exc_info=True)
+
+        # 3. 返回空配置（不再提供开发者 AK 作为后备）
         logger.warning(f"⚠️ 用户 {user_id[:8]}... 未配置 Bohrium AccessKey，请前往设置页面配置")
         return self.default_config.copy()  # access_key 为空字符串
 
