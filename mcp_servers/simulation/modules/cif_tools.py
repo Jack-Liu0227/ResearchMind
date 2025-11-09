@@ -329,7 +329,11 @@ def calculate_kappa_from_cif_impl(
                         # 保存到持久化目录
                         results_csv_filename = f"kappa_results_{calc_id}.csv"
                         results_csv_path = persistent_dir / results_csv_filename
-                        result_df.to_csv(results_csv_path, index=False)
+
+                        # 🔧 修复：将索引（文件名）作为第一列添加到 CSV
+                        result_df_with_filename = result_df.copy()
+                        result_df_with_filename.insert(0, 'filename', result_df_with_filename.index)
+                        result_df_with_filename.to_csv(results_csv_path, index=False)
 
                         # 🆕 生成前端可访问的下载 URL
                         results_csv_url = get_file_url(results_csv_path, "thermal_conductivity", session_id=effective_session_id)
@@ -595,7 +599,12 @@ def _calculate_kappa_batch(
                     # 保存到持久化目录
                     batch_results_csv_filename = f"batch_kappa_results_{batch_timestamp}.csv"
                     batch_results_csv = persistent_dir / batch_results_csv_filename
-                    result_df.to_csv(batch_results_csv, index=False)
+
+                    # 🔧 修复：将索引（文件名）作为第一列添加到 CSV
+                    # result_df 的索引是文件名（来自 get_dir_crystalline_data）
+                    result_df_with_filename = result_df.copy()
+                    result_df_with_filename.insert(0, 'filename', result_df_with_filename.index)
+                    result_df_with_filename.to_csv(batch_results_csv, index=False)
 
                     # 🆕 生成前端可访问的下载 URL
                     batch_results_csv_url = get_file_url(batch_results_csv, "thermal_conductivity", session_id=effective_session_id)
