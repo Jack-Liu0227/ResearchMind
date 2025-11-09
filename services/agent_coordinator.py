@@ -553,6 +553,7 @@ class AgentCoordinator:
             'composition': '',  # 化学式（simulation_agent 可能用到）
             'topic': '',  # 研究主题（deep_research_agent 可能用到）
             'query': '',  # 查询关键词
+            'generation_id': '',  # 结构生成 ID（simulation_agent 可能用到）
         }
         if session_id:
             initial_state['session_id'] = session_id
