@@ -210,8 +210,26 @@ class DataProcessor:
             if 'results_file' in data and data['results_file']:
                 csv_path = data['results_file']
                 filename = os.path.basename(csv_path)
-                # 转换为前端可访问的 URL
-                csv_url = f"/api/files/thermal_conductivity/{filename}"
+
+                # 🔧 修复：从路径中提取 session_id 生成正确的 URL
+                # 路径格式: session_data/simulation/{session_id}/thermal_conductivity/file.csv
+                # URL 格式: /api/files/thermal_conductivity/{session_id}/thermal_conductivity/file.csv
+                normalized_path = csv_path.replace('\\', '/')
+                if 'session_data/simulation/' in normalized_path:
+                    # 提取 session_data/simulation/ 后面的部分
+                    relative_part = normalized_path.split('session_data/simulation/', 1)[1]
+                    # relative_part 格式: {session_id}/thermal_conductivity/file.csv
+                    csv_url = f"/api/files/thermal_conductivity/{relative_part}"
+                    logger.info(f"🔗 Generated thermal conductivity URL from session_data path: {csv_url}")
+                elif session_id:
+                    # 如果有 session_id，使用它构建 URL
+                    csv_url = f"/api/files/thermal_conductivity/{session_id}/thermal_conductivity/{filename}"
+                    logger.info(f"🔗 Generated thermal conductivity URL with session_id: {csv_url}")
+                else:
+                    # 后备方案：只使用文件名（可能不工作）
+                    csv_url = f"/api/files/thermal_conductivity/{filename}"
+                    logger.warning(f"⚠️ Could not extract session_id from path, using filename only: {csv_url}")
+
                 file_metadata['kappa_results_csv_url'] = csv_url
                 file_metadata['kappa_results_csv_path'] = csv_path
 
@@ -246,8 +264,20 @@ class DataProcessor:
             if 'batch_results_file' in data and data['batch_results_file']:
                 csv_path = data['batch_results_file']
                 filename = os.path.basename(csv_path)
-                # 转换为前端可访问的 URL
-                csv_url = f"/api/files/thermal_conductivity/{filename}"
+
+                # 🔧 修复：从路径中提取 session_id 生成正确的 URL
+                normalized_path = csv_path.replace('\\', '/')
+                if 'session_data/simulation/' in normalized_path:
+                    relative_part = normalized_path.split('session_data/simulation/', 1)[1]
+                    csv_url = f"/api/files/thermal_conductivity/{relative_part}"
+                    logger.info(f"🔗 Generated batch thermal conductivity URL from session_data path: {csv_url}")
+                elif session_id:
+                    csv_url = f"/api/files/thermal_conductivity/{session_id}/thermal_conductivity/{filename}"
+                    logger.info(f"🔗 Generated batch thermal conductivity URL with session_id: {csv_url}")
+                else:
+                    csv_url = f"/api/files/thermal_conductivity/{filename}"
+                    logger.warning(f"⚠️ Could not extract session_id from path, using filename only: {csv_url}")
+
                 file_metadata['kappa_batch_csv_url'] = csv_url
                 file_metadata['kappa_batch_csv_path'] = csv_path
 
@@ -283,8 +313,26 @@ class DataProcessor:
             if 'phonon_dispersion_csv' in data and data['phonon_dispersion_csv']:
                 csv_path = data['phonon_dispersion_csv']
                 filename = os.path.basename(csv_path)
-                # 转换为前端可访问的 URL
-                csv_url = f"/api/images/phonon/{filename}"
+
+                # 🔧 修复：从路径中提取 session_id 生成正确的 URL
+                # 路径格式: session_data/simulation/{session_id}/phonon_results/file.csv
+                # URL 格式: /api/images/phonon/{session_id}/phonon_results/file.csv
+                normalized_path = csv_path.replace('\\', '/')
+                if 'session_data/simulation/' in normalized_path:
+                    # 提取 session_data/simulation/ 后面的部分
+                    relative_part = normalized_path.split('session_data/simulation/', 1)[1]
+                    # relative_part 格式: {session_id}/phonon_results/file.csv
+                    csv_url = f"/api/images/phonon/{relative_part}"
+                    logger.info(f"🔗 Generated phonon dispersion CSV URL from session_data path: {csv_url}")
+                elif session_id:
+                    # 如果有 session_id，使用它构建 URL
+                    csv_url = f"/api/images/phonon/{session_id}/phonon_results/{filename}"
+                    logger.info(f"🔗 Generated phonon dispersion CSV URL with session_id: {csv_url}")
+                else:
+                    # 后备方案：只使用文件名（可能不工作）
+                    csv_url = f"/api/images/phonon/{filename}"
+                    logger.warning(f"⚠️ Could not extract session_id from path, using filename only: {csv_url}")
+
                 file_metadata['phonon_dispersion_csv_url'] = csv_url
                 file_metadata['phonon_dispersion_csv_path'] = csv_path
 
@@ -299,8 +347,20 @@ class DataProcessor:
             if 'phonon_dos_csv' in data and data['phonon_dos_csv']:
                 csv_path = data['phonon_dos_csv']
                 filename = os.path.basename(csv_path)
-                # 转换为前端可访问的 URL
-                csv_url = f"/api/images/phonon/{filename}"
+
+                # 🔧 修复：从路径中提取 session_id 生成正确的 URL
+                normalized_path = csv_path.replace('\\', '/')
+                if 'session_data/simulation/' in normalized_path:
+                    relative_part = normalized_path.split('session_data/simulation/', 1)[1]
+                    csv_url = f"/api/images/phonon/{relative_part}"
+                    logger.info(f"🔗 Generated phonon DOS CSV URL from session_data path: {csv_url}")
+                elif session_id:
+                    csv_url = f"/api/images/phonon/{session_id}/phonon_results/{filename}"
+                    logger.info(f"🔗 Generated phonon DOS CSV URL with session_id: {csv_url}")
+                else:
+                    csv_url = f"/api/images/phonon/{filename}"
+                    logger.warning(f"⚠️ Could not extract session_id from path, using filename only: {csv_url}")
+
                 file_metadata['phonon_dos_csv_url'] = csv_url
                 file_metadata['phonon_dos_csv_path'] = csv_path
 

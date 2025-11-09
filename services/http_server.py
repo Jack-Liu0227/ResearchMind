@@ -127,7 +127,9 @@ class HTTPServer:
                     "cif": "/api/cif",
                     "files": "/api/files?type=phonon_results|phonon_examples|generated_structures",
                     "images": "/api/images/{type}/{filename}",
-                    "download_file": "/api/download/{file_path:path}"
+                    "download": "/api/download/papers/{session_id}/{filename} (static files)",
+                    "phonon_images": "/api/images/phonon/{session_id}/phonon_results/{filename} (static files)",
+                    "thermal_conductivity": "/api/files/thermal_conductivity/{session_id}/thermal_conductivity/{filename} (static files)"
                 }
             }
 
@@ -377,7 +379,23 @@ class HTTPServer:
             """Legacy endpoint without /api prefix for backward compatibility"""
             return await cif_operation(request)
 
-        # Robust download handlers that try both paper_search roots
+        # 🔧 修复：移除 /api/download 路由，让静态文件挂载处理
+        # 原因：FastAPI 的路由（@app.get）优先于挂载（app.mount），
+        # 这个路由会拦截所有 /api/download/ 请求并在旧目录中查找文件，
+        # 导致新的 session_data/ 目录中的文件无法访问。
+        #
+        # 解决方案：删除这些路由，让 StaticFileService.setup_static_files() 中的
+        # app.mount("/api/download", StaticFiles(...)) 处理所有下载请求。
+        #
+        # 静态文件挂载配置（在 StaticFileService.setup_static_files() 中）：
+        # - /api/download -> session_data/
+        # - /download -> session_data/
+        #
+        # URL 映射示例：
+        # - /api/download/papers/session_xxx/file.csv -> session_data/papers/session_xxx/file.csv
+
+        # 🔧 保留 /download 路由用于向后兼容（仅用于旧的非会话隔离文件）
+        # 但这个路由应该很少被使用，因为新文件都使用 /api/download
         def _safe_join(base_dir: str, rel_path: str) -> Optional[str]:
             # Prevent path traversal and ensure within base_dir
             normalized = os.path.normpath(os.path.join(base_dir, rel_path))
@@ -386,9 +404,11 @@ class HTTPServer:
             return None
 
         def _find_download_file(file_path: str) -> Optional[str]:
+            # 🔧 修复：优先在 session_data 目录中查找
             roots = [
-                os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "paper_search"),
-                os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "mcp_servers", "paper_search"),
+                server_config.SESSION_DATA_DIR,  # 新的统一存储目录
+                os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "paper_search"),  # 旧目录（向后兼容）
+                os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "mcp_servers", "paper_search"),  # 旧目录（向后兼容）
             ]
             for root in roots:
                 candidate = _safe_join(root, file_path)
@@ -396,12 +416,13 @@ class HTTPServer:
                     return candidate
             return None
 
-        @self.app.get("/api/download/{file_path:path}")
-        async def download_file_api(file_path: str):
-            full = _find_download_file(file_path)
-            if not full:
-                raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-            return FileResponse(full)
+        # 🔧 注释掉 /api/download 路由，让静态文件挂载处理
+        # @self.app.get("/api/download/{file_path:path}")
+        # async def download_file_api(file_path: str):
+        #     full = _find_download_file(file_path)
+        #     if not full:
+        #         raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        #     return FileResponse(full)
 
         @self.app.get("/download/{file_path:path}")
         async def download_file_legacy(file_path: str):
@@ -410,11 +431,6 @@ class HTTPServer:
             if not full:
                 raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
             return FileResponse(full)
-
-        # NOTE: /api/download/{file_path:path} 路由已移至静态文件挂载
-        # 在 StaticFileService.setup_static_files() 中通过以下方式处理：
-        # app.mount("/api/download", StaticFiles(directory=papers_dir), name="papers_download")
-        # 这样可以直接提供 CSV 和 MD 文件，无需额外的路由处理
 
     def get_app(self) -> FastAPI:
         """Get FastAPI application instance"""
