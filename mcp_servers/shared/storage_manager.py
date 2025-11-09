@@ -50,6 +50,9 @@ def get_session_storage_path(
         base_path = SESSION_DATA_DIR / "simulation" / session_id / "thermal_conductivity"
     elif data_type == "cif":
         base_path = SESSION_DATA_DIR / "simulation" / session_id / "cif"
+    elif data_type == "uploads":
+        # CIF 文件上传目录（与 cif 相同）
+        base_path = SESSION_DATA_DIR / "simulation" / session_id / "cif"
     elif data_type == "relaxed_structures":
         base_path = SESSION_DATA_DIR / "simulation" / session_id / "relaxed"
     elif data_type == "generated_structures":

@@ -51,18 +51,20 @@ def generate_crystal_from_composition(
     device: str = "cuda",
     num_samples: int = 1,
     top_k: int = 10,
-    max_new_tokens: int = 2000
+    max_new_tokens: int = 2000,
+    session_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Generate crystal structure from chemical composition using CrystaLLM.
-    
+
     Args:
         composition: Chemical composition (e.g., "Si", "GaN", "Fe2O3")
         device: Computing device ("cpu" or "cuda", default: "cuda")
         num_samples: Number of structures to generate (default: 1)
         top_k: Top-k sampling parameter (default: 10)
         max_new_tokens: Maximum tokens to generate (default: 2000)
-    
+        session_id: Session ID for unified storage (optional)
+
     Returns:
         Dict containing:
         - success: bool - Whether generation succeeded
@@ -123,9 +125,26 @@ def generate_crystal_from_composition(
             }
         
         # Step 4: Create directories in generated_structures
-        # Use persistent generated_structures directory
-        generated_structures_dir = _MODULE_DIR / "generated_structures"
-        generated_structures_dir.mkdir(parents=True, exist_ok=True)
+        # Use unified storage if session_id provided, otherwise use legacy path
+        if session_id:
+            # Import storage manager
+            sys.path.insert(0, str(_MODULE_DIR.parent.parent))
+            from shared.storage_manager import get_session_storage_path
+
+            generated_structures_dir = get_session_storage_path(
+                session_id=session_id,
+                data_type="generated_structures",
+                create=True
+            )
+            logger.info("Using unified storage for generated structures",
+                       path=str(generated_structures_dir),
+                       session_id=session_id)
+        else:
+            # Legacy path for backward compatibility
+            generated_structures_dir = _MODULE_DIR / "generated_structures"
+            generated_structures_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("Using legacy path for generated structures",
+                       path=str(generated_structures_dir))
 
         # Create subdirectories for this generation
         generation_subdir = generated_structures_dir / f"{composition}_{generation_id}"

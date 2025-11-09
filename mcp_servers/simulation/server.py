@@ -113,6 +113,50 @@ except ImportError as e:
     logger.warning(f"SessionManager not available: {e}")
     SESSION_MANAGER_AVAILABLE = False
 
+# Import storage manager
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared.storage_manager import get_session_storage_path
+
+
+def _get_cif_file_path(session_id: str, cif_filename: str) -> Optional[Path]:
+    """
+    获取 CIF 文件路径（统一存储）
+
+    优先级：
+    1. session_data/simulation/{session_id}/relaxed/{cif_filename}
+    2. session_data/simulation/{session_id}/cif/{cif_filename}
+    3. session_data/simulation/{session_id}/uploads/{cif_filename}
+    4. 旧路径（向后兼容）: mcp_servers/simulation/cif/{session_id}/relax/{cif_filename}
+    5. 旧路径（向后兼容）: mcp_servers/simulation/cif/{session_id}/uploads/{cif_filename}
+
+    Args:
+        session_id: 会话ID
+        cif_filename: CIF文件名
+
+    Returns:
+        CIF文件路径，如果不存在返回None
+    """
+    # 尝试新的统一存储路径
+    for data_type in ["relaxed_structures", "cif", "uploads"]:
+        try:
+            storage_path = get_session_storage_path(session_id, data_type, create=False)
+            cif_path = storage_path / cif_filename
+            if cif_path.exists():
+                logger.info(f"Found CIF file in unified storage: {cif_path}")
+                return cif_path
+        except Exception as e:
+            logger.debug(f"Failed to check {data_type}: {e}")
+
+    # 尝试旧路径（向后兼容）
+    simulation_cif_dir = Path(__file__).parent / "cif"
+    for subdir in ["relax", "uploads"]:
+        cif_path = simulation_cif_dir / session_id / subdir / cif_filename
+        if cif_path.exists():
+            logger.warning(f"Found CIF file in legacy path: {cif_path}")
+            return cif_path
+
+    return None
+
 
 def _build_kappa_working_dir(session_id: Optional[str], prefix: str) -> Optional[Path]:
     """
@@ -286,21 +330,11 @@ async def calculate_energy_from_cif(
             "error": "MatterSim not available. Please install mattersim package."
         }
 
-    # Read CIF file from session directory
+    # Read CIF file from session directory (using unified storage)
     try:
-        from pathlib import Path
-        simulation_cif_dir = Path(__file__).parent / "cif"
+        cif_path = _get_cif_file_path(session_id, cif_filename)
 
-        # Try relax directory first (relaxed files)
-        relax_dir = simulation_cif_dir / session_id / "relax"
-        cif_path = relax_dir / cif_filename
-
-        if not cif_path.exists():
-            # Try uploads directory (original files)
-            upload_dir = simulation_cif_dir / session_id / "uploads"
-            cif_path = upload_dir / cif_filename
-
-        if not cif_path.exists():
+        if not cif_path:
             return {
                 "success": False,
                 "error": f"CIF file not found: {cif_filename}. Please ensure the file exists in session {session_id}."
@@ -380,14 +414,11 @@ async def relax_structure(
             "error": "MatterSim not available. Please install mattersim package."
         }
 
-    # Read CIF file from session directory
+    # Read CIF file from session directory (using unified storage)
     try:
-        from pathlib import Path
-        simulation_cif_dir = Path(__file__).parent / "cif"
-        upload_dir = simulation_cif_dir / session_id / "uploads"
-        cif_path = upload_dir / cif_filename
+        cif_path = _get_cif_file_path(session_id, cif_filename)
 
-        if not cif_path.exists():
+        if not cif_path:
             return {
                 "success": False,
                 "error": f"CIF file not found: {cif_filename}. Please ensure the file has been uploaded to session {session_id}."
@@ -414,16 +445,16 @@ async def relax_structure(
             from pathlib import Path
             from datetime import datetime
 
-            # Determine save directory - use simulation/cif directory for consistency
-            simulation_cif_dir = Path(__file__).parent / "cif"
-
+            # Determine save directory - use unified storage
             if session_id:
-                # Save to session-specific relax directory
-                # This matches the read path in calculate_phonon and calculate_energy_from_cif
-                structures_dir = simulation_cif_dir / session_id / "relax"
-                structures_dir.mkdir(parents=True, exist_ok=True)
-                url_prefix = f"/structures/{session_id}/relax"
-                logger.info(f"📁 Using session relax directory: {structures_dir}")
+                # Save to session-specific relaxed directory (unified storage)
+                structures_dir = get_session_storage_path(
+                    session_id=session_id,
+                    data_type="relaxed_structures",
+                    create=True
+                )
+                url_prefix = f"/structures/{session_id}/relaxed"
+                logger.info(f"📁 Using unified storage relaxed directory: {structures_dir}")
             else:
                 # Use global directory (backward compatibility)
                 structures_dir = Path(__file__).parent / "relaxed_structures"
@@ -595,6 +626,9 @@ async def calculate_phonon_from_directory(
                 from modules.mattersim_energy import calculate_phonon_impl
 
                 # Determine output directory for phonon results - use unified storage
+                import sys
+                from pathlib import Path
+                sys.path.insert(0, str(Path(__file__).parent.parent))
                 from shared.storage_manager import get_session_storage_path
                 phonon_dir = get_session_storage_path(
                     session_id=session_id or "default",
@@ -741,22 +775,11 @@ async def calculate_phonon(
             "error": "MatterSim not available. Please install mattersim package."
         }
 
-    # Read CIF file from session directory
-    # Try both relax directory (for relaxed files) and uploads directory (for original files)
+    # Read CIF file from session directory (using unified storage)
     try:
-        from pathlib import Path
-        simulation_cif_dir = Path(__file__).parent / "cif"
+        cif_path = _get_cif_file_path(session_id, cif_filename)
 
-        # Try relax directory first (relaxed files)
-        relax_dir = simulation_cif_dir / session_id / "relax"
-        cif_path = relax_dir / cif_filename
-
-        if not cif_path.exists():
-            # Try uploads directory (original files)
-            upload_dir = simulation_cif_dir / session_id / "uploads"
-            cif_path = upload_dir / cif_filename
-
-        if not cif_path.exists():
+        if not cif_path:
             return {
                 "success": False,
                 "error": f"CIF file not found: {cif_filename}. Please ensure the file exists in session {session_id}. "
@@ -774,7 +797,9 @@ async def calculate_phonon(
         }
 
     # 确定图片保存目录（在调用 impl 之前）- 使用统一存储
+    import sys
     from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
     from shared.storage_manager import get_session_storage_path
 
     # 使用统一的 session_data 目录
@@ -920,9 +945,12 @@ async def extract_and_validate_cif(
     try:
         from pathlib import Path
 
-        # Build upload directory path - use simulation/cif directory
-        simulation_cif_dir = Path(__file__).parent / "cif"
-        upload_dir = simulation_cif_dir / session_id / "uploads"
+        # Build upload directory path - use unified storage
+        upload_dir = get_session_storage_path(
+            session_id=session_id,
+            data_type="cif",  # 使用 cif 类型，会映射到 session_data/simulation/{session_id}/cif/
+            create=False
+        )
 
         if not upload_dir.exists():
             return {
@@ -1356,7 +1384,8 @@ async def generate_crystal_structure(
     device: str = "cuda",
     num_samples: int = 1,
     top_k: int = 10,
-    max_new_tokens: int = 2000
+    max_new_tokens: int = 2000,
+    session_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Generate crystal structure from chemical composition using CrystaLLM.
@@ -1374,6 +1403,7 @@ async def generate_crystal_structure(
         num_samples: Number of structures to generate (default: 1)
         top_k: Top-k sampling parameter for generation diversity (default: 10)
         max_new_tokens: Maximum tokens to generate (default: 2000)
+        session_id: Session ID for unified storage (optional)
 
     Returns:
         Dict containing:
@@ -1388,7 +1418,7 @@ async def generate_crystal_structure(
         - error: str - Error message if failed
 
     Example:
-        result = await generate_crystal_structure(composition="GaN", num_samples=3)
+        result = await generate_crystal_structure(composition="GaN", num_samples=3, session_id="session_123")
         if result["success"]:
             # Use file paths for downstream calculations
             for cif_path in result["cif_file_paths"]:
@@ -1403,7 +1433,8 @@ async def generate_crystal_structure(
         device=device,
         num_samples=num_samples,
         top_k=top_k,
-        max_new_tokens=max_new_tokens
+        max_new_tokens=max_new_tokens,
+        session_id=session_id
     )
 
     # 如果生成成功且包含frontend_structures，记录到全局缓存

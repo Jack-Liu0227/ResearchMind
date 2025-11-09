@@ -155,18 +155,33 @@ class AgentCoordinator:
                         actual_session_id = f"upload_{timestamp}_{unique_id}"
                         logger.info(f"📝 Generated session_id for file upload: {actual_session_id}")
 
-                    # 根据 agent 类型选择不同的上传目录
+                    # 根据 agent 类型选择不同的上传目录 - 使用统一存储
+                    import sys
+                    sys.path.insert(0, str(Path(__file__).parent.parent / "mcp_servers"))
+                    from shared.storage_manager import get_session_storage_path
+
                     if agent_id == 'deep_research_agent':
                         # 文献研究 agent 使用 papers 目录
-                        base_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
+                        upload_dir = get_session_storage_path(
+                            session_id=actual_session_id,
+                            data_type="papers",
+                            create=True
+                        ) / "uploads"
                     elif agent_id == 'simulation_agent':
-                        # 模拟 agent 使用 simulation/cif 目录
-                        base_dir = Path(__file__).parent.parent / "mcp_servers" / "simulation" / "cif"
+                        # 模拟 agent 使用 cif 目录
+                        upload_dir = get_session_storage_path(
+                            session_id=actual_session_id,
+                            data_type="cif",
+                            create=True
+                        )
                     else:
                         # 默认使用 papers 目录
-                        base_dir = Path(__file__).parent.parent / "mcp_servers" / "paper_search" / "papers"
+                        upload_dir = get_session_storage_path(
+                            session_id=actual_session_id,
+                            data_type="papers",
+                            create=True
+                        ) / "uploads"
 
-                    upload_dir = base_dir / actual_session_id / "uploads"
                     upload_dir.mkdir(parents=True, exist_ok=True)
 
                     # 🆕 导入文件名清理函数，确保与 MCP 工具使用相同的文件名

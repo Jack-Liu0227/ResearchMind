@@ -70,14 +70,15 @@ class StaticFileService:
         # More specific paths must be mounted first to avoid being shadowed
 
         # Papers download directory - mount first (most specific)
+        # 🔧 使用统一的 session_data/papers 目录
         # 这是论文搜索结果的 CSV 和 MD 文件存储位置
-        # 注意：挂载点是 /api/download，目录是 mcp_servers/paper_search
-        # 这样 /api/download/papers/topic/file.csv 会映射到 mcp_servers/paper_search/papers/topic/file.csv
-        paper_search_dir = os.path.join(server_config.STATIC_FILES_ROOT, "mcp_servers", "paper_search")
+        # 注意：挂载点是 /api/download，目录是 session_data
+        # 这样 /api/download/papers/{session_id}/file.csv 会映射到 session_data/papers/{session_id}/file.csv
+        paper_search_dir = server_config.SESSION_DATA_DIR
         # 🔧 确保目录存在，如果不存在则创建
         if not os.path.exists(paper_search_dir):
             os.makedirs(paper_search_dir, exist_ok=True)
-            logger.info(f"📁 Created paper search directory: {paper_search_dir}")
+            logger.info(f"📁 Created session data directory: {paper_search_dir}")
 
         app.mount(
             "/api/download",

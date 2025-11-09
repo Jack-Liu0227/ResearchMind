@@ -311,6 +311,9 @@ def calculate_kappa_from_cif_impl(
                     results_csv_url = None
                     try:
                         # 使用统一存储目录
+                        import sys
+                        from pathlib import Path as PathLib
+                        sys.path.insert(0, str(PathLib(__file__).parent.parent.parent))
                         from shared.storage_manager import get_session_storage_path, get_file_url
 
                         # 从 working_dir 提取 session_id（如果可能）
@@ -579,6 +582,9 @@ def _calculate_kappa_batch(
                     batch_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
                     # 使用统一存储目录
+                    import sys
+                    from pathlib import Path as PathLib
+                    sys.path.insert(0, str(PathLib(__file__).parent.parent.parent))
                     from shared.storage_manager import get_session_storage_path, get_file_url
 
                     # 从 working_dir 提取 session_id（如果可能）
