@@ -82,13 +82,13 @@ class StaticFileService:
 
         app.mount(
             "/api/download",
-            StaticFiles(directory=paper_search_dir),
+            StaticFiles(directory=paper_search_dir, check_dir=False),
             name="papers_download"
         )
         # Legacy path support without /api prefix
         app.mount(
             "/download",
-            StaticFiles(directory=paper_search_dir),
+            StaticFiles(directory=paper_search_dir, check_dir=False),
             name="papers_download_legacy"
         )
         logger.info(f"✅ Static files: /api/download -> {paper_search_dir}")
@@ -106,7 +106,7 @@ class StaticFileService:
 
         app.mount(
             "/api/images/phonon",
-            StaticFiles(directory=phonon_dir),
+            StaticFiles(directory=phonon_dir, check_dir=False),
             name="phonon_images"
         )
         logger.info(f"✅ Static files: /api/images/phonon -> {phonon_dir}")
@@ -122,7 +122,7 @@ class StaticFileService:
 
         app.mount(
             "/api/files/thermal_conductivity",
-            StaticFiles(directory=thermal_conductivity_dir),
+            StaticFiles(directory=thermal_conductivity_dir, check_dir=False),
             name="thermal_conductivity_files"
         )
         logger.info(f"✅ Static files: /api/files/thermal_conductivity -> {thermal_conductivity_dir}")
@@ -138,7 +138,7 @@ class StaticFileService:
 
         app.mount(
             "/api/images/generated_structures",
-            StaticFiles(directory=structures_dir),
+            StaticFiles(directory=structures_dir, check_dir=False),
             name="structure_images"
         )
         logger.info(f"✅ Static files: /api/images/generated_structures -> {structures_dir}")
@@ -156,7 +156,7 @@ class StaticFileService:
 
         app.mount(
             "/api/structures",
-            StaticFiles(directory=simulation_cif_dir),
+            StaticFiles(directory=simulation_cif_dir, check_dir=False),
             name="simulation_structures"
         )
         logger.info(f"✅ Static files: /api/structures -> {simulation_cif_dir}")
