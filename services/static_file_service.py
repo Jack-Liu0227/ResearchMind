@@ -70,7 +70,7 @@ class StaticFileService:
         # More specific paths must be mounted first to avoid being shadowed
 
         # Papers download directory - mount first (most specific)
-        # 🔧 使用统一的 session_data/papers 目录
+        # 🔧 使用统一的 session_data 目录
         # 这是论文搜索结果的 CSV 和 MD 文件存储位置
         # 注意：挂载点是 /api/download，目录是 session_data
         # 这样 /api/download/papers/{session_id}/file.csv 会映射到 session_data/papers/{session_id}/file.csv
@@ -97,11 +97,12 @@ class StaticFileService:
         # 🔧 使用统一的 session_data 目录结构
         # Phonon results directory - mount second (specific)
         # 声子谱图片和 CSV 文件 - 使用 session_data/simulation/*/phonon_results
+        # 注意：/api/images/phonon/{session_id}/file.csv 会映射到 session_data/simulation/{session_id}/phonon_results/file.csv
         phonon_dir = os.path.join(server_config.SESSION_DATA_DIR, "simulation")
         # 🔧 确保目录存在，如果不存在则创建
         if not os.path.exists(phonon_dir):
             os.makedirs(phonon_dir, exist_ok=True)
-            logger.info(f"📁 Created phonon results directory: {phonon_dir}")
+            logger.info(f"📁 Created simulation directory: {phonon_dir}")
 
         app.mount(
             "/api/images/phonon",
@@ -112,11 +113,12 @@ class StaticFileService:
 
         # 🆕 Thermal conductivity results directory - mount for CSV files
         # 使用 session_data/simulation/*/thermal_conductivity
+        # 注意：/api/files/thermal_conductivity/{session_id}/file.csv 会映射到 session_data/simulation/{session_id}/thermal_conductivity/file.csv
         thermal_conductivity_dir = os.path.join(server_config.SESSION_DATA_DIR, "simulation")
         # 🔧 确保目录存在，如果不存在则创建
         if not os.path.exists(thermal_conductivity_dir):
             os.makedirs(thermal_conductivity_dir, exist_ok=True)
-            logger.info(f"📁 Created thermal conductivity results directory: {thermal_conductivity_dir}")
+            logger.info(f"📁 Created simulation directory: {thermal_conductivity_dir}")
 
         app.mount(
             "/api/files/thermal_conductivity",
@@ -126,6 +128,8 @@ class StaticFileService:
         logger.info(f"✅ Static files: /api/files/thermal_conductivity -> {thermal_conductivity_dir}")
 
         # Generated structures directory - mount third (specific)
+        # 🔧 CrystalLM 生成的结构 - 使用 session_data/simulation/*/generated
+        # 注意：/api/images/generated_structures/{session_id}/file.cif 会映射到 session_data/simulation/{session_id}/generated/file.cif
         structures_dir = server_config.GENERATED_STRUCTURES_DIR
         # 🔧 确保目录存在，如果不存在则创建
         if not os.path.exists(structures_dir):

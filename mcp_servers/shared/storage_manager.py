@@ -130,20 +130,39 @@ def migrate_legacy_data(data_type: str, session_id: str = "legacy") -> bool:
         return False
 
 
-def get_file_url(file_path: Path, data_type: str) -> str:
+def get_file_url(file_path: Path, data_type: str, session_id: Optional[str] = None) -> str:
     """
     生成前端可访问的文件 URL
-    
+
     Args:
         file_path: 文件路径
         data_type: 数据类型
-    
+        session_id: 会话 ID（可选，用于生成会话隔离的 URL）
+
     Returns:
         URL 路径
     """
     # 根据数据类型生成对应的 URL
     filename = file_path.name
-    
+
+    # 如果提供了 session_id，生成会话隔离的 URL
+    if session_id:
+        if data_type == "phonon_results":
+            return f"/api/images/phonon/{session_id}/phonon_results/{filename}"
+        elif data_type == "thermal_conductivity":
+            return f"/api/files/thermal_conductivity/{session_id}/thermal_conductivity/{filename}"
+        elif data_type == "cif" or data_type == "uploads":
+            return f"/api/structures/{session_id}/cif/{filename}"
+        elif data_type == "relaxed_structures":
+            return f"/api/structures/{session_id}/relaxed/{filename}"
+        elif data_type == "generated_structures":
+            return f"/api/images/generated_structures/{session_id}/generated/{filename}"
+        elif data_type == "papers":
+            return f"/api/download/papers/{session_id}/{filename}"
+        else:
+            return f"/api/files/{data_type}/{session_id}/{filename}"
+
+    # 不提供 session_id 时，使用简化的 URL（向后兼容）
     if data_type == "phonon_results":
         return f"/images/phonon/{filename}"
     elif data_type == "thermal_conductivity":
