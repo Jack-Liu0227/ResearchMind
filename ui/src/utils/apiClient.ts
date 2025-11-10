@@ -14,6 +14,52 @@ const ensureLeadingSlash = (value: string) => (value.startsWith('/') ? value : `
 
 const buildApiUrl = (path: string) => `${API_BASE_URL}${ensureLeadingSlash(path)}`;
 
+/**
+ * 统一的 API 调用包装器
+ * 🔧 优化：减少重复的错误处理代码
+ */
+async function apiCall<T>(
+  fetcher: () => Promise<Response>,
+  errorMessage: string
+): Promise<T> {
+  try {
+    const response = await fetcher();
+
+    if (!response.ok) {
+      let errorDetail = errorMessage;
+      try {
+        const error = await response.json();
+        errorDetail = error.detail || error.message || errorMessage;
+      } catch {
+        // 如果响应不是 JSON，使用默认错误消息
+        errorDetail = `${errorMessage}: ${response.statusText}`;
+      }
+      throw new Error(errorDetail);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error(`❌ ${errorMessage}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * 安全的 API 调用包装器（返回 null 而不是抛出错误）
+ * 🔧 优化：用于可选的 API 调用，失败时返回 null
+ */
+async function safeApiCall<T>(
+  fetcher: () => Promise<Response>,
+  errorMessage: string
+): Promise<T | null> {
+  try {
+    return await apiCall<T>(fetcher, errorMessage);
+  } catch (error) {
+    // 错误已经被 apiCall 记录，这里只返回 null
+    return null;
+  }
+}
+
 const resolveEffectiveOrigin = () => {
   if (API_ORIGIN.startsWith('http://') || API_ORIGIN.startsWith('https://')) {
     return API_ORIGIN;
@@ -113,8 +159,8 @@ export interface APIStructureResponse {
 export async function convertToConventionalCell(
   cifContent: string
 ): Promise<CrystalStructure> {
-  try {
-    const response = await fetch(buildApiUrl('cif'), {
+  const data = await apiCall<APIStructureResponse>(
+    () => fetch(buildApiUrl('cif'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -123,32 +169,23 @@ export async function convertToConventionalCell(
         cif_content: cifContent,
         to_conventional: true,
       }),
-    });
+    }),
+    '惯胞转换失败'
+  );
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || '惯胞转换失败');
-    }
-
-    const data: APIStructureResponse = await response.json();
-
-    // 转换为 CrystalStructure 格式
-    return {
-      id: `api_${Date.now()}`,
-      formula: data.formula,
-      spaceGroup: data.spaceGroup,
-      latticeParameters: data.latticeParameters,
-      atoms: data.atoms.map(atom => ({
-        element: atom.element,
-        position: atom.position,
-        charge: atom.charge,
-      })),
-      properties: data.properties,
-    };
-  } catch (error) {
-    console.error('❌ 惯胞转换失败:', error);
-    throw error;
-  }
+  // 转换为 CrystalStructure 格式
+  return {
+    id: `api_${Date.now()}`,
+    formula: data.formula,
+    spaceGroup: data.spaceGroup,
+    latticeParameters: data.latticeParameters,
+    atoms: data.atoms.map(atom => ({
+      element: atom.element,
+      position: atom.position,
+      charge: atom.charge,
+    })),
+    properties: data.properties,
+  };
 }
 
 /**
@@ -160,8 +197,8 @@ export async function parseCIF(
   cifContent: string,
   toConventional: boolean = false
 ): Promise<CrystalStructure> {
-  try {
-    const response = await fetch(buildApiUrl('cif'), {
+  const data = await apiCall<APIStructureResponse>(
+    () => fetch(buildApiUrl('cif'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -170,32 +207,23 @@ export async function parseCIF(
         cif_content: cifContent,
         to_conventional: toConventional,
       }),
-    });
+    }),
+    'CIF 解析失败'
+  );
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'CIF 解析失败');
-    }
-
-    const data: APIStructureResponse = await response.json();
-
-    // 转换为 CrystalStructure 格式
-    return {
-      id: `api_${Date.now()}`,
-      formula: data.formula,
-      spaceGroup: data.spaceGroup,
-      latticeParameters: data.latticeParameters,
-      atoms: data.atoms.map(atom => ({
-        element: atom.element,
-        position: atom.position,
-        charge: atom.charge,
-      })),
-      properties: data.properties,
-    };
-  } catch (error) {
-    console.error('❌ CIF 解析失败:', error);
-    throw error;
-  }
+  // 转换为 CrystalStructure 格式
+  return {
+    id: `api_${Date.now()}`,
+    formula: data.formula,
+    spaceGroup: data.spaceGroup,
+    latticeParameters: data.latticeParameters,
+    atoms: data.atoms.map(atom => ({
+      element: atom.element,
+      position: atom.position,
+      charge: atom.charge,
+    })),
+    properties: data.properties,
+  };
 }
 
 /**
@@ -244,38 +272,22 @@ export async function getPhononImage(
  * 获取声子谱结果列表
  */
 export async function getPhononResults(): Promise<string[]> {
-  try {
-    const response = await fetch(buildApiUrl('files?type=phonon_results'));
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch phonon results: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data.files || [];
-  } catch (error) {
-    console.error('❌ 获取声子谱结果列表失败:', error);
-    throw error;
-  }
+  const data = await apiCall<{ files: string[] }>(
+    () => fetch(buildApiUrl('files?type=phonon_results')),
+    '获取声子谱结果列表失败'
+  );
+  return data.files || [];
 }
 
 /**
  * 获取生成结构列表
  */
 export async function getGeneratedStructures(): Promise<string[]> {
-  try {
-    const response = await fetch(buildApiUrl('files?type=generated_structures'));
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch generated structures: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data.files || [];
-  } catch (error) {
-    console.error('❌ 获取生成结构列表失败:', error);
-    throw error;
-  }
+  const data = await apiCall<{ files: string[] }>(
+    () => fetch(buildApiUrl('files?type=generated_structures')),
+    '获取生成结构列表失败'
+  );
+  return data.files || [];
 }
 
 /**
@@ -293,19 +305,11 @@ export interface PhononImage {
  * 获取声子谱示例图片列表
  */
 export async function getPhononExamples(): Promise<PhononImage[]> {
-  try {
-    const response = await fetch(buildApiUrl('files?type=phonon_examples'));
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data.files || [];
-  } catch (error) {
-    console.error('❌ 获取声子谱示例失败:', error);
-    throw error;
-  }
+  const data = await apiCall<{ files: PhononImage[] }>(
+    () => fetch(buildApiUrl('files?type=phonon_examples')),
+    '获取声子谱示例失败'
+  );
+  return data.files || [];
 }
 
 // Safer health check that tolerates non-JSON responses
@@ -371,97 +375,59 @@ export interface GlobalBillingStats {
 
 /**
  * 获取指定对话的计费统计
+ * 🔧 优化：正确处理 success=false 的情况
  */
 export async function getConversationBillingStats(conversationId: string): Promise<BillingStats | null> {
-  try {
-    const response = await fetch(buildApiUrl(`billing/stats/conversation/${conversationId}`))
+  const result = await safeApiCall<{ success: boolean; message?: string; data: BillingStats | null }>(
+    () => fetch(buildApiUrl(`billing/stats/conversation/${conversationId}`)),
+    '获取对话计费统计失败'
+  );
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch conversation billing stats: ${response.statusText}`)
-    }
-
-    const result = await response.json()
-
-    if (result.success && result.data) {
-      return result.data
-    }
-
-    return null
-  } catch (error) {
-    console.error('❌ 获取对话计费统计失败:', error)
-    return null
+  // 如果 API 调用失败（网络错误等），返回 null
+  if (!result) {
+    console.warn('⚠️ [getConversationBillingStats] API 调用失败，返回 null');
+    return null;
   }
+
+  // 如果后端返回 success=false（对话不存在），也返回 null
+  if (!result.success) {
+    console.log(`ℹ️ [getConversationBillingStats] 对话 ${conversationId} 不存在或无数据: ${result.message}`);
+    return null;
+  }
+
+  // 返回实际数据
+  return result.data;
 }
 
 /**
  * 获取指定用户的总计费统计
  */
 export async function getUserBillingStats(userId: string): Promise<UserBillingStats | null> {
-  try {
-    const response = await fetch(buildApiUrl(`billing/stats/user/${userId}`))
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch user billing stats: ${response.statusText}`)
-    }
-
-    const result = await response.json()
-
-    if (result.success && result.data) {
-      return result.data
-    }
-
-    return null
-  } catch (error) {
-    console.error('❌ 获取用户计费统计失败:', error)
-    return null
-  }
+  const result = await safeApiCall<{ success: boolean; data: UserBillingStats }>(
+    () => fetch(buildApiUrl(`billing/stats/user/${userId}`)),
+    '获取用户计费统计失败'
+  );
+  return result?.success && result.data ? result.data : null;
 }
 
 /**
  * 获取全局计费统计
  */
 export async function getGlobalBillingStats(): Promise<GlobalBillingStats | null> {
-  try {
-    const response = await fetch(buildApiUrl('billing/stats/global'))
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch global billing stats: ${response.statusText}`)
-    }
-
-    const result = await response.json()
-
-    if (result.success && result.data) {
-      return result.data
-    }
-
-    return null
-  } catch (error) {
-    console.error('❌ 获取全局计费统计失败:', error)
-    return null
-  }
+  const result = await safeApiCall<{ success: boolean; data: GlobalBillingStats }>(
+    () => fetch(buildApiUrl('billing/stats/global')),
+    '获取全局计费统计失败'
+  );
+  return result?.success && result.data ? result.data : null;
 }
 
 /**
  * 列出指定用户的所有对话及其计费信息
  */
 export async function listUserConversations(userId: string): Promise<BillingStats[]> {
-  try {
-    const response = await fetch(buildApiUrl(`billing/conversations/user/${userId}`))
-
-    if (!response.ok) {
-      throw new Error(`Failed to list user conversations: ${response.statusText}`)
-    }
-
-    const result = await response.json()
-
-    if (result.success && result.conversations) {
-      return result.conversations
-    }
-
-    return []
-  } catch (error) {
-    console.error('❌ 列出用户对话失败:', error)
-    return []
-  }
+  const result = await safeApiCall<{ success: boolean; conversations: BillingStats[] }>(
+    () => fetch(buildApiUrl(`billing/conversations/user/${userId}`)),
+    '列出用户对话失败'
+  );
+  return result?.success && result.conversations ? result.conversations : [];
 }
-

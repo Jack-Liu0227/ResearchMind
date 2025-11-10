@@ -6,7 +6,7 @@
 
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 import os
@@ -104,19 +104,20 @@ class BillingRecord(Base):
     __tablename__ = "billing_records"
 
     id = Column(Integer, primary_key=True, index=True)
-    
+
     # 关联用户和会话
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="用户 ID")
+    # 🔧 优化：添加索引以加速查询
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True, comment="用户 ID")
     user = relationship("User", back_populates="billing_records")
-    
-    session_id = Column(Integer, ForeignKey("sessions.id"), comment="会话 ID（可选）")
+
+    session_id = Column(Integer, ForeignKey("sessions.id"), index=True, comment="会话 ID（可选）")
     session = relationship("Session", back_populates="billing_records")
-    
+
     # 计费信息
     tokens = Column(Integer, nullable=False, comment="Token 数量")
     photons = Column(Float, nullable=False, comment="光子数量")
     model = Column(String(100), comment="模型名称")
-    
+
     # Bohrium API 调用信息
     biz_no = Column(String(50), unique=True, index=True, comment="业务流水号")
     charge_result = Column(JSON, comment="扣费结果（JSON）")
@@ -124,9 +125,16 @@ class BillingRecord(Base):
 
     # 元数据（注意：不能使用 metadata 作为字段名，因为 SQLAlchemy 保留了这个名字）
     extra_data = Column(JSON, comment="额外元数据（JSON）")
-    
+
     # 时间戳
-    created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
+    # 🔧 优化：添加索引以加速按时间查询
+    created_at = Column(DateTime, default=datetime.utcnow, index=True, comment="创建时间")
+
+    # 🔧 优化：添加复合索引以加速常见查询
+    __table_args__ = (
+        Index('idx_user_created', 'user_id', 'created_at'),  # 按用户查询历史记录
+        Index('idx_session_created', 'session_id', 'created_at'),  # 按会话查询历史记录
+    )
 
 
 class AuthToken(Base):

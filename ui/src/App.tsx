@@ -1,79 +1,27 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+/**
+ * 主应用组件
+ *
+ * ✅ 认证方式：完全基于 Cookie（不使用 JWT Token）
+ * ✅ 登录门户：阻塞式，用户必须先登录才能进入主界面
+ * ✅ 数据库：仅用于统计和历史记录
+ */
+
+import { useState } from 'react'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import ChatPage from './pages/ChatPage'
 import SettingsPage from './pages/SettingsPage'
 import DiagnosticPage from './pages/DiagnosticPage'
-import AuthGatePage from './pages/AuthGatePage'
-import LoginPage from './pages/LoginPage'
 import UserProfilePage from './pages/UserProfilePage'
+import LoginGateway from './components/LoginGateway'
 
 import StorageValidator from './components/StorageValidator'
 import { useAutoSave } from './hooks/useAutoSave'
-import { useState, useEffect } from 'react'
 
 const routerFutureFlags = {
   v7_startTransition: true,
   v7_relativeSplatPath: true,
 } as const
-
-// 受保护的路由组件（基于 JWT Token）
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
-
-  useEffect(() => {
-    checkAuth()
-  }, [])
-
-  const checkAuth = async () => {
-    try {
-      const token = localStorage.getItem('auth_token')
-
-      if (!token) {
-        setIsAuthenticated(false)
-        return
-      }
-
-      // 验证 Token 是否有效
-      const response = await fetch('/api/auth/me', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (response.ok) {
-        setIsAuthenticated(true)
-      } else {
-        // Token 无效或过期，清除本地存储
-        localStorage.removeItem('auth_token')
-        localStorage.removeItem('user_info')
-        setIsAuthenticated(false)
-      }
-    } catch (error) {
-      console.error('认证检查失败:', error)
-      setIsAuthenticated(false)
-    }
-  }
-
-  // 检查中，显示加载状态
-  if (isAuthenticated === null) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">正在检查认证状态...</p>
-        </div>
-      </div>
-    )
-  }
-
-  // 未认证，跳转到登录页面
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
-  }
-
-  // 已认证，显示内容
-  return <>{children}</>
-}
 
 function App() {
   console.log('App component rendering...')
@@ -81,22 +29,29 @@ function App() {
   // 启用自动保存功能
   useAutoSave(30000) // 30秒自动保存一次
 
+  // 认证状态
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+
   // 添加错误边界
   try {
     return (
       <StorageValidator>
+        {/* 登录门户（阻塞式） */}
+        {!isAuthenticated && (
+          <LoginGateway onAuthenticated={() => setIsAuthenticated(true)} />
+        )}
+
+        {/* 主应用界面 */}
         <div className="min-h-screen bg-gray-50">
           <Router future={routerFutureFlags}>
             <Routes>
-              {/* 公开页面 - 不需要认证 */}
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/auth" element={<AuthGatePage />} />
+              {/* 诊断页面 */}
               <Route path="/diagnostic" element={<DiagnosticPage />} />
 
-              {/* 受保护的页面 - 需要认证 */}
-              <Route path="/" element={<ProtectedRoute><Layout><ChatPage /></Layout></ProtectedRoute>} />
-              <Route path="/settings" element={<ProtectedRoute><Layout><SettingsPage /></Layout></ProtectedRoute>} />
-              <Route path="/profile" element={<ProtectedRoute><Layout><UserProfilePage /></Layout></ProtectedRoute>} />
+              {/* 所有页面都可访问（基于 Cookie 认证） */}
+              <Route path="/" element={<Layout><ChatPage /></Layout>} />
+              <Route path="/settings" element={<Layout><SettingsPage /></Layout>} />
+              <Route path="/profile" element={<Layout><UserProfilePage /></Layout>} />
             </Routes>
           </Router>
         </div>

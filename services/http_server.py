@@ -495,12 +495,11 @@ class HTTPServer:
         return self.app
 
     def _setup_billing_routes(self):
-        """Setup billing and OAuth authentication routes"""
+        """Setup billing routes"""
         try:
-            from services.billing_api import router as billing_router, auth_router
+            from services.billing_api import router as billing_router
             self.app.include_router(billing_router)
-            self.app.include_router(auth_router)
-            logger.info("✅ Billing and OAuth routes registered")
+            logger.info("✅ Billing routes registered")
         except Exception as e:
             logger.warning(f"⚠️ Failed to register billing routes: {e}")
 

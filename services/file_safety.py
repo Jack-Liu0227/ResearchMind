@@ -9,32 +9,56 @@ import shutil
 import logging
 from pathlib import Path
 from typing import Optional, Union
-from functools import wraps
+from functools import wraps, lru_cache
+from time import time
 
 logger = logging.getLogger(__name__)
+
+
+# ==========================================
+# 🔧 优化：磁盘空间检查缓存
+# ==========================================
+
+@lru_cache(maxsize=1)
+def _cached_disk_usage(path: str, cache_time: int):
+    """
+    缓存磁盘使用情况（1分钟）
+
+    Args:
+        path: 要检查的路径
+        cache_time: 缓存时间戳（分钟级）
+
+    Returns:
+        磁盘使用情况
+    """
+    return shutil.disk_usage(path)
 
 
 def check_disk_space(path: Union[str, Path], required_mb: int = 100) -> bool:
     """
     检查磁盘空间是否足够
-    
+
+    🔧 优化：添加 1 分钟缓存，减少频繁的系统调用
+
     Args:
         path: 要检查的路径
         required_mb: 需要的最小空间（MB）
-    
+
     Returns:
         是否有足够空间
     """
     try:
-        stat = shutil.disk_usage(path)
+        # 使用缓存（每分钟更新一次）
+        cache_key = int(time() / 60)  # 分钟级缓存
+        stat = _cached_disk_usage(str(path), cache_key)
         available_mb = stat.free / (1024 * 1024)
-        
+
         if available_mb < required_mb:
             logger.warning(
                 f"⚠️ 磁盘空间不足: 可用 {available_mb:.2f} MB，需要 {required_mb} MB"
             )
             return False
-        
+
         return True
     except Exception as e:
         logger.error(f"❌ 检查磁盘空间失败: {e}")

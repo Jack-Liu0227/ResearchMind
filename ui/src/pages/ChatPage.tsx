@@ -35,7 +35,9 @@ const ChatPage: React.FC = () => {
     addToCurrentSessionPhononImages,
     setShowPhononVisualization,
     sessions,
-    updateBillingData
+    updateBillingData,
+    setUserBillingStats,
+    setGlobalBillingStats
   } = useAppStore()
 
   const pendingFileMetadataRef = useRef<any[]>([])
@@ -380,6 +382,8 @@ const ChatPage: React.FC = () => {
           // 更新计费数据
           if (message.data.billing) {
             console.log('💎 [计费] 收到计费数据:', message.data.billing)
+            console.log('💎 [计费] charged 字段值:', message.data.billing.charged)
+            console.log('💎 [计费] billing_source 字段值:', message.data.billing.billing_source)
             updateBillingData(message.data.billing)
 
             // 将本次对话的计费信息添加到最后一条 assistant 消息
@@ -805,6 +809,23 @@ const ChatPage: React.FC = () => {
 
           const phononFiles = createSessionFilesFromPhononData(phononData, currentMessage.id)
           phononFiles.forEach((file) => addToCurrentSessionFiles(file))
+        }
+      } else if (message.type === 'conversation_stats' && message.data) {
+        // 🆕 处理会话计费统计响应
+        console.log('📊 [计费统计] 收到会话统计:', message.data)
+        // 会话统计已经通过 billingData 更新，这里不需要额外处理
+        // BillingStatsPanel 会监听 billingData 的变化
+      } else if (message.type === 'user_stats' && message.data) {
+        // 🆕 处理用户计费统计响应
+        console.log('📊 [计费统计] 收到用户统计:', message.data)
+        if (message.data.success && message.data.data) {
+          setUserBillingStats(message.data.data)
+        }
+      } else if (message.type === 'global_stats' && message.data) {
+        // 🆕 处理全局计费统计响应
+        console.log('📊 [计费统计] 收到全局统计:', message.data)
+        if (message.data.success && message.data.data) {
+          setGlobalBillingStats(message.data.data)
         }
       }
     })

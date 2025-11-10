@@ -28,6 +28,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Load environment variables from .env (override OS env if provided)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    logger.info("✅ Loaded environment variables from .env")
+except Exception as _e:
+    logger.warning(f"⚠️ Could not load .env automatically: {_e}")
+
 # Import services
 from services.config import server_config
 from services.websocket_server import WebSocketServer
@@ -35,10 +43,19 @@ from services.http_server import HTTPServer
 from services.agent_coordinator import AgentCoordinator
 from services.image_handler import ImageHandler
 from services.json_repair_patch import apply_json_repair_patch
+from services.database import init_db
 
 # Apply JSON repair patch for DeepSeek compatibility
 apply_json_repair_patch()
 logger.info("✅ JSON repair patch applied for LLM tool calls")
+
+# Initialize database
+try:
+    init_db()
+    logger.info("✅ Database initialized successfully")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize database: {e}")
+    sys.exit(1)
 
 # Import agents
 try:
@@ -77,7 +94,7 @@ async def main():
     logger.info("🚀 ResearchMind Unified Server")
     logger.info("=" * 60)
     logger.info("")
-    
+
     # Initialize agents
     agents = {
         "research_coordinator": research_coordinator,
@@ -85,15 +102,15 @@ async def main():
         "database_agent": database_agent,
         "simulation_agent": simulation_agent,
     }
-    
+
     # Initialize agent coordinator
     agent_coordinator = AgentCoordinator(agents)
     logger.info(f"✅ Agent coordinator initialized with {len(agents)} agents")
-    
+
     # Initialize HTTP server
     http_server = HTTPServer()
     logger.info("✅ HTTP server initialized")
-    
+
     # Set base URL for image handler
     # 使用 RESEARCHMIND_HTTP_HOST + RESEARCHMIND_HTTP_PORT
     import os
@@ -101,11 +118,11 @@ async def main():
     api_port = os.getenv("RESEARCHMIND_HTTP_PORT", "50002")  # Changed from 50006 to 50002
     ImageHandler.set_base_url(api_host, int(api_port))
     logger.info(f"✅ Image handler configured: {ImageHandler.BASE_URL}")
-    
+
     # Initialize WebSocket server
     websocket_server = WebSocketServer(agent_coordinator)
     logger.info("✅ WebSocket server initialized")
-    
+
     logger.info("")
     logger.info("📡 Services:")
     logger.info(f"   - WebSocket: ws://{server_config.WEBSOCKET_HOST}:{server_config.WEBSOCKET_PORT}")
@@ -115,7 +132,7 @@ async def main():
     logger.info("Press Ctrl+C to stop all servers")
     logger.info("=" * 60)
     logger.info("")
-    
+
     # Run both servers concurrently with proper error handling
     try:
         # Create tasks for both servers

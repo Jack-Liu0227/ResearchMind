@@ -1,9 +1,12 @@
 """
 Monkey patch for Google ADK LiteLLM to handle malformed JSON in tool calls
+
+Scope-safe version: avoid interfering with security/crypto libraries (e.g., python-jose)
 """
 
 import json
 import logging
+import inspect
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -12,10 +15,43 @@ logger = logging.getLogger(__name__)
 _original_json_loads = json.loads
 
 
+def _should_bypass_patch(s: Any) -> bool:
+    """Decide whether to bypass the patch and use the original json.loads.
+    - Bypass for security/crypto libraries (python-jose, cryptography).
+    - Bypass for non-JSON-looking short strings (like JWT secrets, tokens).
+    """
+    # If not a str, don't try to be clever
+    if not isinstance(s, str):
+        return True
+
+    # Heuristic: if the string doesn't look like JSON, bypass
+    json_indicators = ('{', '}', '[', ']', '"', ':')
+    looks_like_json = any(ch in s for ch in json_indicators)
+    if not looks_like_json and len(s) < 4096:
+        return True
+
+    # Call stack check: skip for python-jose or cryptography stacks
+    try:
+        for frame in inspect.stack(limit=15):
+            filename = (frame.filename or '').replace('\\', '/').lower()
+            if '/site-packages/jose/' in filename or '/site-packages/cryptography/' in filename or '/jose/' in filename:
+                return True
+    except Exception:
+        # If stack inspection fails, be conservative and bypass
+        return True
+
+    return False
+
+
 def safe_json_loads(s: str, **kwargs) -> Any:
     """
-    Safe JSON loads with automatic repair for common issues
+    Safe JSON loads with automatic repair for common issues,
+    but with guardrails to avoid breaking non-JSON callers.
     """
+    # If we should bypass, delegate to the original behavior (raises on invalid JSON)
+    if _should_bypass_patch(s):
+        return _original_json_loads(s, **kwargs)
+
     try:
         return _original_json_loads(s, **kwargs)
     except json.JSONDecodeError as e:
@@ -29,30 +65,11 @@ def safe_json_loads(s: str, **kwargs) -> Any:
         # This is the most common issue with CIF content in JSON
         import re
 
-        # Find all string values that contain unescaped newlines
-        # Pattern: "key": "value with\nunescaped newlines"
-        def escape_newlines_in_strings(match):
-            """Escape newlines within JSON string values"""
-            key = match.group(1)
-            value = match.group(2)
-            # Escape newlines, carriage returns, and tabs
-            value = value.replace('\\', '\\\\')  # Escape backslashes first
-            value = value.replace('\n', '\\n')
-            value = value.replace('\r', '\\r')
-            value = value.replace('\t', '\\t')
-            value = value.replace('"', '\\"')  # Escape quotes
-            return f'"{key}": "{value}"'
-
         # Try to fix unescaped newlines in cifContent fields
-        # This regex matches: "cifContent": "...content with newlines..."
-        # We need to be careful not to match across multiple fields
         try:
-            # Simple approach: if we detect "cifContent" or "cif_content",
-            # we know the issue is likely unescaped newlines
             if '"cifContent"' in repaired or '"cif_content"' in repaired:
                 logger.info("🔧 Detected CIF content, attempting to escape newlines")
-                # For now, just remove the problematic structures field
-                # and let the system fall back to other data
+                # Remove problematic structures field as a safe fallback
                 repaired = re.sub(r'"structures"\s*:\s*\[.*?\]', '"structures": []', repaired, flags=re.DOTALL)
                 logger.info("🔧 Removed structures field with problematic CIF content")
         except Exception as regex_error:
@@ -62,45 +79,40 @@ def safe_json_loads(s: str, **kwargs) -> Any:
         repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
 
         # Common fix 2: Add missing commas between fields
-        # Pattern: "value" "field": or } "field": or ] "field":
         repaired = re.sub(r'(["\d\]\}])\s+("[\w_]+"\s*:)', r'\1, \2', repaired)
 
         # Common fix 3: Remove control characters except newlines/tabs
         repaired = ''.join(char for char in repaired if ord(char) >= 32 or char in '\n\r\t')
 
-        # Common fix 4: Fix truncated JSON - try to close unclosed braces
+        # Common fix 4: Fix truncated JSON - try to close unclosed braces/brackets
         open_braces = repaired.count('{') - repaired.count('}')
         open_brackets = repaired.count('[') - repaired.count(']')
-
         if open_braces > 0:
             logger.warning(f"⚠️ Detected {open_braces} unclosed braces, attempting to close")
             repaired += '}' * open_braces
-
         if open_brackets > 0:
             logger.warning(f"⚠️ Detected {open_brackets} unclosed brackets, attempting to close")
             repaired += ']' * open_brackets
 
         try:
             result = _original_json_loads(repaired, **kwargs)
-            logger.info(f"✅ Successfully repaired and parsed JSON")
+            logger.info("✅ Successfully repaired and parsed JSON")
             return result
         except json.JSONDecodeError as e2:
             logger.error(f"❌ Repair failed: {e2.msg} at position {e2.pos}")
             logger.error(f"Repaired JSON (first 500 chars): {repaired[:500]}")
-
-            # Last resort: return empty dict for tool arguments
-            logger.warning(f"⚠️ Returning empty dict as fallback")
+            # Last resort for JSON-like inputs: return empty dict (maintain previous behavior)
+            logger.warning("⚠️ Returning empty dict as fallback for JSON-like input")
             return {}
 
 
 def apply_json_repair_patch():
     """
     Apply the JSON repair patch to the json module
-    
-    This will affect all json.loads() calls in the application,
-    making them more resilient to malformed JSON from LLMs.
+
+    The patch is scope-safe and will not affect security/crypto libs.
     """
-    logger.info("🔧 Applying JSON repair patch to json.loads()")
+    logger.info("🔧 Applying JSON repair patch to json.loads() (scope-safe)")
     json.loads = safe_json_loads
 
 

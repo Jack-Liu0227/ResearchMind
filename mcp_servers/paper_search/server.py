@@ -65,9 +65,9 @@ def get_api_base_url() -> str:
 
 def get_download_url(file_path: str) -> str:
     """
-    生成文件下载 URL（简化版本，参考热导率数据的处理方式）
+    生成文件下载 URL（支持新的 session_data 目录结构）
 
-    策略：只使用相对于 paper_search 目录的路径，避免复杂的绝对路径解析。
+    策略：提取相对于 session_data 目录的路径
 
     Args:
         file_path: 文件路径（可以是绝对路径或相对路径）
@@ -79,33 +79,36 @@ def get_download_url(file_path: str) -> str:
     1. 后端返回: /api/download/{relative_path}
     2. 前端 resolveFileUrl 转换为完整 URL
     3. 前端请求: http://domain:port/api/download/{relative_path}
-    4. FastAPI /api/download 挂载点处理（挂载到 mcp_servers/paper_search/）
+    4. FastAPI /api/download 挂载点处理（挂载到 session_data/）
     """
     import os
 
     logger.info(f"[get_download_url] Input: {file_path}")
 
-    # 🔧 策略：提取相对于 paper_search 目录的路径
     # 规范化路径分隔符
     normalized_path = file_path.replace('\\', '/')
 
-    # 方法1: 查找 'mcp_servers/paper_search/' 标记并提取后面的部分
-    if 'mcp_servers/paper_search/' in normalized_path:
+    # 🔧 新策略：优先查找 'session_data/' 标记（新的统一存储目录）
+    if 'session_data/' in normalized_path:
+        relative_path = normalized_path.split('session_data/', 1)[1]
+        logger.info(f"[get_download_url] Extracted via 'session_data/': {relative_path}")
+    # 方法2: 查找 'mcp_servers/paper_search/' 标记（旧路径，向后兼容）
+    elif 'mcp_servers/paper_search/' in normalized_path:
         relative_path = normalized_path.split('mcp_servers/paper_search/', 1)[1]
         logger.info(f"[get_download_url] Extracted via 'mcp_servers/paper_search/': {relative_path}")
-    # 方法2: 查找 'paper_search/' 标记并提取后面的部分
+    # 方法3: 查找 'paper_search/' 标记（旧路径，向后兼容）
     elif 'paper_search/' in normalized_path:
         relative_path = normalized_path.split('paper_search/', 1)[1]
         logger.info(f"[get_download_url] Extracted via 'paper_search/': {relative_path}")
-    # 方法3: 查找 'papers/' 目录（paper_search 的子目录）
+    # 方法4: 查找 'papers/' 目录
     elif '/papers/' in normalized_path:
         relative_path = 'papers/' + normalized_path.split('/papers/', 1)[1]
         logger.info(f"[get_download_url] Extracted via '/papers/': {relative_path}")
-    # 方法4: 如果已经是相对路径，直接使用
-    elif not normalized_path.startswith('/') and not normalized_path[1:3] == ':/':
+    # 方法5: 如果已经是相对路径，直接使用
+    elif not normalized_path.startswith('/') and not (len(normalized_path) > 2 and normalized_path[1:3] == ':/'):
         relative_path = normalized_path.lstrip('./')
         logger.info(f"[get_download_url] Using as relative path: {relative_path}")
-    # 方法5: 无法识别，只使用文件名
+    # 方法6: 无法识别，只使用文件名
     else:
         relative_path = os.path.basename(normalized_path)
         logger.warning(f"[get_download_url] Could not extract relative path, using filename only: {relative_path}")

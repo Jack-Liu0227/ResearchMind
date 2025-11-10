@@ -31,27 +31,16 @@ export default function UserProfilePage() {
   const fetchUserInfo = async () => {
     setLoading(true)
     try {
-      const token = localStorage.getItem('auth_token')
-      if (!token) {
-        toast.error('未登录，请先登录')
-        navigate('/login')
-        return
-      }
-
+      // ✅ 基于 Cookie 认证，不需要 JWT Token
       const response = await fetch('/api/auth/me', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        credentials: 'include'  // 发送 Cookie
       })
 
       if (response.ok) {
         const data = await response.json()
         setUserInfo(data)
       } else if (response.status === 401) {
-        toast.error('登录已过期，请重新登录')
-        localStorage.removeItem('auth_token')
-        localStorage.removeItem('user_info')
-        navigate('/login')
+        toast.error('未检测到 Cookie，请登录 Bohrium')
       } else {
         toast.error('获取用户信息失败')
       }

@@ -112,7 +112,10 @@ class WebSocketServer:
         self.connected_clients[client_id] = websocket
         self.client_sessions[client_id] = {
             "connected_at": datetime.now().isoformat(),
-            "path": path
+            "path": path,
+            "authenticated": False,
+            "authenticated_user_id": None,
+            "user": None
         }
 
         logger.info(f"✅ Client connected: {client_id}")

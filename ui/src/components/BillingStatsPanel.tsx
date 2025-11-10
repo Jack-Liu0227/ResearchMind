@@ -1,6 +1,8 @@
 /**
  * 计费统计面板组件
- * 
+ *
+ * 🔧 重构：使用 WebSocket 实时推送代替 HTTP API 轮询
+ *
  * 显示详细的计费统计信息，包括：
  * - 当前会话的计费统计
  * - 用户总计费统计
@@ -8,15 +10,9 @@
  */
 
 import React, { useState, useEffect } from 'react'
-import { 
-  getConversationBillingStats, 
-  getUserBillingStats, 
-  getGlobalBillingStats,
-  BillingStats,
-  UserBillingStats,
-  GlobalBillingStats
-} from '../utils/apiClient'
+import { BillingStats } from '../utils/apiClient'
 import { useAppStore } from '../store/useAppStore'
+import { wsService } from '../services/websocket'
 
 interface BillingStatsPanelProps {
   /** 是否显示面板 */
@@ -32,69 +28,76 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
   onClose,
   className = ''
 }) => {
-  const { currentSession, billingData } = useAppStore()
+  const {
+    currentSession,
+    billingData,
+    userBillingStats,
+    globalBillingStats,
+    user
+  } = useAppStore()
   const [conversationStats, setConversationStats] = useState<BillingStats | null>(null)
-  const [userStats, setUserStats] = useState<UserBillingStats | null>(null)
-  const [globalStats, setGlobalStats] = useState<GlobalBillingStats | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'conversation' | 'user' | 'global'>('conversation')
   const [error, setError] = useState<string | null>(null)
 
-  // 加载计费统计数据
+  // 🔧 重构：通过 WebSocket 请求计费统计数据
   useEffect(() => {
     if (!isOpen) return
 
-    const loadStats = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        console.log('🔍 [BillingStatsPanel] 开始加载计费统计...')
-        console.log('🔍 [BillingStatsPanel] currentSession:', currentSession)
-        console.log('🔍 [BillingStatsPanel] billingData:', billingData)
+    console.log('📊 [BillingStatsPanel] 面板打开，通过 WebSocket 请求计费统计...')
+    setLoading(true)
+    setError(null)
 
-        // 加载全局统计（总是可用）
-        const gStats = await getGlobalBillingStats()
-        console.log('✅ [BillingStatsPanel] 全局统计:', gStats)
-        setGlobalStats(gStats)
+    // 请求全局统计（总是可用）
+    wsService.requestGlobalStats()
 
-        // 尝试加载当前会话的计费统计
-        if (currentSession?.id) {
-          console.log(`🔍 [BillingStatsPanel] 尝试获取会话 ${currentSession.id} 的计费数据...`)
-          try {
-            const convStats = await getConversationBillingStats(currentSession.id)
-            console.log('📊 [BillingStatsPanel] 会话计费数据:', convStats)
+    // 请求当前会话的计费统计
+    if (currentSession?.id) {
+      console.log(`📊 [BillingStatsPanel] 请求会话 ${currentSession.id} 的计费数据...`)
+      wsService.requestConversationStats(currentSession.id)
 
-            if (convStats) {
-              setConversationStats(convStats)
-
-              // 如果有用户ID，加载用户统计
-              if (convStats.user_id) {
-                console.log(`🔍 [BillingStatsPanel] 获取用户 ${convStats.user_id} 的统计...`)
-                const uStats = await getUserBillingStats(convStats.user_id)
-                console.log('📊 [BillingStatsPanel] 用户统计:', uStats)
-                setUserStats(uStats)
-              }
-            } else {
-              console.warn('⚠️ 当前会话没有计费数据，可能还未发送消息')
-              setError('当前会话暂无计费数据，请先发送消息')
-            }
-          } catch (err) {
-            console.warn('⚠️ 获取会话计费数据失败:', err)
-            setError('当前会话暂无计费数据，请先发送消息后再查看')
-          }
-        } else {
-          setError('请先创建或选择一个会话')
-        }
-      } catch (error) {
-        console.error('❌ 加载计费统计失败:', error)
-        setError('加载计费统计失败，请稍后重试')
-      } finally {
-        setLoading(false)
+      // 如果用户已登录，请求用户统计
+      if (user?.id) {
+        console.log(`📊 [BillingStatsPanel] 请求用户 ${user.id} 的统计...`)
+        wsService.requestUserStats(user.id.toString())
       }
+    } else {
+      setError('请先创建或选择一个会话')
+      setLoading(false)
     }
 
-    loadStats()
-  }, [isOpen, currentSession?.id, billingData])
+    // 设置超时，防止永久加载
+    const timeout = setTimeout(() => {
+      setLoading(false)
+    }, 3000)
+
+    return () => clearTimeout(timeout)
+  }, [isOpen, currentSession?.id, user?.id])
+
+  // 🔧 监听 WebSocket 消息更新
+  useEffect(() => {
+    // 当 billingData 更新时，同步到 conversationStats
+    if (billingData && currentSession?.id) {
+      console.log('📊 [BillingStatsPanel] billingData 更新，同步到 conversationStats:', billingData)
+      console.log('📊 [BillingStatsPanel] billingData.charged:', billingData.charged)
+      console.log('📊 [BillingStatsPanel] billingData.billing_source:', billingData.billing_source)
+
+      const newStats = {
+        conversation_id: currentSession.id,
+        user_id: user?.id?.toString() || 'unknown',
+        total_tokens: billingData.session_total_tokens,
+        total_photons: billingData.session_total_photons,
+        request_count: billingData.requests_count,
+        charged: billingData.charged ?? false,  // 🔧 修复：使用后端返回的 charged 状态
+        billing_source: billingData.billing_source,  // 🔧 添加：计费来源
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+
+      console.log('📊 [BillingStatsPanel] 设置 conversationStats:', newStats)
+      setConversationStats(newStats)
+    }
+  }, [billingData, currentSession?.id, user?.id])
 
   if (!isOpen) return null
 
@@ -200,126 +203,64 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
               )}
 
               {/* 用户统计 */}
-              {activeTab === 'user' && userStats && (
+              {activeTab === 'user' && userBillingStats && (
                 <div className="billing-stats-section">
                   <h3>用户总统计</h3>
                   <div className="billing-stats-grid">
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">用户 ID</span>
-                      <span className="billing-stat-value">{userStats.user_id.slice(0, 8)}...</span>
+                      <span className="billing-stat-value">{userBillingStats.user_id.slice(0, 8)}...</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总对话数</span>
-                      <span className="billing-stat-value">{userStats.total_conversations}</span>
+                      <span className="billing-stat-value">{userBillingStats.conversation_count}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总 Tokens</span>
-                      <span className="billing-stat-value highlight">{userStats.total_tokens.toLocaleString()}</span>
+                      <span className="billing-stat-value highlight">{userBillingStats.total_tokens.toLocaleString()}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总光子</span>
-                      <span className="billing-stat-value highlight">{userStats.total_photons.toFixed(4)}</span>
+                      <span className="billing-stat-value highlight">{userBillingStats.total_photons.toFixed(4)}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总请求数</span>
-                      <span className="billing-stat-value">{userStats.total_requests}</span>
+                      <span className="billing-stat-value">{userBillingStats.request_count}</span>
+                    </div>
+                    <div className="billing-stat-item">
+                      <span className="billing-stat-label">计费来源</span>
+                      <span className="billing-stat-value">{userBillingStats.billing_source || '未知'}</span>
                     </div>
                   </div>
 
-                  {/* 对话列表 */}
-                  {userStats.conversations.length > 0 && (
-                    <div className="billing-conversations-list">
-                      <h4>对话列表</h4>
-                      <div className="billing-conversations-table">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>会话 ID</th>
-                              <th>Tokens</th>
-                              <th>光子</th>
-                              <th>请求数</th>
-                              <th>状态</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {userStats.conversations.map((conv) => (
-                              <tr key={conv.conversation_id}>
-                                <td>{conv.conversation_id?.slice(0, 8)}...</td>
-                                <td>{conv.total_tokens.toLocaleString()}</td>
-                                <td>{conv.total_photons.toFixed(4)}</td>
-                                <td>{conv.request_count}</td>
-                                <td>
-                                  <span className={`status-badge ${conv.charged ? 'charged' : 'not-charged'}`}>
-                                    {conv.charged ? '已扣费' : '未扣费'}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
+
                 </div>
               )}
 
               {/* 全局统计 */}
-              {activeTab === 'global' && globalStats && (
+              {activeTab === 'global' && globalBillingStats && (
                 <div className="billing-stats-section">
                   <h3>全局统计</h3>
                   <div className="billing-stats-grid">
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总 Tokens</span>
-                      <span className="billing-stat-value highlight">{globalStats.total_tokens.toLocaleString()}</span>
+                      <span className="billing-stat-value highlight">{globalBillingStats.total_tokens.toLocaleString()}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总光子</span>
-                      <span className="billing-stat-value highlight">{globalStats.total_photons.toFixed(4)}</span>
+                      <span className="billing-stat-value highlight">{globalBillingStats.total_photons.toFixed(4)}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总请求数</span>
-                      <span className="billing-stat-value">{globalStats.total_requests}</span>
+                      <span className="billing-stat-value">{globalBillingStats.request_count}</span>
+                    </div>
+                    <div className="billing-stat-item">
+                      <span className="billing-stat-label">总用户数</span>
+                      <span className="billing-stat-value">{globalBillingStats.user_count}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总会话数</span>
-                      <span className="billing-stat-value">{globalStats.total_sessions}</span>
-                    </div>
-                    <div className="billing-stat-item">
-                      <span className="billing-stat-label">开始时间</span>
-                      <span className="billing-stat-value">
-                        {new Date(globalStats.start_time).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="billing-stat-item">
-                      <span className="billing-stat-label">当前时间</span>
-                      <span className="billing-stat-value">
-                        {new Date(globalStats.current_time).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 计费配置 */}
-                  <div className="billing-config-section">
-                    <h4>计费配置</h4>
-                    <div className="billing-stats-grid">
-                      <div className="billing-stat-item">
-                        <span className="billing-stat-label">Tokens/光子</span>
-                        <span className="billing-stat-value">
-                          {globalStats.billing_config.tokens_per_photon.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="billing-stat-item">
-                        <span className="billing-stat-label">计费状态</span>
-                        <span className={`billing-stat-value ${globalStats.billing_config.billing_enabled ? 'enabled' : 'disabled'}`}>
-                          {globalStats.billing_config.billing_enabled ? '已启用' : '已禁用'}
-                        </span>
-                      </div>
-                      <div className="billing-stat-item">
-                        <span className="billing-stat-label">精度</span>
-                        <span className="billing-stat-value">
-                          {globalStats.billing_config.precision} 位小数
-                        </span>
-                      </div>
+                      <span className="billing-stat-value">{globalBillingStats.conversation_count}</span>
                     </div>
                   </div>
                 </div>

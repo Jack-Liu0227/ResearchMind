@@ -152,10 +152,27 @@ class ImageHandler:
             # Extract filename from path
             filename = Path(path).name
 
-            # 🔧 优化：使用相对路径（不包含 /api 前缀）
-            # 前端的 resolveFileUrl() 会自动添加 /api 前缀
-            # FastAPI 挂载点：/api/images/phonon -> mcp_servers/simulation/phonon_results
-            url = f"/images/phonon/{filename}"
+            # 🔧 修复：从路径中提取 session_id 和相对路径
+            # 路径格式: session_data/simulation/{session_id}/phonon_results/file.png
+            # URL 格式: /api/images/phonon/{session_id}/phonon_results/file.png
+            normalized_path = path.replace('\\', '/')
+
+            # 尝试从路径中提取 session_id 和相对路径
+            if 'session_data/simulation/' in normalized_path:
+                # 提取 session_data/simulation/ 后面的部分
+                relative_part = normalized_path.split('session_data/simulation/', 1)[1]
+                # relative_part 格式: {session_id}/phonon_results/file.png
+                url = f"/api/images/phonon/{relative_part}"
+                logger.info(f"🔗 Generated phonon URL from session_data path: {url}")
+            elif '/simulation/' in normalized_path:
+                # 旧路径格式兼容
+                relative_part = normalized_path.split('/simulation/', 1)[1]
+                url = f"/api/images/phonon/{relative_part}"
+                logger.info(f"🔗 Generated phonon URL from simulation path: {url}")
+            else:
+                # 后备方案：只使用文件名（可能不工作，但至少不会崩溃）
+                url = f"/api/images/phonon/{filename}"
+                logger.warning(f"⚠️ Could not extract session_id from path, using filename only: {url}")
 
             # Check if file exists
             available = os.path.exists(path)
@@ -174,14 +191,36 @@ class ImageHandler:
 
             # 🆕 添加 CSV 数据路径（如果提供）
             if dispersion_csv:
-                csv_filename = Path(dispersion_csv).name
-                image_data["dispersionCsvPath"] = f"/api/images/phonon/{csv_filename}"
-                logger.info(f"📊 Added dispersion CSV path: {csv_filename}")
+                # 同样从 CSV 路径中提取相对路径
+                csv_normalized = dispersion_csv.replace('\\', '/')
+                if 'session_data/simulation/' in csv_normalized:
+                    csv_relative = csv_normalized.split('session_data/simulation/', 1)[1]
+                    csv_url = f"/api/images/phonon/{csv_relative}"
+                elif '/simulation/' in csv_normalized:
+                    csv_relative = csv_normalized.split('/simulation/', 1)[1]
+                    csv_url = f"/api/images/phonon/{csv_relative}"
+                else:
+                    csv_filename = Path(dispersion_csv).name
+                    csv_url = f"/api/images/phonon/{csv_filename}"
+
+                image_data["dispersionCsvPath"] = csv_url
+                logger.info(f"📊 Added dispersion CSV path: {csv_url}")
 
             if dos_csv:
-                csv_filename = Path(dos_csv).name
-                image_data["dosCsvPath"] = f"/api/images/phonon/{csv_filename}"
-                logger.info(f"📊 Added DOS CSV path: {csv_filename}")
+                # 同样从 CSV 路径中提取相对路径
+                csv_normalized = dos_csv.replace('\\', '/')
+                if 'session_data/simulation/' in csv_normalized:
+                    csv_relative = csv_normalized.split('session_data/simulation/', 1)[1]
+                    csv_url = f"/api/images/phonon/{csv_relative}"
+                elif '/simulation/' in csv_normalized:
+                    csv_relative = csv_normalized.split('/simulation/', 1)[1]
+                    csv_url = f"/api/images/phonon/{csv_relative}"
+                else:
+                    csv_filename = Path(dos_csv).name
+                    csv_url = f"/api/images/phonon/{csv_filename}"
+
+                image_data["dosCsvPath"] = csv_url
+                logger.info(f"📊 Added DOS CSV path: {csv_url}")
 
             return image_data
         except Exception as e:

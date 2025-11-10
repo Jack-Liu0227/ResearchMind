@@ -26,12 +26,11 @@ def test_bohrium_api(access_key: str):
     url = "https://openapi.dp.tech/openapi/v1/api/integral/consume"
     
     # 请求头（完全按照官方 curl 示例）
+    # 注意：不要手动设置 Host 和 Connection，让 requests 库自动处理
     headers = {
         "accessKey": access_key,
         "Content-Type": "application/json",
-        "Accept": "*/*",
-        "Host": "openapi.dp.tech",
-        "Connection": "keep-alive"
+        "Accept": "*/*"
     }
     
     # 请求体

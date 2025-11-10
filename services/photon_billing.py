@@ -428,12 +428,11 @@ class PhotonBillingService:
         url = "https://openapi.dp.tech/openapi/v1/api/integral/consume"
 
         # 重要：accessKey 必须在 header 中携带（参考官方 API 文档）
+        # 注意：不要手动设置 Host 和 Connection，让 requests 库自动处理
         headers = {
             "accessKey": access_key,  # 用户的 AccessKey（header 中携带）
             "Content-Type": "application/json",
-            "Accept": "*/*",
-            "Host": "openapi.dp.tech",
-            "Connection": "keep-alive"
+            "Accept": "*/*"
         }
 
         # eventValue：扣费数额（光子数），类型为 int

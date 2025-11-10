@@ -147,6 +147,7 @@ def record_llm_usage(
     Returns:
         None 或修改后的 LlmResponse
     """
+    logger.info(f"🔍 [LLM CALLBACK] record_llm_usage 被调用")
     if not BILLING_AVAILABLE:
         return None
 
@@ -169,9 +170,11 @@ def record_llm_usage(
                 prompt_tokens = usage.prompt_token_count
             if hasattr(usage, 'candidates_token_count'):
                 completion_tokens = usage.candidates_token_count
+            logger.info(f"🔍 [LLM CALLBACK] 从 usage_metadata 提取: total={total_tokens}, prompt={prompt_tokens}, completion={completion_tokens}")
 
         # 如果没有 usage 信息，尝试估算响应 tokens
         if total_tokens == 0:
+            logger.info(f"🔍 [LLM CALLBACK] usage_metadata 为空，尝试估算 tokens")
             # 估算响应 tokens
             if hasattr(llm_response, 'candidates'):
                 for candidate in llm_response.candidates:
@@ -183,12 +186,15 @@ def record_llm_usage(
             # 无法准确估算 prompt tokens，使用响应的 2 倍作为总数（经验值）
             total_tokens = completion_tokens * 2
             prompt_tokens = completion_tokens
+            logger.info(f"🔍 [LLM CALLBACK] 估算结果: total={total_tokens}, prompt={prompt_tokens}, completion={completion_tokens}")
 
         # 尝试从 callback_context 获取模型名称
         if hasattr(callback_context, 'model_name'):
             model_name = callback_context.model_name
         elif hasattr(llm_response, 'model'):
             model_name = llm_response.model
+
+        logger.info(f"🔍 [LLM CALLBACK] model_name={model_name}, total_tokens={total_tokens}")
 
         # 如果有 token 使用，记录计费
         if total_tokens > 0:
@@ -197,6 +203,23 @@ def record_llm_usage(
             # 从线程本地存储获取 session_id、user_id 和 client_id
             # 这些值由 agent_coordinator 在调用 run_async() 前设置
             session_id, user_id, client_id = get_current_session_context()
+
+            # 兼容回退：若线程本地上下文缺失，再从 callback_context 推断
+            try:
+                if (not session_id or session_id == 'unknown') and hasattr(callback_context, 'session_id'):
+                    session_id = getattr(callback_context, 'session_id', session_id)
+                if (not session_id or session_id == 'unknown') and hasattr(callback_context, 'sessionId'):
+                    session_id = getattr(callback_context, 'sessionId', session_id)
+                if not client_id and hasattr(callback_context, 'user_id'):
+                    # ADK 一般会把传入的 user_id 作为回调上下文的 user_id，这里可作为 client_id 使用
+                    client_id = getattr(callback_context, 'user_id', client_id)
+                if not user_id and hasattr(callback_context, 'user_id'):
+                    user_id = getattr(callback_context, 'user_id', user_id)
+                if not user_id and hasattr(callback_context, 'userId'):
+                    user_id = getattr(callback_context, 'userId', user_id)
+            except Exception:
+                pass
+
             logger.info(f"🔍 [BILLING CALLBACK] session_id={session_id}, user_id={user_id}, client_id={client_id}")
 
             # 使用隔离的计费方法
@@ -211,7 +234,8 @@ def record_llm_usage(
                     'prompt_tokens': prompt_tokens,
                     'completion_tokens': completion_tokens
                 },
-                fallback_user_id=client_id  # 🔧 传递 client_id 作为回退查找配置的依据
+                fallback_user_id=client_id,  # 🔧 传递 client_id 作为回退查找配置的依据
+                client_id=client_id  # 🆕 传递 client_id 用于从 WebSocket 会话获取已认证用户
             )
 
             # 记录日志

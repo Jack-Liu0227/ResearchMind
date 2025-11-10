@@ -28,7 +28,7 @@ CONTEXT_SUMMARY_THRESHOLD = 15  # 超过15条消息时开始总结
 
 class AgentCoordinator:
     """Coordinate Google ADK agents"""
-    
+
     def __init__(self, agents: Dict[str, Any]):
         """
         Initialize agent coordinator
@@ -44,7 +44,7 @@ class AgentCoordinator:
         self.current_tool_calls: Dict[str, List[Dict[str, Any]]] = {}  # 跟踪当前消息的工具调用
         self.message_billing_data: Dict[str, Dict[str, Any]] = {}  # 跟踪每条消息的计费数据 (session_key -> billing_data)
         self.message_start_billing: Dict[str, Dict[str, Any]] = {}  # 记录消息开始时的计费状态
-    
+
     async def process_chat_message(
         self,
         client_id: str,
@@ -74,7 +74,7 @@ class AgentCoordinator:
             if not adk_agent:
                 await MessageHandler.send_error(websocket, f"Unknown agent: {agent_id}")
                 return
-            
+
             # Create session key
             session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
 
@@ -110,9 +110,24 @@ class AgentCoordinator:
             # 记录消息开始时的计费状态（用于计算本条消息的增量）
             from services.user_billing_config import get_billing_context_manager
             context_manager = get_billing_context_manager()
-            # 使用 session_id 作为对话 ID 和 user_id（保持一致性）
+            # 优先使用已认证的用户 ID；否则回退到 session_id
             conversation_id = session_id or 'unknown'
-            user_id = session_id or 'unknown'  # 🔧 修复：使用 session_id 而不是 client_id
+            try:
+                from .websocket_server import WebSocketServer
+                ws = WebSocketServer.get_instance()
+                authed_user_id = None
+                if ws and client_id in ws.client_sessions:
+                    authed_user_id = ws.client_sessions[client_id].get("authenticated_user_id")
+                # ✅ 修复：user_id 应该是数据库用户 ID（用于查找配置）
+                # 如果已认证，使用 authed_user_id；否则使用 session_id
+                user_id = str(authed_user_id) if authed_user_id else (session_id or 'unknown')
+                logger.info(f"🔍 [BILLING] authed_user_id={authed_user_id}, user_id={user_id}, session_id={session_id}, client_id={client_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ 获取认证用户 ID 失败: {e}")
+                user_id = session_id or 'unknown'
+            # 用户计费配置现在直接从数据库读取，不需要手动同步到 SessionManager
+            # SessionManager 的计费配置已废弃，计费系统直接从数据库查询
+
             context = context_manager.get_or_create_context(conversation_id, user_id)
             start_snapshot = context.get_snapshot()
 
@@ -302,8 +317,8 @@ class AgentCoordinator:
             # session_id 是用户的真实标识（与计费配置关联），client_id 只是 WebSocket 连接标识
             # 🔧 同时传递 client_id 作为回退查找配置的依据
             from agents.callbacks import set_current_session_context
-            set_current_session_context(session_id or 'unknown', session_id or 'unknown', client_id)
-            logger.info(f"🔍 [AGENT_COORDINATOR] 设置 session 上下文: session_id={session_id}, user_id={session_id}, client_id={client_id}")
+            set_current_session_context(session_id or 'unknown', user_id, client_id)
+            logger.info(f"🔍 [AGENT_COORDINATOR] 设置 session 上下文: session_id={session_id}, user_id={user_id}, client_id={client_id}")
 
             # Google ADK API: run_async() 需要 user_id, session_id 和 new_message 参数
             # 🔒 添加超时保护，防止 LLM 调用卡死
@@ -356,9 +371,8 @@ class AgentCoordinator:
             billing_session_key = session_id or 'unknown'
             context = context_manager.get_context(billing_session_key)
 
-            # 计算本次对话的计费信息
-            previous_total_tokens = 0
-            previous_total_photons = 0.0
+            # 🔧 优化：直接从 ConversationBillingContext 获取计费信息
+            # 删除了与 SessionManager 的冗余同步（已废弃）
             session_usage = {
                 'total_tokens': 0,
                 'total_photons': 0.0,
@@ -371,39 +385,21 @@ class AgentCoordinator:
                 session_usage = {
                     'total_tokens': snapshot['total_tokens'],
                     'total_photons': snapshot['total_photons'],
-                    'requests_count': snapshot['request_count']
+                    'requests_count': snapshot['request_count'],
+                    'charged': snapshot.get('charged', False),  # 🔧 新增：是否已扣费
+                    'charged_photons': snapshot.get('charged_photons', 0)  # 🔧 新增：已扣费光子数
                 }
 
-            # 同步计费信息到 SessionManager
-            if session_id:
-                from .session_manager import SessionManager
-
-                # 更新会话的计费使用情况
-                current_billing = SessionManager.get_billing_summary(session_id)
-                if current_billing:
-                    previous_total_tokens = current_billing['total_tokens']
-                    previous_total_photons = current_billing['total_photons']
-
-            # 计算本次新增的 tokens 和光子
-            current_tokens = session_usage.get('total_tokens', 0) - previous_total_tokens
-            current_photons = session_usage.get('total_photons', 0.0) - previous_total_photons
-
-            # 如果本次有新增，更新 SessionManager
-            if session_id and current_tokens > 0:
-                from .session_manager import SessionManager
-                SessionManager.update_billing_usage(session_id, current_tokens, current_photons)
-                logger.info(f"💳 更新会话 {session_id[:8]}... 计费: +{current_tokens} tokens, +{current_photons:.4f} 光子")
-
-            logger.info(f"💎 [计费] 本次对话: {current_tokens} tokens = {current_photons:.4f} 光子 | 会话累计: {session_usage.get('total_tokens', 0)} tokens = {session_usage.get('total_photons', 0.0):.4f} 光子")
+            logger.info(f"💎 [计费] 会话累计: {session_usage.get('total_tokens', 0)} tokens = {session_usage.get('total_photons', 0.0):.4f} 光子 | 请求次数: {session_usage.get('requests_count', 0)} | 已扣费: {session_usage.get('charged', False)}")
 
             # 发送完成状态（包含计费信息）
             billing_data = {
                 "session_total_tokens": session_usage.get('total_tokens', 0),
                 "session_total_photons": session_usage.get('total_photons', 0.0),
                 "requests_count": session_usage.get('requests_count', 0),
-                "current_tokens": current_tokens,  # 本次对话的 tokens
-                "current_photons": current_photons,  # 本次对话的光子
-                "model_name": os.getenv('MODEL_USE', 'qwen-plus')  # 使用的模型
+                "model_name": os.getenv('MODEL_USE', 'qwen-plus'),  # 使用的模型
+                "charged": session_usage.get('charged', False),  # 🔧 新增：是否已扣费
+                "billing_source": "Cookie"  # 🔧 新增：计费来源（当前架构下都是 Cookie）
             }
             logger.info(f"📤 [WebSocket] 准备发送 complete 状态，计费数据: {billing_data}")
 
@@ -415,11 +411,11 @@ class AgentCoordinator:
 
             logger.info(f"✅ [WebSocket] 已发送 complete 状态")
             logger.info(f"✅ Agent {agent_id} completed")
-            
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"❌ Agent processing error: {error_msg}", exc_info=True)
-            
+
             # Check for JSON parsing errors from LLM tool calls
             if "JSONDecodeError" in error_msg or "Expecting ',' delimiter" in error_msg:
                 logger.error(f"❌ JSON parsing error in LLM tool call - this may be a DeepSeek formatting issue")
@@ -484,7 +480,7 @@ class AgentCoordinator:
             else:
                 # 其他错误
                 await MessageHandler.send_error(websocket, f"处理失败: {error_msg}")
-    
+
     async def _truncate_session_history(
         self,
         session_key: str,
@@ -968,7 +964,7 @@ class AgentCoordinator:
 
         except Exception as e:
             logger.error(f"Failed to handle agent event: {e}", exc_info=True)
-    
+
     def clear_session(self, client_id: str, agent_id: str, session_id: Optional[str] = None):
         """
         Clear session for client and agent
@@ -987,7 +983,7 @@ class AgentCoordinator:
             if session_key in self.session_message_counts:
                 del self.session_message_counts[session_key]
             logger.info(f"🗑️ Cleared session: {session_key}")
-    
+
     def clear_all_sessions(self, client_id: str):
         """
         Clear all sessions for a client
@@ -1008,7 +1004,7 @@ class AgentCoordinator:
                 del self.session_message_counts[key]
 
         logger.info(f"🗑️ Cleared {len(keys_to_remove)} sessions for client {client_id}")
-    
+
     def get_session_count(self) -> int:
         """Get total number of active sessions"""
         return len(self.session_services)

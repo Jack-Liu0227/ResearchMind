@@ -10,17 +10,11 @@ const api = axios.create({
   },
 })
 
-// 请求拦截器 - 自动添加 JWT Token
+// 请求拦截器（已移除 JWT Token 认证）
+// ✅ 认证完全基于 Cookie，不需要 Authorization 头
 api.interceptors.request.use(
   (config) => {
-    // 从 localStorage 获取 JWT Token
-    const token = localStorage.getItem('auth_token')
-
-    if (token) {
-      // 添加 Authorization 头
-      config.headers.Authorization = `Bearer ${token}`
-    }
-
+    // 不再添加 JWT Token
     return config
   },
   (error) => {

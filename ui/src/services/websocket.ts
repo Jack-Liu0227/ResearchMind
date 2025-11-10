@@ -60,6 +60,9 @@ class WebSocketService {
   private readonly HEARTBEAT_INTERVAL = 30000 // 30秒发送一次心跳
   private readonly HEARTBEAT_TIMEOUT = 10000 // 10秒内未收到响应则认为连接断开
 
+  // 🔧 优化：请求去重 - 跟踪待处理的消息
+  private pendingMessages = new Set<string>() // 存储消息内容的哈希
+
   constructor(url?: string) {
     this.url = url || API_CONFIG.WS_URL
     console.log('🔧 WebSocketService constructor - url param:', url)
@@ -115,9 +118,6 @@ class WebSocketService {
 
           // 🆕 发送 JWT Token 进行认证
           this.sendAuthToken()
-
-          // 自动发送用户的 Bohrium 配置（从 Cookie 读取）
-          this.sendUserBohriumConfig()
 
           resolve()
         }
@@ -227,6 +227,20 @@ class WebSocketService {
     }
   }
 
+  /**
+   * 🔧 优化：生成消息的唯一标识符用于去重
+   */
+  private getMessageHash(type: string, content: string, agentId?: string, sessionId?: string): string {
+    return `${type}:${content}:${agentId || ''}:${sessionId || ''}`
+  }
+
+  /**
+   * 🔧 优化：标记消息处理完成，从待处理集合中移除
+   */
+  private markMessageComplete(hash: string): void {
+    this.pendingMessages.delete(hash)
+  }
+
   send(message: WebSocketMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message))
@@ -236,6 +250,14 @@ class WebSocketService {
   }
 
   sendMessage(content: string, agentId?: string, sessionId?: string): void {
+    // 🔧 优化：请求去重 - 检查是否有相同的消息正在处理
+    const messageHash = this.getMessageHash('message', content, agentId, sessionId)
+
+    if (this.pendingMessages.has(messageHash)) {
+      console.warn('⚠️ 重复消息被拦截:', content.substring(0, 50))
+      return
+    }
+
     // 后端期望的格式: { type, content, agentId, sessionId }
     // 不需要 data 包装层
     const message: any = {
@@ -247,7 +269,15 @@ class WebSocketService {
     }
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // 添加到待处理集合
+      this.pendingMessages.add(messageHash)
+
       this.ws.send(JSON.stringify(message))
+
+      // 🔧 优化：设置超时自动清理（30秒后自动移除，防止永久阻塞）
+      setTimeout(() => {
+        this.markMessageComplete(messageHash)
+      }, 30000)
     } else {
       console.warn('WebSocket is not connected')
     }
@@ -256,6 +286,16 @@ class WebSocketService {
   // 发送带附件的聊天消息（例如内联CIF内容）
   sendChatWithAttachments(params: { content?: string; agentId?: string; sessionId?: string; attachments: Array<{ filename: string; content: string }> }): void {
     const { content, agentId, sessionId, attachments } = params
+
+    // 🔧 优化：请求去重 - 使用附件文件名作为哈希的一部分
+    const attachmentHash = attachments.map(a => a.filename).join(',')
+    const messageHash = this.getMessageHash('chat_with_attachments', `${content || ''}:${attachmentHash}`, agentId, sessionId)
+
+    if (this.pendingMessages.has(messageHash)) {
+      console.warn('⚠️ 重复的附件消息被拦截:', attachments.map(a => a.filename).join(', '))
+      return
+    }
+
     const message: any = {
       type: 'chat_with_attachments',
       content,
@@ -264,79 +304,79 @@ class WebSocketService {
       attachments,
       timestamp: new Date().toISOString(),
     }
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // 添加到待处理集合
+      this.pendingMessages.add(messageHash)
+
       this.ws.send(JSON.stringify(message))
+
+      // 🔧 优化：设置超时自动清理（30秒后自动移除）
+      setTimeout(() => {
+        this.markMessageComplete(messageHash)
+      }, 30000)
     } else {
       console.warn('WebSocket is not connected')
     }
   }
 
   /**
-   * 🆕 发送 JWT Token 进行认证
+   * 🆕 发送认证信息（基于 Cookie）
    * 在 WebSocket 连接成功后立即调用
+   *
+   * ✅ 完全基于 Cookie 认证（不使用 JWT Token）
    */
   private sendAuthToken(): void {
     try {
-      const token = localStorage.getItem('auth_token')
+      // 获取 sessionId（确保与计费系统一致）
+      const sessionId = localStorage.getItem('researchmind_session_id') || this.clientId
 
-      if (token) {
-        // 发送认证消息
-        this.send({
-          type: 'auth',
-          data: {
-            token,
-            timestamp: Date.now()
-          }
-        })
-        console.log('🔐 已发送 JWT Token 进行认证')
+      // ✅ 从 Cookie 读取 Bohrium 凭证（唯一认证来源）
+      const appAccessKey = this.getCookie('appAccessKey')
+      const clientName = this.getCookie('clientName')
+
+      console.log('🍪 Cookie 凭证:', {
+        appAccessKey: appAccessKey ? `${appAccessKey.substring(0, 8)}...` : 'null',
+        clientName: clientName || 'null'
+      })
+
+      // 发送认证消息（仅包含 Cookie 凭证）
+      this.send({
+        type: 'auth',
+        data: {
+          timestamp: Date.now(),
+          // ✅ Cookie 凭证（如果存在）
+          appAccessKey: appAccessKey || undefined,
+          clientName: clientName || undefined
+        },
+        sessionId
+      })
+
+      if (appAccessKey) {
+        console.log('✅ 已发送 Cookie 凭证进行认证 (sessionId:', sessionId, ')')
       } else {
-        console.warn('⚠️ 未找到 JWT Token，跳过认证')
+        console.warn('⚠️ 未检测到 Cookie 凭证，计费功能将不可用')
       }
     } catch (error) {
-      console.error('❌ 发送认证 Token 失败:', error)
+      console.error('❌ 发送认证信息失败:', error)
     }
   }
 
   /**
-   * 发送用户的 Bohrium 配置（从 Cookie 读取）
-   * 在 WebSocket 连接成功后自动调用
-   *
-   * 新方案：通过 FastAPI HTTP 端点保存 Cookie 配置
-   * 优点：更简单、更标准、更易维护
+   * 获取 Cookie 值
    */
-  private async sendUserBohriumConfig(): Promise<void> {
-    try {
-      // 获取当前会话 ID（从 localStorage）
-      const sessionId = localStorage.getItem('researchmind_session_id') || this.clientId
-
-      // 调用 FastAPI 端点，自动从 Cookie 读取配置
-      // 就像 Flask 的 request.cookies.get() 一样简单！
-      const response = await fetch(
-        `/api/billing/config/save-from-cookie?user_id=${sessionId}`,
-        {
-          method: 'POST',
-          credentials: 'include'  // 重要：确保发送 Cookie
-        }
-      )
-
-      if (response.ok) {
-        const result = await response.json()
-
-        if (result.has_config) {
-          console.log('✅ 用户 Bohrium 配置已保存 (来自 Cookie)')
-          console.log('   来源:', result.config?.source)
-          console.log('   AccessKey:', result.config?.access_key_masked)
-          console.log('   ClientName:', result.config?.client_name)
-        } else {
-          console.log('ℹ️ Cookie 中未找到用户 Bohrium 配置')
-        }
-      } else {
-        console.warn('⚠️ 保存用户 Bohrium 配置失败:', response.statusText)
-      }
-    } catch (error) {
-      console.error('❌ 保存用户 Bohrium 配置失败:', error)
+  private getCookie(name: string): string | null {
+    const value = `; ${document.cookie}`
+    const parts = value.split(`; ${name}=`)
+    if (parts.length === 2) {
+      return parts.pop()?.split(';').shift() || null
     }
+    return null
   }
+
+  // sendUserBohriumConfig 已删除
+  // 用户配置现在通过登录流程（/api/auth/login-from-cookie）保存到数据库
+  // WebSocket 认证时只需发送 JWT Token 即可
 
   onMessage(handler: MessageHandler): () => void {
     this.messageHandlers.push(handler)
@@ -414,6 +454,56 @@ class WebSocketService {
 
   getClientId(): string {
     return this.clientId
+  }
+
+  /**
+   * 🆕 请求会话计费统计（通过 WebSocket）
+   */
+  requestConversationStats(conversationId: string): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const message = {
+        type: 'get_conversation_stats',
+        conversationId,
+        timestamp: new Date().toISOString(),
+      }
+      console.log('📊 [WebSocket] 请求会话计费统计:', conversationId)
+      this.ws.send(JSON.stringify(message))
+    } else {
+      console.warn('⚠️ WebSocket 未连接，无法请求会话统计')
+    }
+  }
+
+  /**
+   * 🆕 请求用户计费统计（通过 WebSocket）
+   */
+  requestUserStats(userId: string): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const message = {
+        type: 'get_user_stats',
+        userId,
+        timestamp: new Date().toISOString(),
+      }
+      console.log('📊 [WebSocket] 请求用户计费统计:', userId)
+      this.ws.send(JSON.stringify(message))
+    } else {
+      console.warn('⚠️ WebSocket 未连接，无法请求用户统计')
+    }
+  }
+
+  /**
+   * 🆕 请求全局计费统计（通过 WebSocket）
+   */
+  requestGlobalStats(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const message = {
+        type: 'get_global_stats',
+        timestamp: new Date().toISOString(),
+      }
+      console.log('📊 [WebSocket] 请求全局计费统计')
+      this.ws.send(JSON.stringify(message))
+    } else {
+      console.warn('⚠️ WebSocket 未连接，无法请求全局统计')
+    }
   }
 }
 

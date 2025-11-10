@@ -85,7 +85,7 @@ const StructureList: React.FC = () => {
           <div className="divide-y divide-gray-100">
             {displayStructures.map((structure, index) => (
               <StructureListItem
-                key={structure.id || index}
+                key={structure.id || `${structure.formula}-${structure.metadata?.timestamp || index}`}
                 structure={structure}
                 index={index}
                 isSelected={currentStructure?.id === structure.id}

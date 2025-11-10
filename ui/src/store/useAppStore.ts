@@ -26,6 +26,28 @@ export interface BillingData {
   current_tokens?: number  // 本次对话的 tokens
   current_photons?: number  // 本次对话的光子
   model_name?: string  // 使用的模型
+  charged?: boolean  // 🔧 新增：是否已扣费
+  billing_source?: string  // 🔧 新增：计费来源（Cookie/用户配置/开发者默认）
+}
+
+// 🆕 用户计费统计
+export interface UserBillingStats {
+  user_id: string
+  total_tokens: number
+  total_photons: number
+  request_count: number
+  conversation_count: number
+  has_user_config?: boolean
+  billing_source?: string
+}
+
+// 🆕 全局计费统计
+export interface GlobalBillingStats {
+  total_tokens: number
+  total_photons: number
+  request_count: number
+  user_count: number
+  conversation_count: number
 }
 
 interface AppState {
@@ -68,6 +90,9 @@ interface AppState {
 
   // Billing data
   billingData: BillingData | null
+  // 🆕 用户和全局计费统计
+  userBillingStats: UserBillingStats | null
+  globalBillingStats: GlobalBillingStats | null
 
   // Actions
   setAgents: (agents: Agent[]) => void
@@ -112,6 +137,9 @@ interface AppState {
 
   setBillingData: (data: BillingData | null) => void
   updateBillingData: (data: Partial<BillingData>) => void
+  // 🆕 用户和全局计费统计的 setter
+  setUserBillingStats: (data: UserBillingStats | null) => void
+  setGlobalBillingStats: (data: GlobalBillingStats | null) => void
 
   createSession: (title: string, agentId: string) => ChatSession
   deleteSession: (sessionId: string) => void
@@ -206,6 +234,8 @@ export const useAppStore = create<AppState>()(
       loadingMessage: '智能体正在思考...',
 
       billingData: null,
+      userBillingStats: null,
+      globalBillingStats: null,
 
       setAgents: (agents) => set({ agents }),
       setCurrentAgent: (agent) => set({ currentAgent: agent }),
@@ -464,9 +494,18 @@ export const useAppStore = create<AppState>()(
                 session_total_tokens: data.session_total_tokens || 0,
                 session_total_photons: data.session_total_photons || 0,
                 requests_count: data.requests_count || 0,
+                charged: data.charged ?? false,  // 🔧 修复：添加 charged 字段
+                billing_source: data.billing_source,  // 🔧 修复：添加 billing_source 字段
+                current_tokens: data.current_tokens,
+                current_photons: data.current_photons,
+                model_name: data.model_name,
               },
         })
       },
+
+      // 🆕 用户和全局计费统计的实现
+      setUserBillingStats: (data) => set({ userBillingStats: data }),
+      setGlobalBillingStats: (data) => set({ globalBillingStats: data }),
 
       createSession: (title, agentId) => {
         const newSession: ChatSession = {

@@ -403,7 +403,7 @@ const convertTableToCSV = (tableData: string[][]): string => {
     .join('\n')
 }
 
-const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
+const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegenerate }) => {
   const isUser = message.role === 'user'
   const {
     setCurrentStructure,
@@ -950,7 +950,13 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onRegenerate }) => {
       </div>
     </div>
   )
-}
+}, (prevProps, nextProps) => {
+  // 🔧 优化：自定义比较函数，防止不必要的重新渲染
+  return prevProps.message.id === nextProps.message.id &&
+         prevProps.message.content === nextProps.message.content &&
+         prevProps.message.role === nextProps.message.role &&
+         prevProps.onRegenerate === nextProps.onRegenerate
+})
 
 interface LoadingMessageProps {
   message?: string
@@ -1023,7 +1029,7 @@ const LoadingMessage: React.FC<LoadingMessageProps> = ({ message = '⏳ 智能�
   )
 }
 
-const MessageList: React.FC<MessageListProps> = ({ messages, onRegenerate }) => {
+const MessageList: React.FC<MessageListProps> = React.memo(({ messages, onRegenerate }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { isLoading, loadingMessage } = useAppStore()
 
@@ -1072,7 +1078,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, onRegenerate }) => 
       </div>
     </div>
   )
-}
+})
 
 /**
  * 从消息内容中检测数据库来源

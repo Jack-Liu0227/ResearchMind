@@ -35,61 +35,39 @@ class BohriumOAuthService:
     def verify_access_key(access_key: str, client_name: str, sku_id: str = DEFAULT_SKU_ID) -> Tuple[bool, Optional[str]]:
         """
         验证 Bohrium AccessKey 是否有效
-        
-        通过调用 Bohrium API 进行小额测试扣费（0 光子）来验证
-        
+
+        ⚠️ 重要变更：为避免认证时扣费，此方法不再调用 Bohrium API
+        只做基本格式验证，实际有效性将在首次使用时验证
+
         Args:
             access_key: Bohrium AccessKey
             client_name: 客户端名称
             sku_id: SKU ID
-        
+
         Returns:
             (是否有效, 错误信息)
         """
         try:
-            # 生成测试业务流水号
-            timestamp = int(time.time())
-            rand_part = secrets.randbits(16)
-            biz_no = int(f"{timestamp}{rand_part}")
-            
-            # 调用 Bohrium API（测试扣费 0 光子）
-            headers = {
-                "accessKey": access_key,
-                "x-app-key": client_name,
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "bizNo": biz_no,
-                "changeType": 1,
-                "eventValue": 0,  # 测试扣费 0 光子
-                "skuId": int(sku_id),
-                "scene": "appCustomizeCharge"
-            }
-            
-            logger.info(f"🔍 验证 AccessKey: {access_key[:8]}...{access_key[-4:]}")
-            
-            response = requests.post(BOHRIUM_API_URL, headers=headers, json=payload, timeout=10)
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                # 检查返回结果
-                if result.get("code") == 0 or result.get("success") is True:
-                    logger.info(f"✅ AccessKey 验证成功: {access_key[:8]}...{access_key[-4:]}")
-                    return True, None
-                else:
-                    error_msg = result.get("message", "未知错误")
-                    logger.warning(f"❌ AccessKey 验证失败: {error_msg}")
-                    return False, error_msg
-            else:
-                error_msg = f"HTTP {response.status_code}: {response.text}"
-                logger.error(f"❌ Bohrium API 调用失败: {error_msg}")
-                return False, error_msg
-                
-        except requests.exceptions.Timeout:
-            error_msg = "Bohrium API 请求超时"
-            logger.error(f"❌ {error_msg}")
-            return False, error_msg
+            # 基本格式验证
+            if not access_key or not isinstance(access_key, str):
+                return False, "AccessKey 格式无效"
+
+            # 去除首尾空格
+            access_key = access_key.strip()
+
+            # 检查长度（Bohrium AccessKey 通常是 32 位十六进制字符串）
+            if len(access_key) < 16 or len(access_key) > 128:
+                return False, f"AccessKey 长度异常（{len(access_key)} 字符），应为 16-128 字符"
+
+            # 检查是否包含异常字符
+            if '\n' in access_key or '\r' in access_key or '\t' in access_key:
+                return False, "AccessKey 包含非法字符（换行符/制表符）"
+
+            logger.info(f"✅ AccessKey 格式验证通过: {access_key[:8]}...{access_key[-4:]}")
+            logger.info(f"ℹ️  实际有效性将在首次使用时验证（避免认证时扣费）")
+
+            return True, None
+
         except Exception as e:
             error_msg = f"验证失败: {str(e)}"
             logger.error(f"❌ {error_msg}", exc_info=True)
