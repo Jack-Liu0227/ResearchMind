@@ -429,8 +429,10 @@ class PhotonBillingService:
 
         # 重要：accessKey 必须在 header 中携带（参考官方 API 文档）
         # 注意：不要手动设置 Host 和 Connection，让 requests 库自动处理
+        # ⚠️ 重要：根据 Flask 示例，需要同时提供 accessKey 和 x-app-key
         headers = {
-            "accessKey": access_key,  # 用户的 AccessKey（header 中携带）
+            "accessKey": access_key,      # 用户的 AccessKey（header 中携带）
+            "x-app-key": client_name,     # 客户端名称（可能是必需的）
             "Content-Type": "application/json",
             "Accept": "*/*"
         }

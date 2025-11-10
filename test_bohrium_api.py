@@ -14,21 +14,22 @@ import requests
 import time
 import secrets
 
-def test_bohrium_api(access_key: str):
+def test_bohrium_api(access_key: str, client_name: str = "ResearchMind"):
     """测试 Bohrium API 扣费接口"""
-    
+
     # 生成唯一的 bizNo
     timestamp_ms = int(time.time() * 1000)
     rand_part = secrets.randbelow(10000)
     biz_no = (timestamp_ms % 10000000000) * 10000 + rand_part
-    
+
     # API 配置
     url = "https://openapi.dp.tech/openapi/v1/api/integral/consume"
-    
-    # 请求头（完全按照官方 curl 示例）
+
+    # 请求头（根据 Flask 示例添加 x-app-key）
     # 注意：不要手动设置 Host 和 Connection，让 requests 库自动处理
     headers = {
         "accessKey": access_key,
+        "x-app-key": client_name,  # ⚠️ 可能是必需的
         "Content-Type": "application/json",
         "Accept": "*/*"
     }
@@ -50,6 +51,8 @@ def test_bohrium_api(access_key: str):
     for key, value in headers.items():
         if key == "accessKey":
             print(f"  {key}: {value[:8]}...{value[-4:]}")
+        elif key == "x-app-key":
+            print(f"  {key}: {value}")
         else:
             print(f"  {key}: {value}")
     
@@ -100,17 +103,18 @@ def test_bohrium_api(access_key: str):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("用法: python test_bohrium_api.py <your_access_key>")
-        print("示例: python test_bohrium_api.py sk-xxxxxxxxxxxxx")
+        print("用法: python test_bohrium_api.py <your_access_key> [client_name]")
+        print("示例: python test_bohrium_api.py sk-xxxxxxxxxxxxx ResearchMind")
         sys.exit(1)
-    
+
     access_key = sys.argv[1]
-    
+    client_name = sys.argv[2] if len(sys.argv) > 2 else "ResearchMind"
+
     if not access_key.startswith("sk-"):
         print("⚠️ 警告: AccessKey 通常以 'sk-' 开头，请确认您输入的是正确的 AccessKey")
         response = input("是否继续？(y/n): ")
         if response.lower() != 'y':
             sys.exit(0)
-    
-    test_bohrium_api(access_key)
+
+    test_bohrium_api(access_key, client_name)
 
