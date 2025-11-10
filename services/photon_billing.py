@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 class PhotonBillingConfig:
     """光子计费配置"""
 
-    # Bohrium 平台凭证（开发者默认配置，用于测试）
-    BOHRIUM_SKU_ID = os.getenv('BOHRIUM_SKU_ID', '10048')
-    BOHRIUM_ACCESS_KEY = os.getenv('BOHRIUM_ACCESS_KEY', '')
-    BOHRIUM_CLIENT_NAME = os.getenv('BOHRIUM_CLIENT_NAME', 'ResearchMind')
+    # Bohrium 平台配置
+    # ⚠️ 注意：AccessKey 和 ClientName 不从环境变量读取
+    # 它们必须从用户的 Cookie 或前端传递获取，确保每个用户使用自己的凭证
+    BOHRIUM_SKU_ID = os.getenv('BOHRIUM_SKU_ID', '10048')  # SKU ID 可以有默认值
 
     # 从环境变量读取收费标准，默认 5000 tokens = 1 光子
     TOKENS_PER_PHOTON = int(os.getenv('PHOTON_TOKENS_PER_PHOTON', '5000'))
@@ -63,15 +63,13 @@ class PhotonBillingService:
         }
 
         # 验证配置
-        if self.config.BILLING_ENABLED and not self.config.BOHRIUM_ACCESS_KEY:
-            logger.warning("⚠️ 计费已启用但未配置 BOHRIUM_ACCESS_KEY")
-
+        # ⚠️ 注意：不再检查 BOHRIUM_ACCESS_KEY，因为它从用户 Cookie 获取
         logger.info(
             f"💎 光子计费服务已启动 - "
             f"SKU ID: {self.config.BOHRIUM_SKU_ID}, "
-            f"AccessKey: {'已配置' if self.config.BOHRIUM_ACCESS_KEY else '未配置'}, "
             f"收费标准: {self.config.TOKENS_PER_PHOTON} tokens/光子, "
-            f"计费状态: {'启用' if self.config.BILLING_ENABLED else '禁用'}"
+            f"计费状态: {'启用' if self.config.BILLING_ENABLED else '禁用'}, "
+            f"认证方式: Cookie (用户凭证)"
         )
     
     def calculate_photons(self, tokens: int) -> float:
@@ -392,10 +390,10 @@ class PhotonBillingService:
         # 1. ✅ 必须使用参数传入的用户 AK（从 Cookie 获取）
         if user_access_key:
             access_key = user_access_key
-            sku_id = user_sku_id or self.config.BOHRIUM_SKU_ID
-            client_name = user_client_name or self.config.BOHRIUM_CLIENT_NAME
+            sku_id = user_sku_id or self.config.BOHRIUM_SKU_ID  # SKU ID 可以有默认值
+            client_name = user_client_name or "ResearchMind"  # 默认客户端名称
             source = "Cookie"
-            logger.info(f"✅ [扣费] 使用 Cookie 凭证: AK={access_key[:8]}...{access_key[-4:]}")
+            logger.info(f"✅ [扣费] 使用 Cookie 凭证: AK={access_key[:8]}...{access_key[-4:]}, client_name={client_name}")
         else:
             # 2. ⚠️ Cookie 不存在，返回错误提示用户输入
             logger.error(f"❌ [计费] Cookie 中未找到 AccessKey，请确保已登录 Bohrium 平台")
