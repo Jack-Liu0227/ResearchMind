@@ -18,7 +18,7 @@ interface LoginGatewayProps {
 
 const LoginGateway: React.FC<LoginGatewayProps> = ({ onAuthenticated }) => {
   const [accessKey, setAccessKey] = useState('')
-  const [clientName, setClientName] = useState('ResearchMind')
+  const [clientName, setClientName] = useState('researchmind-uuid1759932177')
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(true)
 
@@ -158,7 +158,7 @@ const LoginGateway: React.FC<LoginGatewayProps> = ({ onAuthenticated }) => {
               value={clientName}
               onChange={(e) => setClientName(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="ResearchMind"
+              placeholder="researchmind-uuid1759932177"
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               disabled={loading}
             />

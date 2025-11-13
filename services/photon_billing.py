@@ -391,7 +391,7 @@ class PhotonBillingService:
         if user_access_key:
             access_key = user_access_key
             sku_id = user_sku_id or self.config.BOHRIUM_SKU_ID  # SKU ID 可以有默认值
-            client_name = user_client_name or "ResearchMind"  # 默认客户端名称
+            client_name = user_client_name or "researchmind-uuid1759932177"  # 默认客户端名称
             source = "Cookie"
             logger.info(f"✅ [扣费] 使用 Cookie 凭证: AK={access_key[:8]}...{access_key[-4:]}, client_name={client_name}")
         else:

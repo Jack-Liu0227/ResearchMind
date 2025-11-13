@@ -279,7 +279,7 @@ class MessageHandler:
             # 1) 提取 Cookie 凭证
             auth_data = data.get("data") or {}
             cookie_access_key = auth_data.get("appAccessKey")
-            cookie_client_name = auth_data.get("clientName") or "ResearchMind"
+            cookie_client_name = auth_data.get("clientName") or "researchmind-uuid1759932177"
 
             # 2) 保存到 WebSocket 会话上下文
             try:

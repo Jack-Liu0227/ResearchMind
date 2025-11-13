@@ -12,7 +12,7 @@ const CookieWarningBanner: React.FC = () => {
   const [showBanner, setShowBanner] = useState(false)
   const [showInputModal, setShowInputModal] = useState(false)
   const [accessKey, setAccessKey] = useState('')
-  const [clientName, setClientName] = useState('ResearchMind')
+  const [clientName, setClientName] = useState('researchmind-uuid1759932177')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -145,7 +145,7 @@ const CookieWarningBanner: React.FC = () => {
                   value={clientName}
                   onChange={(e) => setClientName(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="ResearchMind"
+                  placeholder="researchmind-uuid1759932177"
                 />
               </div>
             </div>

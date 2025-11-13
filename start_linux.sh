@@ -151,24 +151,80 @@ prepare_workspace() {
 kill_stale_processes() {
     log_info "Cleaning up stale processes and occupied ports..."
 
-    pkill -9 -f "uv run python" 2>/dev/null || true
-    pkill -9 -f "npm run dev" 2>/dev/null || true
-    pkill -9 -f "node .*vite" 2>/dev/null || true
+    # 首先尝试优雅地停止已知的进程
+    pkill -f "uv run python main.py" 2>/dev/null || true
+    pkill -f "uv run python.*server.py" 2>/dev/null || true
+    pkill -f "npm run dev" 2>/dev/null || true
+    pkill -f "node.*vite" 2>/dev/null || true
 
-    # Linux 使用 lsof 或 ss 来查找占用端口的进程
-    for port in 50002 50003 50010; do
+    sleep 1
+
+    # 收集所有需要清理的端口（从环境变量中读取）
+    local ports_to_clean=(
+        "${VITE_FRONTEND_PORT:-5173}"
+        "${RESEARCHMIND_HTTP_PORT:-8000}"
+        "${RESEARCHMIND_WS_PORT:-8000}"
+        "${PAPER_SEARCH_MCP_PORT:-50002}"
+        "${SIMULATION_MCP_PORT:-50003}"
+        "${DATABASE_MCP_PORT:-50010}"
+    )
+
+    # 去重端口列表
+    local unique_ports=($(printf '%s\n' "${ports_to_clean[@]}" | sort -u))
+
+    # 清理占用端口的进程
+    for port in "${unique_ports[@]}"; do
+        local killed=false
+
+        # 优先使用 lsof
         if command -v lsof >/dev/null 2>&1; then
-            pids=$(lsof -ti:$port 2>/dev/null || true)
-            for pid in $pids; do
-                if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                    log_info "Releasing port $port (PID $pid)"
-                    kill -9 "$pid" 2>/dev/null || true
-                fi
-            done
+            local pids=$(lsof -ti:$port 2>/dev/null || true)
+            if [ -n "$pids" ]; then
+                for pid in $pids; do
+                    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                        log_warning "Port $port is occupied by PID $pid, terminating..."
+                        kill -15 "$pid" 2>/dev/null || true
+                        sleep 0.5
+                        # 如果进程仍在运行，强制终止
+                        if kill -0 "$pid" 2>/dev/null; then
+                            log_warning "Force killing PID $pid on port $port"
+                            kill -9 "$pid" 2>/dev/null || true
+                        fi
+                        killed=true
+                    fi
+                done
+            fi
+        # 备用方案：使用 fuser
+        elif command -v fuser >/dev/null 2>&1; then
+            local pids=$(fuser $port/tcp 2>/dev/null || true)
+            if [ -n "$pids" ]; then
+                for pid in $pids; do
+                    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                        log_warning "Port $port is occupied by PID $pid, terminating..."
+                        kill -15 "$pid" 2>/dev/null || true
+                        sleep 0.5
+                        if kill -0 "$pid" 2>/dev/null; then
+                            log_warning "Force killing PID $pid on port $port"
+                            kill -9 "$pid" 2>/dev/null || true
+                        fi
+                        killed=true
+                    fi
+                done
+            fi
+        fi
+
+        if [ "$killed" = true ]; then
+            log_success "Port $port released"
         fi
     done
 
-    sleep 2
+    # 最后再次强制清理任何残留的相关进程
+    pkill -9 -f "uv run python" 2>/dev/null || true
+    pkill -9 -f "npm run dev" 2>/dev/null || true
+    pkill -9 -f "node.*vite" 2>/dev/null || true
+
+    sleep 1
+    log_success "All stale processes and ports cleaned"
 }
 
 # ---------------------------- Service start helpers -------------------------
