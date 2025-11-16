@@ -216,6 +216,10 @@ export interface UserSettings {
   autoSave: boolean
   notifications: boolean
   apiEndpoint: string
+  // 🆕 UI 配置
+  leftSidebarOpen: boolean    // 左侧边栏默认状态
+  rightSidebarOpen: boolean   // 右侧边栏默认状态
+  showPricingModal: boolean   // 登录时是否显示定价页面
 }
 
 // 搜索结果类型

@@ -18,12 +18,41 @@ from .config import agent_config
 from .data_processor import DataProcessor
 from .message_handler import MessageHandler
 from .photon_billing import get_billing_service
+from .pricing_service import PricingService
 
 logger = logging.getLogger(__name__)
 
 # 会话管理配置
 MAX_CONTEXT_MESSAGES = 20  # 最多保留20条消息（10轮对话）
 CONTEXT_SUMMARY_THRESHOLD = 15  # 超过15条消息时开始总结
+
+# 🆕 工具名称到功能类型的映射（用于按功能扣费）
+TOOL_FEATURE_MAPPING = {
+    # 结构生成与弛豫
+    'generate_crystal_structure': 'structure_gen',  # 10 光子
+    'relax_structure': 'relaxation',                # 5 光子
+
+    # 声子谱与热导率计算
+    'calculate_phonon': 'phonon',                   # 5 光子
+    'calculate_phonon_from_directory': 'phonon',    # 5 光子（单次调用，批量处理）
+    'calculate_kappa_from_cif': 'kappa',            # 5 光子
+    'calculate_kappa_from_directory': 'batch_kappa', # 4 光子（批量优惠）
+    'batch_calculate_kappa': 'batch_kappa',         # 4 光子（批量优惠）
+
+    # 文献报告生成
+    'generate_research_report': 'report',           # 30 光子
+    'generate_research_report_with_data_collection': 'report',  # 30 光子
+
+    # 文献分析
+    'analyze_paper_content': 'analysis',            # 15 光子
+
+    # 免费工具（不在映射中的工具默认免费）
+    # 'search_papers': 0,
+    # 'query_materials_project': 0,
+    # 'query_aflow': 0,
+    # 'extract_and_validate_cif': 0,
+    # 'calculate_energy_from_cif': 0,
+}
 
 
 class AgentCoordinator:
@@ -107,7 +136,7 @@ class AgentCoordinator:
             # 增加消息计数
             self.session_message_counts[session_key] = message_count + 1
 
-            # 记录消息开始时的计费状态（用于计算本条消息的增量）
+            # 记录消息开始时的统计状态（用于计算本条消息的增量）
             from services.user_billing_config import get_billing_context_manager
             context_manager = get_billing_context_manager()
             # 优先使用已认证的用户 ID；否则回退到 session_id
@@ -118,27 +147,22 @@ class AgentCoordinator:
                 authed_user_id = None
                 if ws and client_id in ws.client_sessions:
                     authed_user_id = ws.client_sessions[client_id].get("authenticated_user_id")
-                # ✅ 修复：user_id 应该是数据库用户 ID（用于查找配置）
-                # 如果已认证，使用 authed_user_id；否则使用 session_id
                 user_id = str(authed_user_id) if authed_user_id else (session_id or 'unknown')
-                logger.info(f"🔍 [BILLING] authed_user_id={authed_user_id}, user_id={user_id}, session_id={session_id}, client_id={client_id}")
+                logger.info(f"🔍 [统计] authed_user_id={authed_user_id}, user_id={user_id}, session_id={session_id}, client_id={client_id}")
             except Exception as e:
                 logger.warning(f"⚠️ 获取认证用户 ID 失败: {e}")
                 user_id = session_id or 'unknown'
-            # 用户计费配置现在直接从数据库读取，不需要手动同步到 SessionManager
-            # SessionManager 的计费配置已废弃，计费系统直接从数据库查询
 
             context = context_manager.get_or_create_context(conversation_id, user_id)
             start_snapshot = context.get_snapshot()
 
             self.message_start_billing[session_key] = {
                 'total_tokens': start_snapshot.get('total_tokens', 0),
-                'total_photons': start_snapshot.get('total_photons', 0.0),
-                'conversation_id': conversation_id,  # 保存 conversation_id 供后续使用
+                'conversation_id': conversation_id,
                 'user_id': user_id,
-                'client_id': client_id  # 🔧 保存 client_id 作为回退查找配置的依据
+                'client_id': client_id
             }
-            logger.info(f"💎 [消息计费] 消息开始时计费状态:")
+            logger.info(f"📊 [消息统计] 消息开始时统计状态:")
             logger.info(f"  session_key={session_key}")
             logger.info(f"  conversation_id={conversation_id}")
             logger.info(f"  start_snapshot={start_snapshot}")
@@ -363,20 +387,20 @@ class AgentCoordinator:
 
             logger.info(f"✅ Agent {agent_id} completed - processed {event_count} events")
 
-            # 获取会话的计费统计（使用隔离上下文）
+            # 获取会话的统计数据（使用隔离上下文）
             from .user_billing_config import get_billing_context_manager
             context_manager = get_billing_context_manager()
 
-            # 使用 session_id 和 client_id 获取隔离的计费上下文
+            # 使用 session_id 获取隔离的统计上下文
             billing_session_key = session_id or 'unknown'
             context = context_manager.get_context(billing_session_key)
 
-            # 🔧 优化：直接从 ConversationBillingContext 获取计费信息
-            # 删除了与 SessionManager 的冗余同步（已废弃）
+            # 从 ConversationBillingContext 获取统计信息
             session_usage = {
                 'total_tokens': 0,
-                'total_photons': 0.0,
-                'requests_count': 0
+                'total_photons_charged': 0,
+                'requests_count': 0,
+                'feature_charges': []
             }
 
             if context:
@@ -384,24 +408,24 @@ class AgentCoordinator:
                 snapshot = context.get_snapshot()
                 session_usage = {
                     'total_tokens': snapshot['total_tokens'],
-                    'total_photons': snapshot['total_photons'],
+                    'total_photons_charged': snapshot['total_photons_charged'],
                     'requests_count': snapshot['request_count'],
-                    'charged': snapshot.get('charged', False),  # 🔧 新增：是否已扣费
-                    'charged_photons': snapshot.get('charged_photons', 0)  # 🔧 新增：已扣费光子数
+                    'feature_charges': snapshot.get('feature_charges', [])
                 }
 
-            logger.info(f"💎 [计费] 会话累计: {session_usage.get('total_tokens', 0)} tokens = {session_usage.get('total_photons', 0.0):.4f} 光子 | 请求次数: {session_usage.get('requests_count', 0)} | 已扣费: {session_usage.get('charged', False)}")
+            logger.info(f"📊 [统计] 会话累计: {session_usage.get('total_tokens', 0)} tokens (仅供参考) | 已扣费: {session_usage.get('total_photons_charged', 0)} 光子 | 请求次数: {session_usage.get('requests_count', 0)}")
 
-            # 发送完成状态（包含计费信息）
+            # 发送完成状态（包含统计信息）
             billing_data = {
-                "session_total_tokens": session_usage.get('total_tokens', 0),
-                "session_total_photons": session_usage.get('total_photons', 0.0),
+                "session_total_tokens": session_usage.get('total_tokens', 0),  # Token 统计（仅供参考）
+                "session_total_photons": session_usage.get('total_photons_charged', 0),  # 🔧 修复：字段名改为 session_total_photons（前端期望的字段名）
                 "requests_count": session_usage.get('requests_count', 0),
-                "model_name": os.getenv('MODEL_USE', 'qwen-plus'),  # 使用的模型
-                "charged": session_usage.get('charged', False),  # 🔧 新增：是否已扣费
-                "billing_source": "Cookie"  # 🔧 新增：计费来源（当前架构下都是 Cookie）
+                "model_name": os.getenv('MODEL_USE', 'qwen-plus'),
+                "feature_charges": session_usage.get('feature_charges', []),  # 功能扣费明细
+                "charged": session_usage.get('total_photons_charged', 0) > 0,  # 🆕 是否已扣费（光子数 > 0）
+                "billing_source": "Cookie"  # 🆕 计费来源
             }
-            logger.info(f"📤 [WebSocket] 准备发送 complete 状态，计费数据: {billing_data}")
+            logger.info(f"📤 [WebSocket] 准备发送 complete 状态，统计数据: {billing_data}")
 
             await MessageHandler.send_message(websocket, "status", {
                 "status": "complete",
@@ -619,6 +643,99 @@ class AgentCoordinator:
         # 返回友好提示，如果没有映射则返回默认提示
         return tool_messages.get(tool_name, f"🔧 正在调用工具: {tool_name}...")
 
+    async def _charge_for_tool_if_needed(
+        self,
+        tool_name: str,
+        session_id: str,
+        user_id: Optional[str] = None,
+        user_access_key: Optional[str] = None,
+        user_client_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        在工具调用前检查是否需要扣费，并执行扣费
+
+        Args:
+            tool_name: 工具名称
+            session_id: 会话 ID
+            user_id: 用户 ID（可选）
+            user_access_key: 用户访问密钥（可选）
+            user_client_name: 用户客户端名称（可选）
+
+        Returns:
+            扣费结果字典，包含 success, message, photons 等字段
+        """
+        # 检查工具是否需要扣费
+        feature_type = TOOL_FEATURE_MAPPING.get(tool_name)
+
+        if not feature_type:
+            # 免费工具，无需扣费
+            logger.debug(f"🆓 工具 {tool_name} 是免费工具，无需扣费")
+            return {
+                "success": True,
+                "message": "免费工具",
+                "photons": 0,
+                "feature_type": None
+            }
+
+        # 需要扣费的工具
+        try:
+            logger.info(f"💰 工具 {tool_name} 需要扣费，功能类型: {feature_type}")
+
+            # 调用扣费服务
+            result = PricingService.charge_for_feature(
+                feature_type=feature_type,
+                session_id=session_id,
+                user_id=user_id,
+                user_access_key=user_access_key,
+                user_client_name=user_client_name,
+                quantity=1
+            )
+
+            # 🆕 记录扣费到会话的计费上下文（无论成功或失败都记录）
+            try:
+                from services.user_billing_config import get_billing_context_manager
+                context_manager = get_billing_context_manager()
+                conversation_id = session_id or 'unknown'
+
+                # 获取或创建计费上下文
+                context = context_manager.get_or_create_context(
+                    conversation_id=conversation_id,
+                    user_id=user_id or 'unknown'
+                )
+
+                photons = result.get("photons", 0)
+                success = result.get("success", False)
+                error_msg = result.get("message", "未知错误")
+
+                # 记录功能扣费（包含成功/失败状态）
+                context.record_feature_charge(
+                    feature_type=feature_type,
+                    photons=photons,
+                    success=success,
+                    error_message=None if success else error_msg
+                )
+
+                if success:
+                    logger.info(f"✅ 扣费成功: {tool_name} ({feature_type}) = {photons} 光子")
+                    logger.info(f"📝 已记录扣费到会话 {conversation_id}: {feature_type} = {photons} 光子")
+                else:
+                    logger.warning(f"⚠️ 扣费失败: {tool_name} ({feature_type}) - {error_msg}")
+                    logger.info(f"📝 已记录扣费失败到会话 {conversation_id}: {feature_type} = {photons} 光子 (失败原因: {error_msg})")
+
+            except Exception as e:
+                logger.error(f"❌ 记录扣费到会话失败: {e}", exc_info=True)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ 扣费异常: {tool_name} ({feature_type}) - {e}", exc_info=True)
+            return {
+                "success": False,
+                "message": f"扣费异常: {str(e)}",
+                "photons": 0,
+                "feature_type": feature_type
+            }
+
     async def _handle_agent_event(
         self,
         event: Any,
@@ -649,7 +766,7 @@ class AgentCoordinator:
                                 session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
                                 tool_calls = self.current_tool_calls.get(session_key, [])
 
-                                # 计算本条消息的计费增量
+                                # 计算本条消息的 token 使用增量
                                 billing_data = None
                                 try:
                                     from services.user_billing_config import get_billing_context_manager
@@ -657,32 +774,29 @@ class AgentCoordinator:
 
                                     start_billing_info = self.message_start_billing.get(session_key, {})
                                     conversation_id = start_billing_info.get('conversation_id', session_id or 'unknown')
-                                    user_id = start_billing_info.get('user_id', session_id or 'unknown')  # 🔧 修复：使用 session_id 而不是 client_id
 
                                     context = context_manager.get_context(conversation_id)
                                     if context:
                                         current_snapshot = context.get_snapshot()
                                     else:
-                                        current_snapshot = {'total_tokens': 0, 'total_photons': 0.0}
+                                        current_snapshot = {'total_tokens': 0}
 
-                                    logger.debug(f"💎 [消息计费] 调试信息:")
+                                    logger.debug(f"📊 [消息统计] 调试信息:")
                                     logger.debug(f"  session_key={session_key}")
                                     logger.debug(f"  conversation_id={conversation_id}")
                                     logger.debug(f"  start_billing_info={start_billing_info}")
                                     logger.debug(f"  current_snapshot={current_snapshot}")
 
                                     current_tokens = current_snapshot.get('total_tokens', 0) - start_billing_info.get('total_tokens', 0)
-                                    current_photons = current_snapshot.get('total_photons', 0.0) - start_billing_info.get('total_photons', 0.0)
 
-                                    if current_tokens > 0 or current_photons > 0:
+                                    if current_tokens > 0:
                                         billing_data = {
                                             'tokens': current_tokens,
-                                            'photons': round(current_photons, 4),
                                             'model_name': os.getenv('MODEL_USE', 'qwen-plus')
                                         }
-                                        logger.info(f"💎 [消息计费] 本条消息计费: tokens={current_tokens}, photons={current_photons}")
+                                        logger.info(f"📊 [消息统计] 本条消息 token 使用: {current_tokens} tokens")
                                 except Exception as e:
-                                    logger.error(f"⚠️ 计算消息计费失败: {e}", exc_info=True)
+                                    logger.error(f"⚠️ 计算消息统计失败: {e}", exc_info=True)
 
                                 await MessageHandler.send_agent_response(
                                     websocket=websocket,
@@ -751,6 +865,57 @@ class AgentCoordinator:
                             "status": "pending"
                         }
                         self.current_tool_calls[session_key].append(tool_call_record)
+
+                        # 🆕 在工具调用前执行扣费
+                        try:
+                            # 获取用户凭证（从 WebSocket 服务器的客户端会话中获取）
+                            user_access_key = None
+                            user_client_name = None
+                            user_id_for_charge = None
+
+                            try:
+                                from .websocket_server import WebSocketServer
+                                ws = WebSocketServer.get_instance()
+                                if ws and client_id in ws.client_sessions:
+                                    client_session = ws.client_sessions[client_id]
+
+                                    # 🔧 修复：从 cookie_credentials 中获取凭证
+                                    cookie_creds = client_session.get("cookie_credentials", {})
+                                    user_access_key = cookie_creds.get("access_key")
+                                    user_client_name = cookie_creds.get("client_name")
+
+                                    # 获取用户 ID
+                                    authed_user_id = client_session.get("authenticated_user_id")
+                                    user_id_for_charge = str(authed_user_id) if authed_user_id else (session_id or 'unknown')
+
+                                    logger.debug(f"🔍 [扣费凭证] access_key={'已提供' if user_access_key else '未提供'}, client_name={user_client_name}")
+                            except Exception as e:
+                                logger.debug(f"无法获取用户凭证: {e}")
+                                user_id_for_charge = session_id or 'unknown'
+
+                            # 调用扣费方法
+                            charge_result = await self._charge_for_tool_if_needed(
+                                tool_name=tool_name,
+                                session_id=session_id or 'unknown',
+                                user_id=user_id_for_charge,
+                                user_access_key=user_access_key,
+                                user_client_name=user_client_name
+                            )
+
+                            # 记录扣费结果到工具调用记录
+                            tool_call_record["charge_result"] = charge_result
+
+                            # 如果扣费失败，记录警告（但不阻止工具执行）
+                            if not charge_result.get("success") and charge_result.get("feature_type"):
+                                logger.warning(f"⚠️ 工具 {tool_name} 扣费失败，但继续执行: {charge_result.get('message')}")
+                                # 可选：发送扣费失败通知到前端
+                                await MessageHandler.send_message(websocket, "warning", {
+                                    "message": f"扣费失败: {charge_result.get('message')}，但功能将继续执行"
+                                })
+
+                        except Exception as e:
+                            logger.error(f"❌ 工具扣费异常: {tool_name} - {e}", exc_info=True)
+                            # 扣费异常不阻止工具执行
 
                         # 🆕 发送独立的工具执行消息到前端
                         logger.info(f"🔧 发送工具执行消息 (pending): {tool_name}")

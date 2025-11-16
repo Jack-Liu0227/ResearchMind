@@ -19,6 +19,16 @@ export interface PhononImage {
   dosCsvPath?: string         // 声子 DOS 数据 CSV 路径
 }
 
+// 🆕 功能扣费记录
+export interface FeatureCharge {
+  feature_type: string  // 功能类型（如 'relaxation', 'phonon', 'kappa'）
+  photons: number  // 扣费光子数
+  success: boolean  // 扣费是否成功
+  error_message?: string  // 扣费失败原因（可选）
+  timestamp: string  // 扣费时间
+  conversation_id?: string  // 🆕 所属会话 ID（用于用户统计）
+}
+
 export interface BillingData {
   session_total_tokens: number
   session_total_photons: number
@@ -28,17 +38,24 @@ export interface BillingData {
   model_name?: string  // 使用的模型
   charged?: boolean  // 🔧 新增：是否已扣费
   billing_source?: string  // 🔧 新增：计费来源（Cookie/用户配置/开发者默认）
+  feature_charges?: FeatureCharge[]  // 🆕 功能扣费明细
 }
 
 // 🆕 用户计费统计
 export interface UserBillingStats {
   user_id: string
   total_tokens: number
-  total_photons: number
-  request_count: number
-  conversation_count: number
+  total_photons_charged: number  // 🔧 修复：匹配后端字段名
+  total_requests: number  // 🔧 修复：匹配后端字段名
+  total_conversations: number  // 🔧 修复：匹配后端字段名
   has_user_config?: boolean
   billing_source?: string
+  total_feature_charges?: number  // 🆕 总扣费次数
+  success_charges_count?: number  // 🆕 成功扣费次数
+  failed_charges_count?: number  // 🆕 失败扣费次数
+  success_photons?: number  // 🆕 成功扣费的光子数
+  failed_photons?: number  // 🆕 失败扣费的光子数（应扣累计）
+  recent_feature_charges?: FeatureCharge[]  // 🆕 最近 10 条扣费明细
 }
 
 // 🆕 全局计费统计
@@ -160,6 +177,10 @@ const defaultSettings: UserSettings = {
   autoSave: true,
   notifications: true,
   apiEndpoint: API_CONFIG.BASE_URL,
+  // 🆕 UI 配置默认值
+  leftSidebarOpen: true,     // 左侧边栏默认展开
+  rightSidebarOpen: true,    // 右侧边栏默认展开
+  showPricingModal: true,    // 登录时默认显示定价页面
 }
 
 const defaultAgents: Agent[] = [
@@ -210,7 +231,7 @@ export const useAppStore = create<AppState>()(
       currentSession: null,
       messages: [],
 
-      sidebarOpen: false,
+      sidebarOpen: true,  // 🆕 默认展开左侧边栏
 
       currentStructure: null,
       structureList: [],
@@ -496,6 +517,7 @@ export const useAppStore = create<AppState>()(
                 requests_count: data.requests_count || 0,
                 charged: data.charged ?? false,  // 🔧 修复：添加 charged 字段
                 billing_source: data.billing_source,  // 🔧 修复：添加 billing_source 字段
+                feature_charges: data.feature_charges || [],  // 🆕 添加 feature_charges 字段
                 current_tokens: data.current_tokens,
                 current_photons: data.current_photons,
                 model_name: data.model_name,

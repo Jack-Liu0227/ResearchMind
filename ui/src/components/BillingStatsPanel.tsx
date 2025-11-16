@@ -1,12 +1,17 @@
 /**
  * 计费统计面板组件
  *
+ * ⚠️ Token 自动扣费已禁用 - 改为按次计费模式
+ * 此组件显示的 Token 和光子统计仅供参考，不再用于实际扣费
+ *
  * 🔧 重构：使用 WebSocket 实时推送代替 HTTP API 轮询
  *
  * 显示详细的计费统计信息，包括：
- * - 当前会话的计费统计
- * - 用户总计费统计
- * - 全局计费统计
+ * - 当前会话的 Token 使用统计（仅记录，不扣费）
+ * - 用户总 Token 使用统计（仅记录，不扣费）
+ * - 全局 Token 使用统计（仅记录，不扣费）
+ *
+ * 实际扣费请使用 /api/billing/charge 端点（按次计费）
  */
 
 import React, { useState, useEffect } from 'react'
@@ -32,12 +37,12 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
     currentSession,
     billingData,
     userBillingStats,
-    globalBillingStats,
+    // 🔧 移除 globalBillingStats
     user
   } = useAppStore()
   const [conversationStats, setConversationStats] = useState<BillingStats | null>(null)
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'conversation' | 'user' | 'global'>('conversation')
+  const [activeTab, setActiveTab] = useState<'conversation' | 'user'>('conversation')  // 🔧 移除 'global' 选项
   const [error, setError] = useState<string | null>(null)
 
   // 🔧 重构：通过 WebSocket 请求计费统计数据
@@ -48,8 +53,7 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
     setLoading(true)
     setError(null)
 
-    // 请求全局统计（总是可用）
-    wsService.requestGlobalStats()
+    // 🔧 移除全局统计请求
 
     // 请求当前会话的计费统计
     if (currentSession?.id) {
@@ -85,9 +89,9 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
       const newStats = {
         conversation_id: currentSession.id,
         user_id: user?.id?.toString() || 'unknown',
-        total_tokens: billingData.session_total_tokens,
-        total_photons: billingData.session_total_photons,
-        request_count: billingData.requests_count,
+        total_tokens: billingData.session_total_tokens || 0,  // 🔧 添加默认值
+        total_photons: billingData.session_total_photons || 0,  // 🔧 添加默认值
+        request_count: billingData.requests_count || 0,  // 🔧 添加默认值
         charged: billingData.charged ?? false,  // 🔧 修复：使用后端返回的 charged 状态
         billing_source: billingData.billing_source,  // 🔧 添加：计费来源
         created_at: new Date().toISOString(),
@@ -130,12 +134,7 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
           >
             用户统计
           </button>
-          <button
-            className={`billing-stats-tab ${activeTab === 'global' ? 'active' : ''}`}
-            onClick={() => setActiveTab('global')}
-          >
-            全局统计
-          </button>
+          {/* 🔧 移除全局统计标签 */}
         </div>
 
         {/* 内容区域 */}
@@ -145,7 +144,7 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
               <div className="spinner" />
               <p>加载中...</p>
             </div>
-          ) : error && activeTab !== 'global' ? (
+          ) : error ? (
             <div className="billing-stats-error">
               <div className="error-icon">⚠️</div>
               <p>{error}</p>
@@ -164,21 +163,21 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总 Tokens</span>
-                      <span className="billing-stat-value highlight">{conversationStats.total_tokens.toLocaleString()}</span>
+                      <span className="billing-stat-value highlight">{(conversationStats.total_tokens || 0).toLocaleString()}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总光子</span>
-                      <span className="billing-stat-value highlight">{conversationStats.total_photons.toFixed(4)}</span>
+                      <span className="billing-stat-value highlight">{(conversationStats.total_photons || 0).toFixed(4)}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">请求次数</span>
-                      <span className="billing-stat-value">{conversationStats.request_count}</span>
+                      <span className="billing-stat-value">{conversationStats.request_count || 0}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">平均每次</span>
                       <span className="billing-stat-value">
-                        {conversationStats.request_count > 0 
-                          ? (conversationStats.total_tokens / conversationStats.request_count).toFixed(0)
+                        {(conversationStats.request_count || 0) > 0
+                          ? ((conversationStats.total_tokens || 0) / conversationStats.request_count).toFixed(0)
                           : 0} tokens
                       </span>
                     </div>
@@ -199,6 +198,84 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
                       </span>
                     </div>
                   </div>
+
+                  {/* 🆕 功能扣费明细 */}
+                  {billingData?.feature_charges && billingData.feature_charges.length > 0 && (
+                    <div className="billing-charges-section" style={{ marginTop: '20px' }}>
+                      <h4 style={{ marginBottom: '10px', fontSize: '14px', fontWeight: 600 }}>功能扣费明细</h4>
+                      <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                        {billingData.feature_charges.map((charge, index) => (
+                          <div
+                            key={index}
+                            style={{
+                              padding: '8px 12px',
+                              marginBottom: '8px',
+                              borderRadius: '6px',
+                              backgroundColor: charge.success ? '#f0f9ff' : '#fef2f2',
+                              border: `1px solid ${charge.success ? '#bfdbfe' : '#fecaca'}`,
+                              fontSize: '12px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontWeight: 500 }}>
+                                {charge.success ? '✅' : '❌'} {charge.feature_type}
+                              </span>
+                              <span style={{
+                                color: charge.success ? '#059669' : '#dc2626',
+                                fontWeight: 600
+                              }}>
+                                {charge.photons} 光子
+                              </span>
+                            </div>
+                            {!charge.success && charge.error_message && (
+                              <div style={{
+                                marginTop: '4px',
+                                color: '#dc2626',
+                                fontSize: '11px'
+                              }}>
+                                失败原因: {charge.error_message}
+                              </div>
+                            )}
+                            <div style={{
+                              marginTop: '4px',
+                              color: '#6b7280',
+                              fontSize: '11px'
+                            }}>
+                              {new Date(charge.timestamp).toLocaleString()}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 扣费统计摘要 */}
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '10px',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '6px',
+                        fontSize: '12px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>成功扣费:</span>
+                          <span style={{ color: '#059669', fontWeight: 600 }}>
+                            {billingData.feature_charges.filter(c => c.success).reduce((sum, c) => sum + c.photons, 0)} 光子
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>失败扣费:</span>
+                          <span style={{ color: '#dc2626', fontWeight: 600 }}>
+                            {billingData.feature_charges.filter(c => !c.success).reduce((sum, c) => sum + c.photons, 0)} 光子
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '4px', borderTop: '1px solid #e5e7eb' }}>
+                          <span style={{ fontWeight: 600 }}>应扣累计:</span>
+                          <span style={{ fontWeight: 600 }}>
+                            {billingData.feature_charges.filter(c => !c.success).reduce((sum, c) => sum + c.photons, 0)} 光子
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -213,7 +290,7 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总对话数</span>
-                      <span className="billing-stat-value">{userBillingStats.conversation_count}</span>
+                      <span className="billing-stat-value">{userBillingStats.total_conversations}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总 Tokens</span>
@@ -221,50 +298,92 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总光子</span>
-                      <span className="billing-stat-value highlight">{userBillingStats.total_photons.toFixed(4)}</span>
+                      <span className="billing-stat-value highlight">{(userBillingStats.total_photons_charged || 0).toFixed(4)}</span>
                     </div>
                     <div className="billing-stat-item">
                       <span className="billing-stat-label">总请求数</span>
-                      <span className="billing-stat-value">{userBillingStats.request_count}</span>
+                      <span className="billing-stat-value">{userBillingStats.total_requests}</span>
                     </div>
                     <div className="billing-stat-item">
-                      <span className="billing-stat-label">计费来源</span>
-                      <span className="billing-stat-value">{userBillingStats.billing_source || '未知'}</span>
+                      <span className="billing-stat-label">平均每次</span>
+                      <span className="billing-stat-value">
+                        {userBillingStats.total_requests > 0
+                          ? (userBillingStats.total_tokens / userBillingStats.total_requests).toFixed(0)
+                          : 0} tokens
+                      </span>
                     </div>
                   </div>
 
-
-                </div>
-              )}
-
-              {/* 全局统计 */}
-              {activeTab === 'global' && globalBillingStats && (
-                <div className="billing-stats-section">
-                  <h3>全局统计</h3>
+                  {/* 🆕 功能扣费汇总 */}
+                  <h3 className="mt-6">功能扣费汇总</h3>
                   <div className="billing-stats-grid">
                     <div className="billing-stat-item">
-                      <span className="billing-stat-label">总 Tokens</span>
-                      <span className="billing-stat-value highlight">{globalBillingStats.total_tokens.toLocaleString()}</span>
+                      <span className="billing-stat-label">总扣费次数</span>
+                      <span className="billing-stat-value">{userBillingStats.total_feature_charges || 0}</span>
                     </div>
                     <div className="billing-stat-item">
-                      <span className="billing-stat-label">总光子</span>
-                      <span className="billing-stat-value highlight">{globalBillingStats.total_photons.toFixed(4)}</span>
+                      <span className="billing-stat-label">成功扣费</span>
+                      <span className="billing-stat-value success">{userBillingStats.success_photons || 0} 光子</span>
                     </div>
                     <div className="billing-stat-item">
-                      <span className="billing-stat-label">总请求数</span>
-                      <span className="billing-stat-value">{globalBillingStats.request_count}</span>
+                      <span className="billing-stat-label">失败扣费</span>
+                      <span className="billing-stat-value error">{userBillingStats.failed_photons || 0} 光子</span>
                     </div>
                     <div className="billing-stat-item">
-                      <span className="billing-stat-label">总用户数</span>
-                      <span className="billing-stat-value">{globalBillingStats.user_count}</span>
-                    </div>
-                    <div className="billing-stat-item">
-                      <span className="billing-stat-label">总会话数</span>
-                      <span className="billing-stat-value">{globalBillingStats.conversation_count}</span>
+                      <span className="billing-stat-label">应扣累计</span>
+                      <span className="billing-stat-value highlight">{userBillingStats.failed_photons || 0} 光子</span>
                     </div>
                   </div>
+
+                  {/* 🆕 功能扣费明细（最近 10 条） */}
+                  {userBillingStats.recent_feature_charges && userBillingStats.recent_feature_charges.length > 0 && (
+                    <>
+                      <h3 className="mt-6">功能扣费明细</h3>
+                      <div className="billing-feature-charges">
+                        {userBillingStats.recent_feature_charges.map((charge, index) => (
+                          <div
+                            key={index}
+                            className={`billing-feature-charge-item ${charge.success ? '' : 'failed'}`}
+                          >
+                            <div className="charge-header">
+                              <span className={`charge-status ${charge.success ? 'success' : 'error'}`}>
+                                {charge.success ? '✓' : '✗'}
+                              </span>
+                              <span className="charge-feature">{charge.feature_type}</span>
+                              <span className="charge-photons">{charge.photons} 光子</span>
+                            </div>
+                            <div className="charge-details">
+                              <span className="charge-time">
+                                {new Date(charge.timestamp).toLocaleString('zh-CN', {
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </span>
+                              {charge.conversation_id && (
+                                <span className="charge-session">
+                                  会话: {charge.conversation_id.slice(0, 8)}...
+                                </span>
+                              )}
+                              {!charge.success && charge.error_message && (
+                                <span className="charge-error">{charge.error_message}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {(userBillingStats.total_feature_charges || 0) > 10 && (
+                        <p className="billing-stats-note">
+                          💡 仅显示最近 10 条扣费记录，共 {userBillingStats.total_feature_charges} 条
+                        </p>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
+
+              {/* 🔧 移除全局统计 */}
             </>
           )}
         </div>
@@ -566,6 +685,119 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
           margin-top: 24px;
           padding-top: 24px;
           border-top: 1px solid #e5e7eb;
+        }
+
+        /* 🆕 功能扣费明细样式 */
+        .billing-feature-charges {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin-top: 12px;
+        }
+
+        .billing-feature-charge-item {
+          padding: 12px;
+          background: #f9fafb;
+          border-radius: 8px;
+          border: 1px solid #e5e7eb;
+          transition: all 0.2s ease;
+        }
+
+        .billing-feature-charge-item:hover {
+          background: #f3f4f6;
+          border-color: #d1d5db;
+        }
+
+        .billing-feature-charge-item.failed {
+          background: #fef2f2;
+          border-color: #fecaca;
+        }
+
+        .charge-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+
+        .charge-status {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .charge-status.success {
+          background: #d1fae5;
+          color: #065f46;
+        }
+
+        .charge-status.error {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+
+        .charge-feature {
+          flex: 1;
+          font-size: 14px;
+          font-weight: 600;
+          color: #1f2937;
+        }
+
+        .charge-photons {
+          font-size: 14px;
+          font-weight: 600;
+          color: #667eea;
+          font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+        }
+
+        .charge-details {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          font-size: 12px;
+          color: #6b7280;
+          padding-left: 28px;
+        }
+
+        .charge-time {
+          font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+        }
+
+        .charge-session {
+          color: #9ca3af;
+        }
+
+        .charge-error {
+          color: #dc2626;
+          font-weight: 500;
+        }
+
+        .billing-stats-note {
+          margin-top: 12px;
+          padding: 10px;
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          border-radius: 6px;
+          font-size: 13px;
+          color: #92400e;
+          text-align: center;
+        }
+
+        .mt-6 {
+          margin-top: 24px;
+        }
+
+        .billing-stat-value.success {
+          color: #059669;
+        }
+
+        .billing-stat-value.error {
+          color: #dc2626;
         }
       `}</style>
     </div>

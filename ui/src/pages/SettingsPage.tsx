@@ -275,6 +275,99 @@ const SettingsPage: React.FC = () => {
 
               <div className="border-t border-gray-200"></div>
 
+              {/* 🆕 左侧边栏默认状态 */}
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
+                    左侧边栏默认展开
+                    <Info className="w-4 h-4 ml-1 text-gray-400" />
+                  </label>
+                  <p className="text-sm text-gray-500 mt-1">
+                    设置左侧对话历史边栏的默认状态
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.leftSidebarOpen}
+                    onChange={(e) => {
+                      const newValue = e.target.checked
+                      setLocalSettings({
+                        ...localSettings,
+                        leftSidebarOpen: newValue
+                      })
+                      toast.success(newValue ? '左侧边栏将默认展开' : '左侧边栏将默认折叠')
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+
+              {/* 🆕 右侧边栏默认状态 */}
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
+                    右侧边栏默认展开
+                    <Info className="w-4 h-4 ml-1 text-gray-400" />
+                  </label>
+                  <p className="text-sm text-gray-500 mt-1">
+                    设置右侧结构/数据面板的默认状态
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.rightSidebarOpen}
+                    onChange={(e) => {
+                      const newValue = e.target.checked
+                      setLocalSettings({
+                        ...localSettings,
+                        rightSidebarOpen: newValue
+                      })
+                      toast.success(newValue ? '右侧边栏将默认展开' : '右侧边栏将默认折叠')
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+
+              {/* 🆕 登录时显示定价页面 */}
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
+                    登录时显示定价页面
+                    <Info className="w-4 h-4 ml-1 text-gray-400" />
+                  </label>
+                  <p className="text-sm text-gray-500 mt-1">
+                    每次登录成功后自动弹出收费标准页面
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.showPricingModal}
+                    onChange={(e) => {
+                      const newValue = e.target.checked
+                      setLocalSettings({
+                        ...localSettings,
+                        showPricingModal: newValue
+                      })
+                      // 同步更新 localStorage
+                      if (newValue) {
+                        localStorage.removeItem('researchmind_hide_pricing_modal')
+                      } else {
+                        localStorage.setItem('researchmind_hide_pricing_modal', 'true')
+                      }
+                      toast.success(newValue ? '将在登录时显示定价页面' : '将不再显示定价页面')
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+
               {/* 🆕 对话框文件展示设置 */}
               <div className="flex items-center justify-between py-2">
                 <div className="flex-1">

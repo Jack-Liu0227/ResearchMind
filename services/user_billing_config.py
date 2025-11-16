@@ -18,6 +18,11 @@ class ConversationBillingContext:
     每个对话的独立计费上下文
 
     确保每个用户/对话的计费数据完全隔离，防止并发访问时的数据混乱
+
+    数据结构说明：
+    - total_tokens: Token 使用量统计（仅供参考，不用于扣费）
+    - total_photons_charged: 按功能扣费累计的光子数（实际扣费金额）
+    - feature_charges: 功能扣费记录列表
     """
 
     def __init__(self, conversation_id: str, user_id: str):
@@ -32,80 +37,86 @@ class ConversationBillingContext:
         self.user_id = user_id
         self._lock = threading.RLock()
 
-        # 计费统计
+        # Token 使用量统计（仅供参考，不用于扣费）
         self.total_tokens: int = 0
-        self.total_photons: float = 0.0
         self.request_count: int = 0
 
-        # 扣费状态
-        self.charged: bool = False
-        self.charge_result: Optional[Dict] = None
-        self.charged_photons: int = 0
+        # 功能扣费统计（实际扣费金额）
+        self.total_photons_charged: int = 0
+        self.feature_charges: list = []  # [{feature_type, photons, timestamp}, ...]
 
         # 时间戳
         self.created_at = datetime.now().isoformat()
         self.updated_at = datetime.now().isoformat()
 
-    def update_token_usage(self, tokens: int, photons: float, model: str = "unknown", metadata: Optional[Dict] = None) -> None:
+    def update_token_usage(self, tokens: int, model: str = "unknown", metadata: Optional[Dict] = None) -> None:
         """
-        线程安全地更新 token 使用
+        线程安全地更新 token 使用统计（仅供参考，不用于扣费）
 
         Args:
             tokens: 本次使用的 token 数
-            photons: 本次消耗的光子数
             model: 使用的模型名称
             metadata: 额外元数据
         """
         with self._lock:
             self.total_tokens += tokens
-            self.total_photons += photons
             self.request_count += 1
             self.updated_at = datetime.now().isoformat()
 
-    def mark_charged(self, result: Dict, photons_charged: int = 0) -> None:
+    def record_feature_charge(self, feature_type: str, photons: int, success: bool = True, error_message: str = None) -> None:
         """
-        线程安全地标记已扣费
+        记录功能扣费（按功能固定扣费）
 
         Args:
-            result: 扣费结果
-            photons_charged: 本次扣费的光子数（可选）
+            feature_type: 功能类型（如 'report', 'structure_gen'）
+            photons: 扣费的光子数
+            success: 扣费是否成功（默认 True）
+            error_message: 扣费失败时的错误信息（可选）
         """
         with self._lock:
-            self.charged = True
-            self.charge_result = result
-            if photons_charged > 0:
-                self.charged_photons += photons_charged  # 🔧 修复：累加已扣费光子数
+            charge_record = {
+                'feature_type': feature_type,
+                'photons': photons,
+                'success': success,  # 🆕 扣费是否成功
+                'error_message': error_message,  # 🆕 扣费失败原因
+                'timestamp': datetime.now().isoformat()
+            }
+            self.feature_charges.append(charge_record)
+
+            # 只有扣费成功时才累加到 total_photons_charged
+            if success:
+                self.total_photons_charged += photons
+
             self.updated_at = datetime.now().isoformat()
 
-            # 🔍 调试日志
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"🔍 [mark_charged] conversation_id={self.conversation_id}, charged={self.charged}, charged_photons={self.charged_photons}, photons_charged={photons_charged}")
+            if success:
+                logger.info(f"💎 [功能扣费成功] conversation_id={self.conversation_id}, feature={feature_type}, photons={photons}, total_charged={self.total_photons_charged}")
+            else:
+                logger.warning(f"⚠️ [功能扣费失败] conversation_id={self.conversation_id}, feature={feature_type}, photons={photons}, reason={error_message}")
 
     def get_snapshot(self) -> Dict:
         """
         获取当前计费状态的快照（线程安全）
 
         Returns:
-            计费状态快照
+            计费状态快照，包含：
+            - total_tokens: Token 使用量（仅供参考）
+            - total_photons_charged: 按功能扣费累计的光子数
+            - feature_charges: 功能扣费记录列表
         """
         with self._lock:
             snapshot = {
                 'conversation_id': self.conversation_id,
                 'user_id': self.user_id,
                 'total_tokens': self.total_tokens,
-                'total_photons': self.total_photons,
+                'total_photons_charged': self.total_photons_charged,
                 'request_count': self.request_count,
-                'charged': self.charged,
-                'charged_photons': self.charged_photons,
+                'feature_charges': self.feature_charges.copy(),
                 'created_at': self.created_at,
                 'updated_at': self.updated_at
             }
 
-            # 🔍 调试日志
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"🔍 [get_snapshot] conversation_id={self.conversation_id}, charged={self.charged}, charged_photons={self.charged_photons}")
+            logger.debug(f"📊 [快照] conversation_id={self.conversation_id}, tokens={self.total_tokens}, charged_photons={self.total_photons_charged}")
 
             return snapshot
 
@@ -213,21 +224,51 @@ class ConversationBillingContextManager:
             user_id: 用户 ID
 
         Returns:
-            用户的总使用统计
+            用户的总使用统计，包含：
+            - 汇总数据（总 tokens、总光子、总请求数等）
+            - 最近 10 条功能扣费明细
         """
         with self._contexts_lock:
             user_contexts = [c for c in self._contexts.values() if c.user_id == user_id]
 
             total_tokens = sum(c.total_tokens for c in user_contexts)
-            total_photons = sum(c.total_photons for c in user_contexts)
+            total_photons_charged = sum(c.total_photons_charged for c in user_contexts)
             total_requests = sum(c.request_count for c in user_contexts)
+
+            # 🆕 汇总所有功能扣费明细
+            all_feature_charges = []
+            for context in user_contexts:
+                snapshot = context.get_snapshot()
+                # 为每条扣费记录添加会话 ID
+                for charge in snapshot.get('feature_charges', []):
+                    charge_with_session = charge.copy()
+                    charge_with_session['conversation_id'] = context.conversation_id
+                    all_feature_charges.append(charge_with_session)
+
+            # 按时间戳降序排序，取最近的 10 条
+            all_feature_charges.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            recent_feature_charges = all_feature_charges[:10]
+
+            # 统计成功和失败的扣费
+            success_charges = [c for c in all_feature_charges if c.get('success', True)]
+            failed_charges = [c for c in all_feature_charges if not c.get('success', True)]
+
+            # 计算成功扣费的光子数和失败扣费的光子数
+            success_photons = sum(c.get('photons', 0) for c in success_charges)
+            failed_photons = sum(c.get('photons', 0) for c in failed_charges)
 
             return {
                 'user_id': user_id,
                 'total_conversations': len(user_contexts),
                 'total_tokens': total_tokens,
-                'total_photons': total_photons,
+                'total_photons_charged': total_photons_charged,  # 实际扣费的光子数（应该等于 success_photons）
                 'total_requests': total_requests,
+                'total_feature_charges': len(all_feature_charges),  # 🆕 总扣费次数
+                'success_charges_count': len(success_charges),  # 🆕 成功扣费次数
+                'failed_charges_count': len(failed_charges),  # 🆕 失败扣费次数
+                'success_photons': success_photons,  # 🆕 成功扣费的光子数
+                'failed_photons': failed_photons,  # 🆕 失败扣费的光子数（应扣累计）
+                'recent_feature_charges': recent_feature_charges,  # 🆕 最近 10 条扣费明细
                 'conversations': [c.get_snapshot() for c in user_contexts]
             }
 
@@ -242,7 +283,7 @@ class ConversationBillingContextManager:
             all_contexts = list(self._contexts.values())
 
             total_tokens = sum(c.total_tokens for c in all_contexts)
-            total_photons = sum(c.total_photons for c in all_contexts)
+            total_photons_charged = sum(c.total_photons_charged for c in all_contexts)
             total_requests = sum(c.request_count for c in all_contexts)
 
             # 按用户分组统计
@@ -254,19 +295,19 @@ class ConversationBillingContextManager:
                         'user_id': user_id,
                         'total_conversations': 0,
                         'total_tokens': 0,
-                        'total_photons': 0,
+                        'total_photons_charged': 0,
                         'total_requests': 0
                     }
                 user_stats[user_id]['total_conversations'] += 1
                 user_stats[user_id]['total_tokens'] += context.total_tokens
-                user_stats[user_id]['total_photons'] += context.total_photons
+                user_stats[user_id]['total_photons_charged'] += context.total_photons_charged
                 user_stats[user_id]['total_requests'] += context.request_count
 
             return {
                 'total_conversations': len(all_contexts),
                 'total_users': len(user_stats),
                 'total_tokens': total_tokens,
-                'total_photons': total_photons,
+                'total_photons_charged': total_photons_charged,
                 'total_requests': total_requests,
                 'user_stats': list(user_stats.values())
             }

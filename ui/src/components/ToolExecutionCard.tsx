@@ -30,9 +30,9 @@ export const ToolExecutionCard: React.FC<ToolExecutionCardProps> = ({
   timestamp,
   error
 }) => {
-  const [isExpanded, setIsExpanded] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false)  // 
   const [showInput, setShowInput] = useState(false)
-  const [showOutput, setShowOutput] = useState(false)  // 🆕 添加输出折叠状态
+  const [showOutput, setShowOutput] = useState(false)  // 
 
   // 状态图标和颜色
   const getStatusIcon = () => {

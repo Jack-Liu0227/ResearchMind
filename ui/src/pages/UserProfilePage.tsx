@@ -7,6 +7,8 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import QuotaDisplay from '../components/QuotaDisplay'
+import InvitationPanel from '../components/InvitationPanel'
 
 interface UserInfo {
   id: number
@@ -162,6 +164,16 @@ export default function UserProfilePage() {
               <p className="text-xs text-green-600 mt-1">Tokens</p>
             </div>
           </div>
+        </div>
+
+        {/* 配额显示 */}
+        <div className="mb-6">
+          <QuotaDisplay userId={userInfo.id} />
+        </div>
+
+        {/* 邀请面板 */}
+        <div className="mb-6">
+          <InvitationPanel userId={userInfo.id} />
         </div>
 
         {/* 操作按钮 */}

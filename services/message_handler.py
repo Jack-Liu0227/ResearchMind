@@ -30,11 +30,7 @@ class MessageHandler:
             "upload_structures": self.handle_upload_structures,  # Multiple files
             "chat_with_attachments": self.handle_chat_with_attachments,
             "ping": self.handle_ping,
-            # Bohrium 计费相关
-            "charge_session": self.handle_charge_session,
-            "get_billing_summary": self.handle_get_billing_summary,
-            "set_user_billing_config": self.handle_set_user_billing_config,
-            # 🆕 新的 WebSocket 计费统计查询
+            # WebSocket 统计查询
             "get_conversation_stats": self.handle_get_conversation_stats,
             "get_user_stats": self.handle_get_user_stats,
             "get_global_stats": self.handle_get_global_stats,
@@ -434,113 +430,7 @@ class MessageHandler:
         await MessageHandler.send_message(websocket, "message", message_data)
         logger.info(f"📤 Sent agent response from {agent_id}: {content[:100]}...")
 
-    async def handle_charge_session(
-        self,
-        client_id: str,
-        websocket: Any,
-        data: dict,
-        agent_coordinator: "AgentCoordinator"
-    ) -> None:
-        """
-        处理会话扣费请求
 
-        Args:
-            client_id: 客户端 ID
-            websocket: WebSocket 连接
-            data: 消息数据，包含 sessionId
-            agent_coordinator: Agent 协调器
-        """
-        session_id = data.get("sessionId")
-
-        if not session_id:
-            await self.send_error(websocket, "缺少 sessionId 参数")
-            return
-
-        logger.info(f"💳 [Client:{client_id}] 请求对会话 {session_id[:8]}... 进行扣费")
-
-        try:
-            from .session_manager import SessionManager
-
-            # 执行扣费
-            result = SessionManager.charge_session(session_id)
-
-            # 发送结果
-            await self.send_message(websocket, "charge_result", {
-                "sessionId": session_id,
-                "success": result.get("success", False),
-                "message": result.get("message", ""),
-                "photons": result.get("photons", 0),
-                "bizNo": result.get("bizNo"),
-                "timestamp": datetime.now().isoformat()
-            })
-
-        except Exception as e:
-            logger.error(f"❌ 扣费失败: {e}", exc_info=True)
-            await self.send_error(websocket, f"扣费失败: {str(e)}")
-
-    async def handle_get_billing_summary(
-        self,
-        client_id: str,
-        websocket: Any,
-        data: dict,
-        agent_coordinator: "AgentCoordinator"
-    ) -> None:
-        """
-        获取会话的计费摘要
-
-        Args:
-            client_id: 客户端 ID
-            websocket: WebSocket 连接
-            data: 消息数据，包含 sessionId
-            agent_coordinator: Agent 协调器
-        """
-        session_id = data.get("sessionId")
-
-        if not session_id:
-            await self.send_error(websocket, "缺少 sessionId 参数")
-            return
-
-        try:
-            from .session_manager import SessionManager
-
-            # 获取计费摘要
-            summary = SessionManager.get_billing_summary(session_id)
-
-            if summary:
-                await self.send_message(websocket, "billing_summary", summary)
-            else:
-                await self.send_error(websocket, "会话不存在")
-
-        except Exception as e:
-            logger.error(f"❌ 获取计费摘要失败: {e}", exc_info=True)
-            await self.send_error(websocket, f"获取计费摘要失败: {str(e)}")
-
-    async def handle_set_user_billing_config(
-        self,
-        client_id: str,
-        websocket: Any,
-        data: dict,
-        agent_coordinator: "AgentCoordinator"
-    ) -> None:
-        """
-        ⚠️ 已废弃：设置用户的计费配置（从 Cookie 中获取）
-
-        此方法已被 HTTP 端点 /api/billing/config/save-from-cookie 替代
-        配置现在直接存储在数据库中，不再使用文件系统
-
-        Args:
-            client_id: 客户端 ID
-            websocket: WebSocket 连接
-            data: 消息数据，包含 sessionId, accessKey, skuId, clientName
-            agent_coordinator: Agent 协调器
-        """
-        logger.warning("⚠️ handle_set_user_billing_config 已废弃，请使用 HTTP 端点 /api/billing/config/save-from-cookie")
-
-        # 返回错误提示
-        await self.send_error(
-            websocket,
-            "此功能已废弃，请使用 HTTP 端点 /api/billing/config/save-from-cookie 或通过登录页面配置"
-        )
 
     async def handle_get_conversation_stats(
         self,
@@ -601,21 +491,30 @@ class MessageHandler:
         """
         🆕 通过 WebSocket 获取用户计费统计
 
+        🔒 安全机制：只返回当前登录用户的数据，忽略前端传来的 userId
+
         Args:
             client_id: 客户端 ID
             websocket: WebSocket 连接
-            data: 消息数据，包含 userId
+            data: 消息数据（userId 参数会被忽略，使用当前登录用户）
             agent_coordinator: Agent 协调器
         """
-        user_id = data.get("userId")
-
-        if not user_id:
-            await self.send_error(websocket, "缺少 userId 参数")
-            return
-
         try:
-            from .user_billing_config import get_billing_context_manager
+            # 🔒 安全：从 WebSocket 会话中获取当前登录用户 ID
+            from .websocket_server import WebSocketServer
+            ws_server = WebSocketServer.get_instance()
 
+            authenticated_user_id = None
+            if ws_server and client_id in ws_server.client_sessions:
+                authenticated_user_id = ws_server.client_sessions[client_id].get("authenticated_user_id")
+
+            # 如果没有认证用户 ID，使用 client_id 作为回退
+            user_id = str(authenticated_user_id) if authenticated_user_id else client_id
+
+            logger.info(f"🔒 [用户隔离] 获取用户统计: authenticated_user_id={authenticated_user_id}, user_id={user_id}, client_id={client_id}")
+
+            # 获取用户统计数据
+            from .user_billing_config import get_billing_context_manager
             context_manager = get_billing_context_manager()
             user_stats = context_manager.get_user_total_usage(user_id)
 

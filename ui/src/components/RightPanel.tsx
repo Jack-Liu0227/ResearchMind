@@ -453,6 +453,24 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
                 </div>
               )}
               <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {/* 🆕 原始数据按钮 - 移到图像右上角，使用文字标识 */}
+                {hasRawData && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleDataExpansion(index)
+                    }}
+                    className={`px-3 py-1.5 rounded transition-colors flex items-center space-x-1 text-sm font-medium ${
+                      isDataExpanded
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                        : 'bg-black bg-opacity-50 hover:bg-opacity-70 text-white'
+                    }`}
+                    title={isDataExpanded ? "隐藏原始数据" : "显示原始数据"}
+                  >
+                    <span>数据</span>
+                    {isDataExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  </button>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -485,17 +503,6 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
                     <p className="text-xs text-gray-500 mt-1">{image.description}</p>
                   )}
                 </div>
-                {/* 🆕 原始数据按钮 */}
-                {hasRawData && (
-                  <button
-                    onClick={() => toggleDataExpansion(index)}
-                    className="ml-2 px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded flex items-center space-x-1 transition-colors"
-                    title={isDataExpanded ? "隐藏原始数据" : "显示原始数据"}
-                  >
-                    {isDataExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                    <span>数据</span>
-                  </button>
-                )}
               </div>
             </div>
 

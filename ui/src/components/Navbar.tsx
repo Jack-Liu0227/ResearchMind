@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Menu, Settings, Wifi, WifiOff, Bot, Database, BarChart3 } from 'lucide-react'
+import { Menu, Settings, Wifi, WifiOff, Bot, Database, BarChart3, DollarSign } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { Link } from 'react-router-dom'
 import BillingIndicator from './BillingIndicator'
@@ -84,6 +84,15 @@ const Navbar: React.FC = () => {
         </div>
 
         <div className="h-6 w-px bg-gray-300" />
+
+        {/* 定价页面按钮 */}
+        <Link
+          to="/pricing"
+          className="p-2 hover:bg-gray-100 rounded-md transition-colors"
+          title="收费标准"
+        >
+          <DollarSign className="w-5 h-5 text-green-600" />
+        </Link>
 
         {/* 存储测试按钮 */}
         <Link

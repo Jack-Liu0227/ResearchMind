@@ -1,8 +1,8 @@
 """
-光子计费服务 (Photon Billing Service)
+Token 使用统计服务 (Token Usage Statistics Service)
 
-根据 token 使用量计算光子消耗
-默认收费标准：5000 tokens = 1 光子（可通过环境变量 PHOTON_TOKENS_PER_PHOTON 配置）
+仅统计 LLM 调用的 token 使用量，不进行光子转换和扣费。
+光子扣费完全基于功能（见 pricing_config.py 的 FEATURE_PRICING）。
 """
 
 import os
@@ -21,74 +21,42 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-class PhotonBillingConfig:
-    """光子计费配置"""
+class TokenStatsConfig:
+    """Token 统计配置"""
 
-    # Bohrium 平台配置
-    # ⚠️ 注意：AccessKey 和 ClientName 不从环境变量读取
-    # 它们必须从用户的 Cookie 或前端传递获取，确保每个用户使用自己的凭证
-    BOHRIUM_SKU_ID = os.getenv('BOHRIUM_SKU_ID', '10048')  # SKU ID 可以有默认值
-
-    # 从环境变量读取收费标准，默认 5000 tokens = 1 光子
-    TOKENS_PER_PHOTON = int(os.getenv('PHOTON_TOKENS_PER_PHOTON', '5000'))
-
-    # 是否启用计费（默认启用）
-    BILLING_ENABLED = os.getenv('PHOTON_BILLING_ENABLED', 'true').lower() == 'true'
-
-    # 计费精度（保留小数位数）
-    BILLING_PRECISION = int(os.getenv('PHOTON_BILLING_PRECISION', '4'))
+    # 是否启用 Token 统计（默认启用）
+    STATS_ENABLED = os.getenv('TOKEN_STATS_ENABLED', 'true').lower() == 'true'
 
     # 是否记录详细日志
-    VERBOSE_LOGGING = os.getenv('PHOTON_BILLING_VERBOSE', 'false').lower() == 'true'
+    VERBOSE_LOGGING = os.getenv('TOKEN_STATS_VERBOSE', 'false').lower() == 'true'
 
 
 class PhotonBillingService:
     """
-    光子计费服务
-    
-    功能：
-    1. 跟踪每个会话的 token 使用量
-    2. 计算光子消耗
-    3. 提供使用统计
-    """
-    
-    def __init__(self):
-        """初始化计费服务"""
-        self.config = PhotonBillingConfig()
+    Token 使用统计服务
 
-        # 🔧 优化：移除全局锁和全局统计，改为从 ConversationBillingContext 聚合
+    功能：
+    1. 跟踪每个会话的 token 使用量（仅供参考，不用于扣费）
+    2. 提供使用统计
+
+    注意：光子扣费完全基于功能（见 pricing_config.py），不再基于 token 使用量
+    """
+
+    def __init__(self):
+        """初始化 Token 统计服务"""
+        self.config = TokenStatsConfig()
+
         # 保留 start_time 用于统计服务启动时间
         self.global_stats = {
             'start_time': datetime.now().isoformat()
         }
 
-        # 验证配置
-        # ⚠️ 注意：不再检查 BOHRIUM_ACCESS_KEY，因为它从用户 Cookie 获取
         logger.info(
-            f"💎 光子计费服务已启动 - "
-            f"SKU ID: {self.config.BOHRIUM_SKU_ID}, "
-            f"收费标准: {self.config.TOKENS_PER_PHOTON} tokens/光子, "
-            f"计费状态: {'启用' if self.config.BILLING_ENABLED else '禁用'}, "
-            f"认证方式: Cookie (用户凭证)"
+            f"📊 Token 统计服务已启动 - "
+            f"统计状态: {'启用' if self.config.STATS_ENABLED else '禁用'}"
         )
     
-    def calculate_photons(self, tokens: int) -> float:
-        """
-        根据 token 数量计算光子消耗
-        
-        Args:
-            tokens: token 数量
-            
-        Returns:
-            光子数量（保留指定精度）
-        """
-        if not self.config.BILLING_ENABLED or tokens <= 0:
-            return 0.0
-        
-        photons = tokens / self.config.TOKENS_PER_PHOTON
-        return round(photons, self.config.BILLING_PRECISION)
-    
-    def record_usage_isolated(
+    def record_token_usage(
         self,
         conversation_id: str,
         user_id: str,
@@ -99,14 +67,9 @@ class PhotonBillingService:
         client_id: str = None
     ) -> Dict[str, Any]:
         """
-        使用隔离上下文记录 token 使用（推荐方法）
+        记录 token 使用统计（仅供参考，不用于扣费）
 
-        这个方法确保每个对话的计费数据完全隔离，防止并发时的数据混乱
-
-        新的扣费逻辑：
-        - 每累计 5000 tokens 扣费 1 个光子
-        - 优先使用用户的 appAccessKey 和 clientName（从数据库获取）
-        - 通过 client_id 从 WebSocket 会话上下文获取已认证的用户 ID
+        这个方法确保每个对话的统计数据完全隔离，防止并发时的数据混乱
 
         Args:
             conversation_id: 对话 ID
@@ -114,201 +77,71 @@ class PhotonBillingService:
             tokens: 使用的 token 数量
             model: 使用的模型名称
             metadata: 额外的元数据
-            fallback_user_id: 回退用户 ID（可选，通常是 client_id，用于查找旧配置）
-            client_id: WebSocket 客户端 ID（用于从会话上下文获取已认证用户）
+            fallback_user_id: 回退用户 ID（保留参数以兼容旧代码）
+            client_id: WebSocket 客户端 ID（保留参数以兼容旧代码）
 
         Returns:
             包含本次使用和累计统计的字典
         """
-        if not self.config.BILLING_ENABLED:
+        if not self.config.STATS_ENABLED:
             return {
-                'billing_enabled': False,
-                'message': '计费功能已禁用'
+                'stats_enabled': False,
+                'message': 'Token 统计功能已禁用'
             }
 
         # 🔍 详细日志：记录每次 token 使用
         if self.config.VERBOSE_LOGGING:
-            logger.info(f"🔍 [TOKEN 记录] conversation_id={conversation_id}, user_id={user_id}, tokens={tokens}, model={model}")
+            logger.info(f"📊 [TOKEN 统计] conversation_id={conversation_id}, user_id={user_id}, tokens={tokens}, model={model}")
 
-        # 计算光子消耗（不再实时扣费，而是累计到阈值时扣费）
-        photons = self.calculate_photons(tokens)
-
-        # 获取或创建隔离的计费上下文
+        # 获取或创建隔离的统计上下文
         from .user_billing_config import get_billing_context_manager
         context_manager = get_billing_context_manager()
         context = context_manager.get_or_create_context(conversation_id, user_id)
 
-        # 在隔离上下文中更新使用
-        context.update_token_usage(tokens, photons, model, metadata)
+        # 在隔离上下文中更新 token 使用
+        context.update_token_usage(tokens, model, metadata)
 
-        # 🔧 优化：移除全局统计更新以减少锁竞争
-        # 全局统计现在通过聚合所有 ConversationBillingContext 来计算
-        # 这样避免了每次 LLM 调用都需要获取全局锁
-
-        # 新的扣费逻辑：每累计达到阈值时扣费
-        charge_result = None
+        # 获取当前统计快照
         snapshot = context.get_snapshot()
-        total_tokens = snapshot['total_tokens']
 
-        # 检查是否达到扣费阈值
-        tokens_threshold = self.config.TOKENS_PER_PHOTON
-        photons_to_charge = total_tokens // tokens_threshold  # 应该扣费的光子数
-
-        # 获取已扣费的光子数（从上下文中）
-        charged_photons = getattr(context, 'charged_photons', 0)
-
-        # 计算需要扣费的光子数
-        photons_need_charge = photons_to_charge - charged_photons
-
-        # 🔍 详细日志：阈值检查
-        if self.config.VERBOSE_LOGGING:
-            logger.info(f"🔍 [阈值检查] total_tokens={total_tokens}, threshold={tokens_threshold}")
-            logger.info(f"🔍 [阈值检查] photons_to_charge={photons_to_charge}, charged_photons={charged_photons}, need_charge={photons_need_charge}")
-
-        if self.config.BILLING_ENABLED and photons_need_charge > 0:
-            # 🔒 将计费逻辑包装在 try-except 中，确保计费失败不阻塞主流程
-            try:
-                # 🆕 优先从 WebSocket 会话上下文获取已认证的用户 ID
-                authenticated_user_id = None
-                if client_id:
-                    try:
-                        from .websocket_server import WebSocketServer
-                        ws_server = WebSocketServer.get_instance()
-                        if ws_server and client_id in ws_server.client_sessions:
-                            session_info = ws_server.client_sessions[client_id]
-                            authenticated_user_id = session_info.get("authenticated_user_id")
-                            if authenticated_user_id:
-                                logger.info(f"🔍 [计费追踪] 从 WebSocket 会话获取已认证用户 ID: {authenticated_user_id}")
-                    except Exception as e:
-                        logger.debug(f"📝 [计费] 从 WebSocket 会话获取用户 ID 失败: {e}")
-
-                # 🔍 添加详细日志，追踪扣费流程
-                logger.info(f"🔍 [计费追踪] user_id={user_id}, authenticated_user_id={authenticated_user_id}, conversation_id={conversation_id}")
-
-                # ✅ 优先从 WebSocket 会话中获取 Cookie 凭证
-                user_access_key = None
-                user_sku_id = None
-                user_client_name = None
-                credentials_source = None
-
-                if authenticated_user_id:
-                    try:
-                        from .websocket_server import WebSocketServer
-                        ws_server = WebSocketServer.get_instance()
-                        if ws_server and client_id in ws_server.client_sessions:
-                            session_info = ws_server.client_sessions[client_id]
-                            cookie_creds = session_info.get("cookie_credentials", {})
-
-                            # ✅ 优先使用 Cookie 凭证
-                            if cookie_creds.get("source") == "cookie":
-                                user_access_key = cookie_creds.get("access_key")
-                                user_sku_id = cookie_creds.get("sku_id")
-                                user_client_name = cookie_creds.get("client_name")
-                                credentials_source = "Cookie"
-                                logger.info(f"✅ [计费追踪] 使用 Cookie 凭证: AK={user_access_key[:8]}...{user_access_key[-4:]}")
-                            else:
-                                # ⚠️ Cookie 不存在，不使用数据库凭证，而是返回错误提示用户输入
-                                logger.warning(f"⚠️ [计费追踪] Cookie 凭证不存在，需要用户输入 AccessKey")
-                                credentials_source = "none"
-                    except Exception as e:
-                        logger.error(f"❌ [计费追踪] 从 WebSocket 会话获取凭证失败: {e}")
-
-                # 🔍 记录使用的凭证（脱敏）
-                if not user_access_key:
-                    logger.warning(f"⚠️ [计费追踪] 未找到 Cookie 凭证，user_id={user_id}, authenticated_user_id={authenticated_user_id}")
-
-                # 调用扣费 API
-                charge_result = self.charge_photons(
-                    photons=photons_need_charge,
-                    session_id=conversation_id,
-                    user_id=str(authenticated_user_id) if authenticated_user_id else user_id,  # 🆕 优先使用已认证的用户 ID
-                    user_access_key=user_access_key,
-                    user_sku_id=user_sku_id,
-                    user_client_name=user_client_name,
-                    fallback_user_id=fallback_user_id  # 🔧 传递 fallback_user_id 用于回退查找配置
-                )
-            except Exception as billing_error:
-                # 🔒 计费异常不应阻塞主流程，记录错误并继续
-                logger.error(f"❌ [计费异常] 扣费过程发生异常: {billing_error}", exc_info=True)
-                charge_result = {
-                    'success': False,
-                    'message': f'计费异常: {str(billing_error)}',
-                    'photons': photons_need_charge
-                }
-
-            # 标记上下文为已扣费
-            if charge_result.get('success'):
-                # 🔧 修复：传入本次扣费的光子数，让 mark_charged 方法累加
-                context.mark_charged(charge_result, photons_charged=photons_need_charge)
-
-                # 🔒 生产模式：简化日志输出
-                if self.config.VERBOSE_LOGGING:
-                    logger.info(
-                        f"✅ [自动扣费] 对话 {conversation_id[:8]}... 累计 {total_tokens} tokens，"
-                        f"成功扣除 {photons_need_charge} 光子 (已扣费: {photons_to_charge} 光子)"
-                    )
-                else:
-                    logger.info(f"✅ [自动扣费] 成功扣除 {photons_need_charge} 光子")
-            else:
-                error_msg = charge_result.get('message', '未知错误')
-
-                # 🔒 生产模式：简化错误日志
-                if self.config.VERBOSE_LOGGING:
-                    logger.warning(f"⚠️ [自动扣费] 对话 {conversation_id[:8]}... 扣费失败: {error_msg}")
-                else:
-                    logger.warning(f"⚠️ [自动扣费] 扣费失败: {error_msg}")
-
-                # 如果是余额不足，给出友好提示
-                if '余额不足' in error_msg or 'insufficient' in error_msg.lower():
-                    logger.warning(f"💡 [提示] 请充值光子余额或配置用户的 Bohrium AccessKey")
-
-        # 构建返回结果
+        # 构建返回结果（仅包含 token 统计）
         result = {
-            'billing_enabled': True,
+            'stats_enabled': True,
             'current_request': {
                 'tokens': tokens,
-                'photons': photons,
                 'model': model
             },
             'conversation_total': {
                 'tokens': snapshot['total_tokens'],
-                'photons': snapshot['total_photons'],
                 'requests_count': snapshot['request_count'],
-                'charged_photons': charged_photons,  # 已扣费的光子数
-                'pending_tokens': total_tokens % tokens_threshold  # 待扣费的 tokens
-            },
-            'billing_config': {
-                'tokens_per_photon': self.config.TOKENS_PER_PHOTON,
-                'precision': self.config.BILLING_PRECISION
-            },
-            'charge_result': charge_result  # 添加扣费结果
+                'photons_charged': snapshot['total_photons_charged']  # 按功能扣费累计的光子数
+            }
         }
 
         # 详细日志
         if self.config.VERBOSE_LOGGING:
             logger.info(
-                f"💎 [隔离计费] 对话 {conversation_id[:8]}... (用户: {user_id[:8]}...) | "
-                f"本次: {tokens} tokens = {photons} 光子 | "
-                f"累计: {snapshot['total_tokens']} tokens = {snapshot['total_photons']} 光子 | "
-                f"已扣费: {charged_photons} 光子 | "
-                f"待扣费: {total_tokens % tokens_threshold} tokens | "
-                f"模型: {model} | "
-                f"扣费: {'成功' if charge_result and charge_result.get('success') else ('失败' if charge_result else '未达阈值')}"
-            )
-        else:
-            logger.info(
-                f"💎 [隔离计费] {tokens} tokens → {photons} 光子 "
-                f"(累计: {snapshot['total_photons']} 光子, 已扣费: {charged_photons} 光子)"
+                f"📊 [Token 统计] 对话 {conversation_id[:8]}... | "
+                f"本次: {tokens} tokens | "
+                f"累计: {snapshot['total_tokens']} tokens | "
+                f"模型: {model}"
             )
 
         return result
 
+    def record_usage_isolated(self, *args, **kwargs) -> Dict[str, Any]:
+        """
+        向后兼容方法：调用新的 record_token_usage 方法
+
+        保留此方法以兼容旧代码（如 agents/callbacks.py）
+        """
+        return self.record_token_usage(*args, **kwargs)
+
     def get_global_stats(self) -> Dict[str, Any]:
         """
-        获取全局使用统计
+        获取全局 Token 使用统计
 
-        🔧 优化：通过聚合所有 ConversationBillingContext 来计算全局统计
-        避免了每次 LLM 调用都需要更新全局锁保护的统计数据
+        通过聚合所有 ConversationBillingContext 来计算全局统计
 
         Returns:
             全局统计信息
@@ -320,22 +153,17 @@ class PhotonBillingService:
         all_contexts = context_manager._contexts.values()
 
         total_tokens = sum(ctx.total_tokens for ctx in all_contexts)
-        total_photons = sum(ctx.total_photons for ctx in all_contexts)
+        total_photons_charged = sum(ctx.total_photons_charged for ctx in all_contexts)
         total_requests = sum(ctx.request_count for ctx in all_contexts)
         total_sessions = len(all_contexts)
 
         return {
             'total_tokens': total_tokens,
-            'total_photons': round(total_photons, self.config.BILLING_PRECISION),
+            'total_photons_charged': total_photons_charged,
             'total_requests': total_requests,
             'total_sessions': total_sessions,
             'start_time': self.global_stats['start_time'],
-            'current_time': datetime.now().isoformat(),
-            'billing_config': {
-                'tokens_per_photon': self.config.TOKENS_PER_PHOTON,
-                'billing_enabled': self.config.BILLING_ENABLED,
-                'precision': self.config.BILLING_PRECISION
-            }
+            'current_time': datetime.now().isoformat()
         }
 
     def charge_photons(
@@ -369,12 +197,9 @@ class PhotonBillingService:
         Returns:
             扣费结果
         """
-        if not self.config.BILLING_ENABLED:
-            return {
-                'success': False,
-                'message': '计费未启用',
-                'photons': photons
-            }
+        # 🆕 功能扣费始终启用，不再检查 BILLING_ENABLED
+        # （因为功能扣费是按需调用的，不是自动扣费）
+        # 如果需要禁用扣费，应该在调用 charge_for_feature() 之前检查
 
         # ✅ 优先级：Cookie（必须） > 提示用户输入
         # ⚠️ 不再从数据库读取凭证用于计费
@@ -390,10 +215,10 @@ class PhotonBillingService:
         # 1. ✅ 必须使用参数传入的用户 AK（从 Cookie 获取）
         if user_access_key:
             access_key = user_access_key
-            sku_id = user_sku_id or self.config.BOHRIUM_SKU_ID  # SKU ID 可以有默认值
+            sku_id = user_sku_id or "10048"  # 🔧 修复：使用硬编码的默认 SKU ID（不再从 config 读取）
             client_name = user_client_name or "researchmind-uuid1759932177"  # 默认客户端名称
             source = "Cookie"
-            logger.info(f"✅ [扣费] 使用 Cookie 凭证: AK={access_key[:8]}...{access_key[-4:]}, client_name={client_name}")
+            logger.info(f"✅ [扣费] 使用 Cookie 凭证: AK={access_key[:8]}...{access_key[-4:]}, client_name={client_name}, sku_id={sku_id}")
         else:
             # 2. ⚠️ Cookie 不存在，返回错误提示用户输入
             logger.error(f"❌ [计费] Cookie 中未找到 AccessKey，请确保已登录 Bohrium 平台")

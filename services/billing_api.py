@@ -5,13 +5,14 @@
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Cookie
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 
 from .user_billing_config import get_billing_context_manager
 from .photon_billing import get_billing_service
+from .pricing_service import PricingService
 
 logger = logging.getLogger(__name__)
 
@@ -155,9 +156,12 @@ class BillingStatsResponse(BaseModel):
 @router.get("/stats/conversation/{conversation_id}")
 async def get_conversation_billing_stats(conversation_id: str) -> BillingStatsResponse:
     """
-    获取指定对话的计费统计
+    获取指定对话的统计数据
 
-    🔧 优化：添加 30 秒缓存以减少重复查询
+    返回数据包含：
+    - total_tokens: Token 使用量（仅供参考，不用于扣费）
+    - total_photons_charged: 按功能扣费累计的光子数
+    - feature_charges: 功能扣费明细列表
 
     返回示例:
     ```json
@@ -168,11 +172,12 @@ async def get_conversation_billing_stats(conversation_id: str) -> BillingStatsRe
             "conversation_id": "conv_123",
             "user_id": "user_456",
             "total_tokens": 15000,
-            "total_photons": 5.0,
+            "total_photons_charged": 50,
             "request_count": 10,
-            "charged": false,
-            "has_user_config": true,
-            "billing_source": "用户账户",
+            "feature_charges": [
+                {"feature_type": "report", "photons": 30, "timestamp": "2025-11-03T23:00:00"},
+                {"feature_type": "structure_gen", "photons": 10, "timestamp": "2025-11-03T23:15:00"}
+            ],
             "created_at": "2025-11-03T23:00:00",
             "updated_at": "2025-11-03T23:30:00"
         }
@@ -218,9 +223,11 @@ async def get_conversation_billing_stats(conversation_id: str) -> BillingStatsRe
 @router.get("/stats/user/{user_id}")
 async def get_user_billing_stats(user_id: str) -> BillingStatsResponse:
     """
-    获取指定用户的总计费统计（所有对话的聚合）
+    获取指定用户的总统计数据（所有对话的聚合）
 
-    🔧 优化：添加 30 秒缓存以减少重复查询
+    ⚠️ 注意：此端点已弃用，建议使用 WebSocket 的 get_user_stats 消息
+    ⚠️ REST API 无法验证用户身份，存在安全风险
+    ⚠️ 仅用于开发和调试，生产环境应使用 WebSocket
 
     返回示例:
     ```json
@@ -231,20 +238,24 @@ async def get_user_billing_stats(user_id: str) -> BillingStatsResponse:
             "user_id": "user_456",
             "total_conversations": 5,
             "total_tokens": 50000,
-            "total_photons": 16.6667,
+            "total_photons_charged": 150,
             "total_requests": 50,
             "conversations": [
                 {
                     "conversation_id": "conv_123",
                     "total_tokens": 15000,
-                    "total_photons": 5.0,
-                    "request_count": 10
+                    "total_photons_charged": 50,
+                    "request_count": 10,
+                    "feature_charges": [...]
                 }
             ]
         }
     }
     ```
     """
+    # ⚠️ 安全警告：REST API 无法验证用户身份
+    logger.warning(f"⚠️ [安全警告] REST API 获取用户统计: user_id={user_id}（无身份验证）")
+
     # 🔧 优化：检查缓存
     cache_key = f"stats:user:{user_id}"
     cached = billing_cache.get(cache_key)
@@ -273,9 +284,7 @@ async def get_user_billing_stats(user_id: str) -> BillingStatsResponse:
 @router.get("/stats/global")
 async def get_global_billing_stats() -> BillingStatsResponse:
     """
-    获取全局计费统计
-
-    🔧 优化：添加 30 秒缓存以减少重复查询
+    获取全局统计数据
 
     返回示例:
     ```json
@@ -284,16 +293,11 @@ async def get_global_billing_stats() -> BillingStatsResponse:
         "message": "获取成功",
         "data": {
             "total_tokens": 100000,
-            "total_photons": 33.3333,
+            "total_photons_charged": 300,
             "total_requests": 100,
             "total_sessions": 20,
             "start_time": "2025-11-03T00:00:00",
-            "current_time": "2025-11-03T23:30:00",
-            "billing_config": {
-                "tokens_per_photon": 3000,
-                "billing_enabled": true,
-                "precision": 4
-            }
+            "current_time": "2025-11-03T23:30:00"
         }
     }
     ```
@@ -370,3 +374,184 @@ async def list_user_conversations(user_id: str) -> ConversationListResponse:
         logger.error(f"❌ 列出用户对话失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ==========================================
+# 🆕 定价系统 API（简化版）
+# ==========================================
+
+class PermissionCheckRequest(BaseModel):
+    """权限检查请求"""
+    feature_type: str
+    quantity: int = 1
+
+
+class PermissionCheckResponse(BaseModel):
+    """权限检查响应"""
+    success: bool
+    allowed: bool
+    reason: str
+    photons_required: int
+
+
+@router.post("/check-permission", response_model=PermissionCheckResponse)
+async def check_permission(request: PermissionCheckRequest):
+    """
+    检查功能所需光子数（简化版，不涉及用户数据库）
+
+    Args:
+        request: 权限检查请求
+
+    Returns:
+        权限检查结果
+    """
+    try:
+        from .pricing_service import PricingService
+
+        result = PricingService.check_permission(
+            feature_type=request.feature_type,
+            quantity=request.quantity
+        )
+
+        return PermissionCheckResponse(
+            success=True,
+            **result
+        )
+
+    except Exception as e:
+        logger.error(f"❌ 检查权限失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/pricing/config")
+async def get_pricing_config():
+    """
+    获取收费标准配置
+
+    Returns:
+        完整的收费标准配置
+    """
+    try:
+        from .pricing_config import (
+            FEATURE_PRICING,
+            FREE_QUOTA_CONFIG,
+            INVITATION_REWARDS_INVITER,
+            INVITATION_REWARDS_INVITEE,
+            BATCH_DISCOUNT,
+            get_latest_pricing_version,
+            PRICING_CHANGELOG
+        )
+
+        return {
+            "success": True,
+            "version": get_latest_pricing_version(),
+            "feature_pricing": FEATURE_PRICING,
+            "free_quota": FREE_QUOTA_CONFIG,
+            "invitation_rewards": {
+                "inviter": INVITATION_REWARDS_INVITER,
+                "invitee": INVITATION_REWARDS_INVITEE,
+            },
+            "batch_discount": BATCH_DISCOUNT,
+            "changelog": PRICING_CHANGELOG,
+        }
+
+    except Exception as e:
+        logger.error(f"❌ 获取收费标准配置失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# 💳 扣费接口（前端主动扣费）
+# ==========================================
+
+class ChargeRequest(BaseModel):
+    """扣费请求模型"""
+    feature_type: str  # 功能类型（如 'report', 'structure_gen' 等）
+    session_id: str    # 会话 ID
+    quantity: int = 1  # 数量（默认 1）
+
+
+class ChargeResponse(BaseModel):
+    """扣费响应模型"""
+    success: bool
+    message: str
+    photons: Optional[int] = None
+    feature_type: Optional[str] = None
+    session_id: Optional[str] = None
+    error_code: Optional[str] = None
+
+
+@router.post("/charge", response_model=ChargeResponse)
+async def charge_for_feature(
+    request: ChargeRequest,
+    appAccessKey: Optional[str] = Cookie(None),
+    clientName: Optional[str] = Cookie(None)
+):
+    """
+    执行功能扣费（前端主动调用）
+
+    Args:
+        request: 扣费请求（包含 feature_type, session_id, quantity）
+        appAccessKey: 从 Cookie 中提取的 Bohrium AccessKey
+        clientName: 从 Cookie 中提取的客户端名称
+
+    Returns:
+        扣费结果
+
+    Raises:
+        HTTPException: 当 Cookie 不存在或扣费失败时
+    """
+    try:
+        # 1. 验证 Cookie 凭证
+        if not appAccessKey:
+            logger.error(f"❌ [扣费] Cookie 中未找到 appAccessKey")
+            return ChargeResponse(
+                success=False,
+                message="未检测到 Bohrium Cookie，请在浏览器中登录 Bohrium 平台后刷新页面",
+                error_code="NO_COOKIE_ACCESS_KEY",
+                feature_type=request.feature_type,
+                session_id=request.session_id
+            )
+
+        # 2. 记录扣费请求
+        logger.info(f"💳 [扣费请求] feature_type={request.feature_type}, session_id={request.session_id}, quantity={request.quantity}")
+        logger.info(f"💳 [扣费请求] 使用 Cookie 凭证: AK={appAccessKey[:8]}...{appAccessKey[-4:]}, client_name={clientName or 'ResearchMind'}")
+
+        # 3. 调用 PricingService 执行扣费
+        result = PricingService.charge_for_feature(
+            feature_type=request.feature_type,
+            session_id=request.session_id,
+            user_access_key=appAccessKey,
+            user_client_name=clientName or "researchmind-uuid1759932177",
+            quantity=request.quantity
+        )
+
+        # 4. 返回扣费结果
+        if result.get("success"):
+            logger.info(f"✅ [扣费成功] feature_type={request.feature_type}, photons={result.get('photons', 0)}")
+            return ChargeResponse(
+                success=True,
+                message=result.get("message", "扣费成功"),
+                photons=result.get("photons", 0),
+                feature_type=request.feature_type,
+                session_id=request.session_id
+            )
+        else:
+            logger.error(f"❌ [扣费失败] feature_type={request.feature_type}, message={result.get('message')}")
+            return ChargeResponse(
+                success=False,
+                message=result.get("message", "扣费失败"),
+                photons=result.get("photons", 0),
+                feature_type=request.feature_type,
+                session_id=request.session_id,
+                error_code=result.get("error_code", "CHARGE_FAILED")
+            )
+
+    except Exception as e:
+        logger.error(f"❌ [扣费异常] feature_type={request.feature_type}, error={e}", exc_info=True)
+        return ChargeResponse(
+            success=False,
+            message=f"扣费异常: {str(e)}",
+            feature_type=request.feature_type,
+            session_id=request.session_id,
+            error_code="INTERNAL_ERROR"
+        )

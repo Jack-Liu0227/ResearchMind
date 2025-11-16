@@ -146,17 +146,7 @@ class SessionManager:
                 "updated_at": datetime.now().isoformat(),
                 "message_count": 0,
                 "structure_count": 0,
-                "image_count": 0,
-                # Bohrium 计费相关
-                "billing": {
-                    "total_tokens": 0,
-                    "total_photons": 0.0,
-                    "requests_count": 0,
-                    "charged": False,  # 是否已扣费
-                    "charge_result": None,  # 扣费结果
-                    "user_access_key": None,  # 用户自定义 AK（可选）
-                    "user_sku_id": None  # 用户自定义 SKU ID（可选）
-                }
+                "image_count": 0
             }
 
             # Create session directories
@@ -368,124 +358,7 @@ class SessionManager:
 
             return len(expired_sessions)
 
-    # ==========================================
-    # Bohrium 计费相关方法（已废弃，保留用于向后兼容）
-    # ==========================================
-    # ⚠️ 注意：这些方法已废弃，计费功能现在由 ConversationBillingContext 管理
-    # 保留这些方法仅为向后兼容，新代码应使用 ConversationBillingContext
 
-    @classmethod
-    def set_user_billing_config(cls, session_id: str, access_key: str, sku_id: str):
-        """
-        ⚠️ 已废弃：设置会话的用户计费配置
-
-        用户配置现在直接存储在数据库中，不需要通过 SessionManager 设置
-        """
-        logger.warning(f"⚠️ set_user_billing_config 已废弃，用户配置现在存储在数据库中")
-        # 保留空实现以避免破坏现有代码
-
-    @classmethod
-    def update_billing_usage(cls, session_id: str, tokens: int, photons: float):
-        """
-        ⚠️ 已废弃：更新会话的计费使用情况
-
-        计费统计现在由 ConversationBillingContext 管理，此方法保留仅为向后兼容
-        """
-        logger.debug(f"⚠️ update_billing_usage 已废弃，计费由 ConversationBillingContext 管理")
-        # 保留空实现以避免破坏现有代码
-
-    @classmethod
-    def get_billing_summary(cls, session_id: str) -> Optional[Dict[str, Any]]:
-        """
-        ⚠️ 已废弃：获取会话的计费摘要
-
-        计费统计现在由 ConversationBillingContext 管理
-        保留此方法仅为向后兼容，返回空摘要
-        """
-        logger.debug(f"⚠️ get_billing_summary 已废弃，请使用 ConversationBillingContext")
-        return {
-            "session_id": session_id,
-            "total_tokens": 0,
-            "total_photons": 0.0,
-            "requests_count": 0,
-            "avg_tokens_per_request": 0,
-            "charged": False,
-            "has_user_config": False,
-            "billing_source": "已废弃"
-        }
-
-    @classmethod
-    def charge_session(cls, session_id: str) -> Dict[str, Any]:
-        """
-        对会话进行实际扣费（调用 Bohrium API）
-
-        Args:
-            session_id: 会话 ID
-
-        Returns:
-            扣费结果
-        """
-        with cls._sessions_lock:
-            if session_id not in cls._sessions:
-                return {
-                    "success": False,
-                    "message": "会话不存在"
-                }
-
-            billing = cls._sessions[session_id]["billing"]
-
-            # 检查是否已扣费
-            if billing["charged"]:
-                logger.warning(f"⚠️ 会话 {session_id[:8]}... 已经扣费，跳过")
-                return {
-                    "success": False,
-                    "message": "会话已扣费",
-                    "previous_result": billing["charge_result"]
-                }
-
-            # 检查是否有消耗
-            if billing["total_photons"] <= 0:
-                logger.info(f"ℹ️ 会话 {session_id[:8]}... 无光子消耗，跳过扣费")
-                return {
-                    "success": True,
-                    "message": "无需扣费",
-                    "photons": 0
-                }
-
-        # 调用计费服务（在锁外执行，避免长时间持有锁）
-        try:
-            from .photon_billing import get_billing_service
-            billing_service = get_billing_service()
-
-            # 使用用户 AK（不再提供开发者默认 AK）
-            result = billing_service.charge_photons(
-                photons=billing["total_photons"],
-                session_id=session_id,
-                user_access_key=billing["user_access_key"],
-                user_sku_id=billing["user_sku_id"]
-            )
-
-            # 记录扣费结果（需要重新获取锁）
-            with cls._sessions_lock:
-                if session_id in cls._sessions:
-                    billing = cls._sessions[session_id]["billing"]
-                    billing["charged"] = result.get("success", False)
-                    billing["charge_result"] = result
-                    cls.update_session(session_id, {})
-
-            if result.get("success"):
-                logger.info(f"✅ 会话 {session_id[:8]}... 扣费成功: {billing['total_photons']:.4f} 光子")
-            else:
-                logger.error(f"❌ 会话 {session_id[:8]}... 扣费失败: {result.get('message')}")
-
-            return result
-
-        except Exception as e:
-            logger.error(f"❌ 会话 {session_id[:8]}... 扣费异常: {e}", exc_info=True)
-            return {
-                "success": False,
-                "message": f"扣费异常: {str(e)}"
-            }
 
 
 # Initialize on module import

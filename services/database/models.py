@@ -47,19 +47,32 @@ class User(Base):
     # 配额管理
     total_photons_used = Column(Float, default=0.0, comment="累计使用光子数")
     total_tokens_used = Column(Integer, default=0, comment="累计使用 Token 数")
-    
+
+    # 🆕 免费额度管理
+    free_chat_quota = Column(Integer, default=5, comment="免费对话额度（默认 5 次）")
+    free_chat_used = Column(Integer, default=0, comment="已使用免费对话次数")
+
+    # 🆕 邀请系统
+    invited_by = Column(Integer, ForeignKey("users.id"), nullable=True, comment="邀请人 ID")
+    invitation_code = Column(String(20), unique=True, index=True, comment="用户的邀请码（唯一）")
+    invitation_count = Column(Integer, default=0, comment="成功邀请人数")
+    invitation_rewards_total = Column(Integer, default=0, comment="累计获得的邀请奖励光子数")
+
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
     last_login_at = Column(DateTime, comment="最后登录时间")
-    
+
     # 状态
     is_active = Column(Boolean, default=True, comment="是否激活")
     is_verified = Column(Boolean, default=False, comment="是否已验证 AccessKey")
-    
+
     # 关联关系
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
     billing_records = relationship("BillingRecord", back_populates="user", cascade="all, delete-orphan")
+    feature_usages = relationship("FeatureUsage", back_populates="user", cascade="all, delete-orphan")
+    invitations_sent = relationship("Invitation", foreign_keys="[Invitation.inviter_id]", back_populates="inviter", cascade="all, delete-orphan")
+    invitations_received = relationship("Invitation", foreign_keys="[Invitation.invitee_id]", back_populates="invitee")
 
 
 class Session(Base):
@@ -142,18 +155,96 @@ class AuthToken(Base):
     __tablename__ = "auth_tokens"
 
     id = Column(Integer, primary_key=True, index=True)
-    
+
     # Token 信息
     token_hash = Column(String(64), unique=True, index=True, nullable=False, comment="Token 哈希值")
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="用户 ID")
-    
+
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
     expires_at = Column(DateTime, nullable=False, comment="过期时间")
     revoked_at = Column(DateTime, comment="撤销时间")
-    
+
     # 状态
     is_revoked = Column(Boolean, default=False, comment="是否已撤销")
+
+
+class Invitation(Base):
+    """邀请记录表"""
+    __tablename__ = "invitations"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # 邀请关系
+    inviter_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="邀请人 ID")
+    invitee_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="被邀请人 ID（注册后填充）")
+    invitation_code = Column(String(20), index=True, comment="使用的邀请码")
+
+    # 被邀请人信息（注册前）
+    invitee_email = Column(String(255), comment="被邀请人邮箱（可选）")
+    invitee_access_key = Column(String(64), comment="被邀请人 AccessKey（注册时匹配）")
+
+    # 奖励状态
+    reward_photons = Column(Integer, default=1000, comment="奖励光子数（默认 1000）")
+    reward_claimed = Column(Boolean, default=False, comment="是否已发放奖励")
+    reward_claimed_at = Column(DateTime, comment="奖励发放时间")
+
+    # 时间戳
+    created_at = Column(DateTime, default=datetime.utcnow, comment="邀请创建时间")
+    registered_at = Column(DateTime, comment="被邀请人注册时间")
+    registered_within_72h = Column(Boolean, default=False, comment="是否在 72 小时内注册")
+
+    # 状态
+    status = Column(String(20), default="pending", comment="状态：pending/registered/rewarded/expired")
+
+    # 关联关系
+    inviter = relationship("User", foreign_keys=[inviter_id], back_populates="invitations_sent")
+    invitee = relationship("User", foreign_keys=[invitee_id], back_populates="invitations_received")
+
+
+class FeatureUsage(Base):
+    """功能使用记录表"""
+    __tablename__ = "feature_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # 关联用户和会话
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="用户 ID")
+    session_id = Column(String(100), ForeignKey("sessions.session_id"), comment="会话 ID")
+
+    # 功能信息
+    feature_type = Column(String(50), nullable=False, comment="功能类型")
+    # 功能类型枚举：
+    # - 'chat': 智能体对话
+    # - 'report': 文献分析报告
+    # - 'structure_gen': 结构生成
+    # - 'relaxation': 结构弛豫
+    # - 'phonon': 声子谱计算
+    # - 'kappa': 热导率计算
+    # - 'batch_kappa': 批量热导率计算
+
+    feature_name = Column(String(100), comment="功能名称（可读）")
+
+    # 计费信息
+    photons_consumed = Column(Integer, default=0, comment="消耗光子数")
+    is_free = Column(Boolean, default=False, comment="是否使用免费额度")
+    billing_status = Column(String(20), default="success", comment="计费状态：success/failed/pending")
+
+    # 元数据
+    extra_data = Column(JSON, comment="功能元数据（如生成的文件路径、计算参数等）")
+
+    # 时间戳
+    created_at = Column(DateTime, default=datetime.utcnow, comment="使用时间")
+
+    # 关联关系
+    user = relationship("User", back_populates="feature_usages")
+
+    # 索引
+    __table_args__ = (
+        Index('idx_user_feature', 'user_id', 'feature_type'),
+        Index('idx_session_feature', 'session_id', 'feature_type'),
+        Index('idx_created_at', 'created_at'),
+    )
 
 
 def init_db():

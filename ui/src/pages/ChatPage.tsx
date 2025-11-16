@@ -164,6 +164,7 @@ const ChatPage: React.FC = () => {
       '声子态密度数据'
     )
 
+    console.log('📄 [createSessionFilesFromMetadata] 创建了', files.length, '个文件:', files.map(f => f.name))
     return files
   }
 
@@ -280,6 +281,7 @@ const ChatPage: React.FC = () => {
         }
 
         if (pendingFileMetadataRef.current.length > 0) {
+          console.log('📄 [pending metadata] 发现', pendingFileMetadataRef.current.length, '个待处理的文件元数据')
           let mergedMetadata = { ...(newMessage.metadata || {}) }
           const bufferedFiles: SessionFile[] = []
           while (pendingFileMetadataRef.current.length > 0) {
@@ -287,16 +289,21 @@ const ChatPage: React.FC = () => {
             if (!pendingMetadata) {
               continue
             }
+            console.log('📄 [pending metadata] 处理元数据:', pendingMetadata)
             mergedMetadata = {
               ...mergedMetadata,
               ...pendingMetadata
             }
             bufferedFiles.push(...createSessionFilesFromMetadata(pendingMetadata, newMessage.id))
           }
+          console.log('📄 [pending metadata] 总共创建了', bufferedFiles.length, '个文件')
           updateMessage(newMessage.id, {
             metadata: mergedMetadata
           })
-          bufferedFiles.forEach((file) => addToCurrentSessionFiles(file))
+          bufferedFiles.forEach((file) => {
+            console.log('📄 [pending metadata] 添加文件到右侧面板:', file.name, file.id)
+            addToCurrentSessionFiles(file)
+          })
         }
 
           // 🆕 收到内容后，保持loading状态，等待complete状态
@@ -741,7 +748,7 @@ const ChatPage: React.FC = () => {
         // 使用 [...] 创建新数组副本，避免修改原数组
         const currentMessage = assistantMessages[assistantMessages.length - 1]
         if (currentMessage) {
-          console.log('📄 更新消息metadata:', currentMessage.id)
+          console.log('📄 找到assistant消息，直接更新:', currentMessage.id)
           console.log('📄 原metadata:', currentMessage.metadata)
           console.log('📄 新metadata:', message.data.metadata)
 
@@ -753,13 +760,18 @@ const ChatPage: React.FC = () => {
           })
 
           const generatedFiles = createSessionFilesFromMetadata(message.data.metadata, currentMessage.id)
-          generatedFiles.forEach((file) => addToCurrentSessionFiles(file))
+          console.log('📄 创建了', generatedFiles.length, '个文件，准备添加到右侧面板')
+          generatedFiles.forEach((file) => {
+            console.log('📄 添加文件:', file.name, file.id)
+            addToCurrentSessionFiles(file)
+          })
 
           // 验证更新是否成功
           setTimeout(() => {
             const latest = useAppStore.getState()
             const updatedMsg = latest.messages.find(m => m.id === currentMessage.id)
             console.log('📄 更新后的消息metadata:', updatedMsg?.metadata)
+            console.log('📄 当前会话文件数:', latest.currentSessionFiles.length)
           }, 100)
 
           // 提示用户
@@ -779,7 +791,9 @@ const ChatPage: React.FC = () => {
           }
         } else {
           console.warn('⚠️ 未找到assistant消息，暂存文件元数据以便稍后应用')
+          console.log('⚠️ 暂存的元数据:', message.data.metadata)
           pendingFileMetadataRef.current.push(message.data.metadata)
+          console.log('⚠️ pending队列长度:', pendingFileMetadataRef.current.length)
         }
       } else if (message.type === 'phonon_data' && message.data?.phonon_data) {
         // 直接处理声子谱数据

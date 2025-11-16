@@ -731,6 +731,7 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
                             }
                             alt={displayName}
                             className="w-full h-auto rounded border"
+                            style={{ maxWidth: '400px', maxHeight: '300px', objectFit: 'contain' }}
                             onError={(e) => {
                               console.error('Failed to load image:', image.path || (image as any).url)
                               const target = e.target as HTMLImageElement
