@@ -349,12 +349,31 @@ class DataProcessor:
                 file_metadata['phonon_dispersion_csv_url'] = csv_url
                 file_metadata['phonon_dispersion_csv_path'] = csv_path
 
-                # 读取 CSV 内容用于内联展示
-                inline_csv = DataProcessor._read_text_file(csv_path)
-                if inline_csv is not None:
-                    file_metadata['phonon_dispersion_csv_content'] = inline_csv
+                # 🔧 优化：不传输完整 CSV 内容，只传递下载 URL
+                # 前端可以通过 URL 按需下载 CSV 文件
+                # inline_csv = DataProcessor._read_text_file(csv_path)
+                # if inline_csv is not None:
+                #     file_metadata['phonon_dispersion_csv_content'] = inline_csv
 
                 logger.info(f"📄 Found phonon dispersion CSV: {csv_url}")
+
+                # 🔧 同时发送为独立的文件数据，确保在右侧面板显示
+                await DataProcessor._send_message(websocket, "file_data", {
+                    "files": [{
+                        "id": f"phonon_dispersion_{filename}",
+                        "type": "csv",
+                        "name": f"声子色散数据 - {filename}",
+                        "downloadUrl": csv_url,
+                        "filePath": csv_path,
+                        "createdAt": datetime.now().timestamp() * 1000,
+                        "extra": {
+                            "category": "phonon_dispersion"
+                        }
+                    }],
+                    "agentId": agent_id,
+                    "sessionId": session_id,
+                    "timestamp": datetime.now().isoformat()
+                })
 
             # 声子态密度数据
             if 'phonon_dos_csv' in data and data['phonon_dos_csv']:
@@ -377,12 +396,31 @@ class DataProcessor:
                 file_metadata['phonon_dos_csv_url'] = csv_url
                 file_metadata['phonon_dos_csv_path'] = csv_path
 
-                # 读取 CSV 内容用于内联展示
-                inline_csv = DataProcessor._read_text_file(csv_path)
-                if inline_csv is not None:
-                    file_metadata['phonon_dos_csv_content'] = inline_csv
+                # 🔧 优化：不传输完整 CSV 内容，只传递下载 URL
+                # 前端可以通过 URL 按需下载 CSV 文件
+                # inline_csv = DataProcessor._read_text_file(csv_path)
+                # if inline_csv is not None:
+                #     file_metadata['phonon_dos_csv_content'] = inline_csv
 
                 logger.info(f"📄 Found phonon DOS CSV: {csv_url}")
+
+                # 🔧 同时发送为独立的文件数据，确保在右侧面板显示
+                await DataProcessor._send_message(websocket, "file_data", {
+                    "files": [{
+                        "id": f"phonon_dos_{filename}",
+                        "type": "csv",
+                        "name": f"声子态密度数据 - {filename}",
+                        "downloadUrl": csv_url,
+                        "filePath": csv_path,
+                        "createdAt": datetime.now().timestamp() * 1000,
+                        "extra": {
+                            "category": "phonon_dos"
+                        }
+                    }],
+                    "agentId": agent_id,
+                    "sessionId": session_id,
+                    "timestamp": datetime.now().isoformat()
+                })
 
             # If we found any file links, send them as metadata
             if file_metadata:

@@ -130,7 +130,8 @@ def calculate_energy_from_cif_impl(
         logger.info("Saved CIF to temporary file", path=str(cif_path))
 
         # Step 2: Load structure with ASE and validate
-        structure = ase_io.read(str(cif_path))
+        # 🔧 强制使用 CIF 格式，避免 ASE 根据文件名误判
+        structure = ase_io.read(str(cif_path), format='cif')
         composition_str = structure.get_chemical_formula()
         n_atoms = len(structure)
         
@@ -835,6 +836,11 @@ def _clean_cif_content(cif_content: str) -> str:
     # Handle different line endings (Windows \r\n, Unix \n, Mac \r)
     cif_content = cif_content.replace('\r\n', '\n').replace('\r', '\n')
 
+    # 🔧 修复：移除多余的空行（POSCAR 转 CIF 时可能产生）
+    # 将连续的多个空行替换为单个空行
+    import re
+    cif_content = re.sub(r'\n\n+', '\n', cif_content)
+
     lines = cif_content.split('\n')
     cleaned_lines = []
 
@@ -847,9 +853,35 @@ def _clean_cif_content(cif_content: str) -> str:
         # (important for CIF loop structures)
         line = line.rstrip()
 
-        # Skip completely empty lines, but keep lines with just whitespace
-        # (they might be significant in CIF format)
-        if line or not cleaned_lines:
+        # 🔧 修复：处理可能导致 "scaling factors" 错误的对称性标签
+        # ASE 在解析某些空间群名称时可能会出错
+        if line.strip().startswith('_symmetry_space_group_name_H-M'):
+            # 提取空间群名称并规范化
+            parts = line.split(None, 1)  # 分割为标签和值
+            if len(parts) == 2:
+                tag, value = parts
+                # 移除引号并清理空格
+                value = value.strip().strip('"\'')
+                # 🔧 修复下标问题：_1 → 1, _2 → 2, etc.
+                value = value.replace('_1', '1').replace('_2', '2').replace('_3', '3').replace('_4', '4').replace('_6', '6')
+                # 重新格式化为带引号的形式
+                line = f"{tag} '{value}'"
+                logger.info(f"🔧 Normalized space group name: {value}")
+
+        # 🔧 修复：移除可能导致解析错误的 _symmetry_Int_Tables_number
+        # 某些 CIF 文件中这个字段格式不正确
+        if line.strip().startswith('_symmetry_Int_Tables_number'):
+            logger.info("🔧 Removing _symmetry_Int_Tables_number (may cause parsing issues)")
+            continue  # 跳过这一行
+
+        # 🔧 修复：移除可能导致解析错误的 _space_group_IT_number
+        # 与 _symmetry_Int_Tables_number 类似
+        if line.strip().startswith('_space_group_IT_number'):
+            logger.info("🔧 Removing _space_group_IT_number (may cause parsing issues)")
+            continue
+
+        # Skip empty lines (but keep first line if it's empty for data_ block)
+        if line.strip() or not cleaned_lines:
             cleaned_lines.append(line)
 
     # Ensure proper line endings
@@ -921,8 +953,9 @@ def relax_structure_impl(
         logger.info("Saved CIF to temporary file", path=str(cif_path))
 
         # Step 2: Load structure with ASE and validate
+        # 🔧 关键修复：强制使用 CIF 格式，避免 ASE 根据文件名误判（如 POSCAR.cif 被当作 VASP 文件）
         try:
-            structure = ase_io.read(str(cif_path))
+            structure = ase_io.read(str(cif_path), format='cif')
             composition_str = structure.get_chemical_formula()
             n_atoms = len(structure)
             logger.info(f"✅ Successfully parsed CIF with ASE: {composition_str}, {n_atoms} atoms")
@@ -941,7 +974,7 @@ def relax_structure_impl(
                 cleaned_cif = _clean_cif_content(cif_text)
                 with open(cif_path, 'w', encoding='utf-8') as f:
                     f.write(cleaned_cif)
-                structure = ase_io.read(str(cif_path))
+                structure = ase_io.read(str(cif_path), format='cif')
                 composition_str = structure.get_chemical_formula()
                 n_atoms = len(structure)
                 logger.info(f"✅ Successfully parsed CIF after cleaning: {composition_str}, {n_atoms} atoms")
@@ -953,21 +986,74 @@ def relax_structure_impl(
                 }
             except Exception as e2:
                 logger.error(f"❌ Failed to parse CIF even after cleaning: {str(e2)}")
-                # Provide helpful error message based on the error type
-                error_msg = f"Failed to parse CIF file. "
-                if "data_" in str(e2).lower():
-                    error_msg += "The file may be missing a 'data_' block declaration. "
-                elif "cell" in str(e2).lower():
-                    error_msg += "The file may be missing lattice parameters (_cell_length_a, _cell_length_b, etc.). "
-                elif "atom" in str(e2).lower():
-                    error_msg += "The file may be missing atomic position data (_atom_site_*). "
 
-                error_msg += f"Original error: {str(e)}. After cleaning: {str(e2)}"
+                # 🔧 最后的尝试：使用 pymatgen 重新生成 CIF
+                try:
+                    logger.info("🔧 Attempting to regenerate CIF using pymatgen...")
+                    from pymatgen.core import Structure as PymatgenStructure
+                    from pymatgen.io.cif import CifParser
+                    from io import StringIO
 
-                return {
-                    "success": False,
-                    "error": error_msg
-                }
+                    # 尝试用 pymatgen 解析
+                    parser = CifParser(StringIO(cif_text))
+                    pmg_structure = parser.get_structures()[0]
+
+                    # 重新生成干净的 CIF
+                    from pymatgen.io.cif import CifWriter
+                    writer = CifWriter(pmg_structure, symprec=0.01)
+                    regenerated_cif = str(writer)
+
+                    # 🔧 清理 pymatgen 生成的 CIF 中可能导致 ASE 解析错误的字段
+                    lines = regenerated_cif.split('\n')
+                    cleaned_lines = []
+                    for line in lines:
+                        # 跳过可能导致 ASE 解析错误的对称性字段
+                        if line.strip().startswith('_symmetry_Int_Tables_number'):
+                            logger.info("🔧 Removing _symmetry_Int_Tables_number from regenerated CIF")
+                            continue
+                        if line.strip().startswith('_space_group_IT_number'):
+                            logger.info("🔧 Removing _space_group_IT_number from regenerated CIF")
+                            continue
+
+                        # 🔧 修复空间群名称中的下标问题
+                        # pymatgen 使用 _1, _2 等表示下标，但 ASE 不识别
+                        if line.strip().startswith('_symmetry_space_group_name_H-M'):
+                            line = line.replace('_1', '1').replace('_2', '2').replace('_3', '3').replace('_4', '4').replace('_6', '6')
+                            logger.info(f"🔧 Fixed space group name subscripts: {line.strip()}")
+
+                        cleaned_lines.append(line)
+
+                    regenerated_cif = '\n'.join(cleaned_lines)
+
+                    # 保存并重新尝试
+                    with open(cif_path, 'w', encoding='utf-8') as f:
+                        f.write(regenerated_cif)
+
+                    # 🔧 强制使用 CIF 格式
+                    structure = ase_io.read(str(cif_path), format='cif')
+                    composition_str = structure.get_chemical_formula()
+                    n_atoms = len(structure)
+                    logger.info(f"✅ Successfully parsed CIF after pymatgen regeneration: {composition_str}, {n_atoms} atoms")
+
+                except Exception as e3:
+                    logger.error(f"❌ Failed to regenerate CIF with pymatgen: {str(e3)}")
+                    # Provide helpful error message based on the error type
+                    error_msg = f"Failed to parse CIF file. "
+                    if "scaling" in str(e).lower() or "scaling" in str(e2).lower():
+                        error_msg += "The file contains invalid symmetry or lattice parameter scaling factors. "
+                    elif "data_" in str(e2).lower():
+                        error_msg += "The file may be missing a 'data_' block declaration. "
+                    elif "cell" in str(e2).lower():
+                        error_msg += "The file may be missing lattice parameters (_cell_length_a, _cell_length_b, etc.). "
+                    elif "atom" in str(e2).lower():
+                        error_msg += "The file may be missing atomic position data (_atom_site_*). "
+
+                    error_msg += f"\n\nOriginal error: {str(e)}\nAfter cleaning: {str(e2)}\nAfter pymatgen: {str(e3)}"
+
+                    return {
+                        "success": False,
+                        "error": error_msg
+                    }
 
         # Validate structure with detailed error reporting
         if not validate_structure(structure):
@@ -1276,8 +1362,9 @@ def calculate_phonon_impl(
         logger.info("Saved CIF to temporary file", path=str(cif_path))
 
         # Step 2: Load structure with ASE and validate
+        # 🔧 强制使用 CIF 格式，避免 ASE 根据文件名误判
         try:
-            structure = ase_io.read(str(cif_path))
+            structure = ase_io.read(str(cif_path), format='cif')
         except StopIteration:
             logger.error("Failed to parse CIF file - file may be empty or invalid")
             return {

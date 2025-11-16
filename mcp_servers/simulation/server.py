@@ -899,6 +899,13 @@ async def calculate_phonon(
             result["images"] = images
             logger.info(f"✅ Phonon calculation completed with {len(images)} images")
 
+        # 🔧 确保 CSV 路径在返回结果中（供 DataProcessor 使用）
+        # 这样 DataProcessor 可以提取这些路径并发送 file_data 消息
+        if dispersion_csv_path:
+            result["phonon_dispersion_csv"] = dispersion_csv_path
+        if dos_csv_path:
+            result["phonon_dos_csv"] = dos_csv_path
+
     return result
 
 
@@ -1002,6 +1009,58 @@ async def extract_and_validate_cif(
         cif_filename = cif_file.name
 
         logger.info(f"📂 Reading CIF file: {cif_file}")
+
+        # 🔧 标准化 CIF 文件：使用 pymatgen 重新生成干净的 CIF
+        # 这样可以修复 POSCAR 转 CIF 时产生的格式问题
+        try:
+            logger.info("🔧 Attempting to standardize CIF using pymatgen...")
+            from pymatgen.io.cif import CifParser, CifWriter
+            from io import StringIO
+
+            # 尝试用 pymatgen 解析
+            parser = CifParser(StringIO(cif_content))
+            structure = parser.get_structures()[0]
+
+            # 重新生成干净的 CIF
+            writer = CifWriter(structure, symprec=0.01)
+            standardized_cif = str(writer)
+
+            # 🔧 清理 pymatgen 生成的 CIF 中可能导致 ASE 解析错误的字段
+            # 移除 _symmetry_Int_Tables_number 和 _space_group_IT_number
+            # 修复空间群名称中的下标问题（如 Pmn2_1 → Pmn21）
+            lines = standardized_cif.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                # 跳过可能导致 ASE 解析错误的对称性字段
+                if line.strip().startswith('_symmetry_Int_Tables_number'):
+                    logger.info("🔧 Removing _symmetry_Int_Tables_number from standardized CIF")
+                    continue
+                if line.strip().startswith('_space_group_IT_number'):
+                    logger.info("🔧 Removing _space_group_IT_number from standardized CIF")
+                    continue
+
+                # 🔧 修复空间群名称中的下标问题
+                # pymatgen 使用 _1, _2 等表示下标，但 ASE 不识别
+                # 将 _1, _2, _3 等替换为 1, 2, 3
+                if line.strip().startswith('_symmetry_space_group_name_H-M'):
+                    # 替换下标：_1 → 1, _2 → 2, _3 → 3, _4 → 4, _6 → 6
+                    line = line.replace('_1', '1').replace('_2', '2').replace('_3', '3').replace('_4', '4').replace('_6', '6')
+                    logger.info(f"🔧 Fixed space group name subscripts: {line.strip()}")
+
+                cleaned_lines.append(line)
+
+            standardized_cif = '\n'.join(cleaned_lines)
+
+            # 保存标准化后的 CIF（覆盖原文件）
+            cif_file.write_text(standardized_cif, encoding='utf-8')
+            logger.info(f"✅ CIF file standardized and saved: {cif_file}")
+
+            # 使用标准化后的内容进行验证
+            cif_content = standardized_cif
+
+        except Exception as e:
+            logger.warning(f"⚠️ Could not standardize CIF with pymatgen: {e}")
+            logger.info("Will use original CIF content")
 
         # Validate CIF content using existing implementation
         validation_result = _validate_cif_content(cif_content, cif_filename)
