@@ -16,9 +16,10 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 class CrystalStructureGenerator:
-    def __init__(self, composition, params=None, progress_callback: Optional[Callable[[str, float], None]] = None):
+    def __init__(self, composition, params=None, progress_callback: Optional[Callable[[str, float], None]] = None, spacegroup: Optional[str] = None):
         self.composition = composition
         self.progress_callback = progress_callback
+        self.spacegroup = spacegroup  # 空间群约束（可选）
 
         # Get the directory where this file is located
         self._module_dir = Path(__file__).parent.absolute()
@@ -207,7 +208,16 @@ class CrystalStructureGenerator:
         env = self._get_subprocess_env()
         # Use current Python interpreter
         python_exe = sys.executable
-        subprocess.run([python_exe, os.path.join(self.params['bin_dir'], 'make_prompt_file.py'), self.composition, prompt_path], env=env)
+
+        # 构建命令参数
+        cmd_args = [python_exe, os.path.join(self.params['bin_dir'], 'make_prompt_file.py'), self.composition, prompt_path]
+
+        # 如果指定了空间群，添加 --spacegroup 参数
+        if self.spacegroup:
+            cmd_args.extend(['--spacegroup', self.spacegroup])
+            logger.info(f"🔬 使用空间群约束: {self.spacegroup}")
+
+        subprocess.run(cmd_args, env=env)
         self.generated_params['start'] = f"FILE:{prompt_path}"
         self._report_progress("提示词文件生成完成", 0.2)
         
@@ -417,16 +427,17 @@ def main():
         print(f"❌ 生成失败: {result['message']}")
 
 # 提供一个便于外部调用的函数
-def generate_structures_for_composition(composition: str, num_samples: int = 5, export_json: bool = True, progress_callback=None) -> Dict[str, Any]:
+def generate_structures_for_composition(composition: str, num_samples: int = 5, export_json: bool = True, progress_callback=None, spacegroup: Optional[str] = None) -> Dict[str, Any]:
     """
     为指定化学组成生成晶体结构的便捷函数
-    
+
     Args:
         composition: 化学组成，如 "Li2O", "CaTiO3"
         num_samples: 生成的样本数量
         export_json: 是否导出前端兼容的JSON格式
         progress_callback: 进度回调函数
-    
+        spacegroup: 空间群约束（可选），如 "P4/nmm", "Fd-3m" 等
+
     Returns:
         包含生成结果的字典
     """
@@ -441,8 +452,8 @@ def generate_structures_for_composition(composition: str, num_samples: int = 5, 
         'postprocess_input_dir': f'generated_structures_{composition}',
         'postprocess_output_dir': f'processed_structures_{composition}'
     }
-    
-    generator = CrystalStructureGenerator(composition, params=custom_params, progress_callback=progress_callback)
+
+    generator = CrystalStructureGenerator(composition, params=custom_params, progress_callback=progress_callback, spacegroup=spacegroup)
     return generator.run_pipeline(export_json=export_json, json_output_dir='frontend_exports')
 
 def convert_cif_to_frontend_format(cif_content: str, filename: str, composition: str, generation_id: str) -> Dict[str, Any]:

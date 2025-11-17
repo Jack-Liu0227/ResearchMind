@@ -61,14 +61,22 @@ class SessionFolderManager:
         except Exception as e:
             logger.error(f"Failed to save session mapping: {e}")
     
-    def get_session_folder(self, session_id: str, topic: Optional[str] = None) -> str:
+    def get_session_folder(
+        self,
+        session_id: str,
+        topic: Optional[str] = None,
+        session_type: str = 'search',
+        created_by: str = 'system'
+    ) -> str:
         """
         获取会话文件夹路径
-        
+
         Args:
             session_id: 会话ID
-            topic: 主题（可选，用于文件夹命名）
-        
+            topic: 主题（可选，记录在元数据中）
+            session_type: 会话类型 ('search', 'upload', 'test')
+            created_by: 创建方式 ('system', 'user', 'api')
+
         Returns:
             文件夹路径
         """
@@ -77,21 +85,27 @@ class SessionFolderManager:
             folder_path = self.session_folders[session_id]
             logger.info(f"Using existing folder for session {session_id}: {folder_path}")
             return folder_path
-        
+
         # 创建新文件夹
         folder_name = self._generate_folder_name(session_id, topic)
         folder_path = os.path.join(PAPER_DIR, folder_name)
-        
+
         # 创建文件夹
         os.makedirs(folder_path, exist_ok=True)
-        
-        # 保存映射
+
+        # 保存映射（使用 session_id 作为 key，folder_path 作为 value）
         self.session_folders[session_id] = folder_path
         self._save_session_mapping()
-        
+
         # 创建会话元数据文件
-        self._create_session_metadata(folder_path, session_id, topic)
-        
+        self._create_session_metadata(
+            folder_path,
+            session_id,
+            topic,
+            session_type=session_type,
+            created_by=created_by
+        )
+
         logger.info(f"Created new folder for session {session_id}: {folder_path}")
         return folder_path
     
@@ -99,17 +113,31 @@ class SessionFolderManager:
         """
         生成文件夹名称
 
+        统一使用 session_{timestamp}_{random_id} 格式
+        例如: session_1763305049955_zs3m2y8m
+
         Args:
             session_id: 会话ID
-            topic: 主题（可选）
+            topic: 主题（可选，不用于文件夹命名）
 
         Returns:
             文件夹名称
         """
-        # 直接使用session_id作为文件夹名
-        # session_id已经包含了query和hash,格式: {query_clean}_{hash}
-        # 例如: knowledge_graph_design_a1b2c3d4
-        folder_name = session_id
+        import time
+        import random
+        import string
+
+        # 检查 session_id 是否已经是 session_{timestamp}_{id} 格式
+        if session_id.startswith('session_'):
+            # 已经是正确格式，直接使用
+            folder_name = session_id
+        else:
+            # 生成新的 session 格式文件夹名
+            timestamp = int(time.time() * 1000)  # 毫秒级时间戳
+            random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+            folder_name = f"session_{timestamp}_{random_id}"
+
+            logger.info(f"Generated session folder name: {folder_name} for session_id: {session_id}")
 
         return folder_name
     
@@ -132,22 +160,34 @@ class SessionFolderManager:
         filename = filename.strip('_')
         return filename
     
-    def _create_session_metadata(self, folder_path: str, session_id: str, topic: Optional[str] = None):
+    def _create_session_metadata(
+        self,
+        folder_path: str,
+        session_id: str,
+        topic: Optional[str] = None,
+        session_type: str = 'search',
+        created_by: str = 'system'
+    ):
         """
         创建会话元数据文件
-        
+
         Args:
             folder_path: 文件夹路径
             session_id: 会话ID
             topic: 主题（可选）
+            session_type: 会话类型 ('search', 'upload', 'test')
+            created_by: 创建方式 ('system', 'user', 'api')
         """
         metadata = {
             "session_id": session_id,
             "topic": topic,
+            "session_type": session_type,
+            "created_by": created_by,
             "created_at": datetime.now().isoformat(),
-            "folder_path": folder_path
+            "folder_path": folder_path,
+            "folder_name": os.path.basename(folder_path)
         }
-        
+
         metadata_file = os.path.join(folder_path, "session_metadata.json")
         try:
             with open(metadata_file, 'w', encoding='utf-8') as f:
@@ -208,19 +248,26 @@ def get_session_folder_manager() -> SessionFolderManager:
     return _session_folder_manager
 
 
-def get_session_folder(session_id: str, topic: Optional[str] = None) -> str:
+def get_session_folder(
+    session_id: str,
+    topic: Optional[str] = None,
+    session_type: str = 'search',
+    created_by: str = 'system'
+) -> str:
     """
     获取会话文件夹路径（便捷函数）
-    
+
     Args:
         session_id: 会话ID
-        topic: 主题（可选）
-    
+        topic: 主题（可选，记录在元数据中）
+        session_type: 会话类型 ('search', 'upload', 'test')
+        created_by: 创建方式 ('system', 'user', 'api')
+
     Returns:
         文件夹路径
     """
     manager = get_session_folder_manager()
-    return manager.get_session_folder(session_id, topic)
+    return manager.get_session_folder(session_id, topic, session_type, created_by)
 
 
 def cleanup_session(session_id: str):

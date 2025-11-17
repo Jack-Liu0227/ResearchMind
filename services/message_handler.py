@@ -30,6 +30,7 @@ class MessageHandler:
             "upload_structures": self.handle_upload_structures,  # Multiple files
             "chat_with_attachments": self.handle_chat_with_attachments,
             "ping": self.handle_ping,
+            "stop_response": self.handle_stop_response,  # 🆕 停止响应
             # WebSocket 统计查询
             "get_conversation_stats": self.handle_get_conversation_stats,
             "get_user_stats": self.handle_get_user_stats,
@@ -310,6 +311,42 @@ class MessageHandler:
         except Exception as e:
             await self.send_error(websocket, f"认证处理异常: {e}")
 
+    async def handle_stop_response(
+        self,
+        client_id: str,
+        websocket: Any,
+        data: dict,
+        agent_coordinator: "AgentCoordinator"
+    ) -> None:
+        """
+        🆕 处理停止响应请求
+
+        Args:
+            client_id: Client ID
+            websocket: WebSocket connection
+            data: Message data with agentId, sessionId
+            agent_coordinator: Agent coordinator instance
+        """
+        agent_id = data.get("agentId")
+        session_id = data.get("sessionId")
+
+        logger.info(f"🛑 [Client:{client_id}] 收到停止请求 [Agent:{agent_id}] [Session:{session_id}]")
+
+        try:
+            # 调用 agent_coordinator 停止当前任务
+            agent_coordinator.stop_current_task(client_id, agent_id, session_id)
+
+            # 发送停止确认消息
+            await self.send_message(websocket, "status", {
+                "status": "stopped",
+                "message": "已停止响应"
+            })
+
+            logger.info(f"✅ [Client:{client_id}] 已停止任务")
+
+        except Exception as e:
+            logger.error(f"❌ 停止响应失败: {e}", exc_info=True)
+            await self.send_error(websocket, f"停止响应失败: {str(e)}")
 
     @staticmethod
     async def send_message(websocket: Any, message_type: str, data: Dict[str, Any]):

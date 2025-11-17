@@ -5,9 +5,11 @@
 1. 提供统一的 session_data 目录结构
 2. 管理不同类型数据的存储路径
 3. 支持会话隔离和数据迁移
+4. 创建和管理会话元数据
 """
 
 import os
+import json
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -26,16 +28,22 @@ SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
 def get_session_storage_path(
     session_id: str,
     data_type: str,
-    create: bool = True
+    create: bool = True,
+    session_type: str = "upload",
+    created_by: str = "user",
+    topic: Optional[str] = None
 ) -> Path:
     """
     获取会话存储路径
-    
+
     Args:
         session_id: 会话ID
         data_type: 数据类型 (papers, structures, phonon_results, thermal_conductivity, cif, etc.)
         create: 是否创建目录
-    
+        session_type: 会话类型 (upload, search, simulation, etc.)
+        created_by: 创建方式 (user, system, api)
+        topic: 会话主题（可选）
+
     Returns:
         存储路径
     """
@@ -60,12 +68,66 @@ def get_session_storage_path(
     else:
         # 通用路径
         base_path = SESSION_DATA_DIR / data_type / session_id
-    
+
     if create:
+        # 创建目录
+        is_new_session = not base_path.exists()
         base_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created storage path: {base_path}")
-    
+
+        # 为 papers 类型创建元数据文件
+        if data_type == "papers" and is_new_session:
+            _create_session_metadata(
+                base_path=base_path,
+                session_id=session_id,
+                session_type=session_type,
+                created_by=created_by,
+                topic=topic
+            )
+
     return base_path
+
+
+def _create_session_metadata(
+    base_path: Path,
+    session_id: str,
+    session_type: str = "upload",
+    created_by: str = "user",
+    topic: Optional[str] = None
+):
+    """
+    创建会话元数据文件
+
+    Args:
+        base_path: 会话目录路径
+        session_id: 会话ID
+        session_type: 会话类型 (upload, search, simulation, etc.)
+        created_by: 创建方式 (user, system, api)
+        topic: 会话主题（可选）
+    """
+    metadata_file = base_path / "session_metadata.json"
+
+    # 如果元数据文件已存在，不覆盖
+    if metadata_file.exists():
+        logger.info(f"Session metadata already exists: {metadata_file}")
+        return
+
+    metadata = {
+        "session_id": session_id,
+        "topic": topic,
+        "session_type": session_type,
+        "created_by": created_by,
+        "created_at": datetime.now().isoformat(),
+        "folder_path": str(base_path),
+        "folder_name": base_path.name
+    }
+
+    try:
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+        logger.info(f"Created session metadata: {metadata_file}")
+    except Exception as e:
+        logger.error(f"Failed to create session metadata: {e}")
 
 
 def get_legacy_path(data_type: str) -> Optional[Path]:

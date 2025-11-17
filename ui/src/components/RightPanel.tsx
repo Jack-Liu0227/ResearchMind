@@ -109,13 +109,19 @@ const buildDownloadUrl = (file: SessionFile): string | undefined => {
 const extractFileName = (value?: string, fallback = 'data-file') => {
   if (!value) return fallback
   const clean = value.split('?')[0]
-  const segments = clean.split('/').filter(Boolean)
+  // 🔧 修复：同时支持 Windows (\) 和 Unix (/) 路径分隔符
+  const segments = clean.split(/[/\\]/).filter(Boolean)
   return segments.pop() || fallback
 }
 
 const getFileDisplayName = (file: SessionFile) => {
   if (file.name && file.name.trim()) {
-    return file.name.trim()
+    const name = file.name.trim()
+    // 🔧 修复：如果 name 是完整路径（包含 : 或 \ 或 /），提取文件名
+    if (name.includes(':') || name.includes('\\') || name.includes('/')) {
+      return extractFileName(name)
+    }
+    return name
   }
   return extractFileName(file.filePath || file.downloadUrl || undefined)
 }
@@ -170,6 +176,15 @@ const RightPanel: React.FC<RightPanelProps> = ({
     currentStructure,
     currentSessionStructures
   } = useAppStore()
+
+  // 🔧 修复：按时间倒序排列图片（最新的在最前面）
+  const sortedPhononImages = useMemo(() => {
+    return [...currentSessionPhononImages].sort((a, b) => {
+      const timeA = a.timestamp ? (typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : a.timestamp) : 0
+      const timeB = b.timestamp ? (typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : b.timestamp) : 0
+      return timeB - timeA  // 倒序：最新的在前
+    })
+  }, [currentSessionPhononImages])
 
   const [activeTab, setActiveTab] = useState<'structures' | 'images' | 'files'>('structures')
 
@@ -261,7 +276,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
               : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
           }`}
         >
-          图片 ({currentSessionPhononImages.length})
+          图片 ({sortedPhononImages.length})
         </button>
         <button
           onClick={() => setActiveTab('files')}
@@ -286,7 +301,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
 
         {activeTab === 'images' && (
           <PhononTab
-            phononImages={currentSessionPhononImages}
+            phononImages={sortedPhononImages}
             onImageFullscreen={openImageFullscreen}
             onDownloadImage={downloadFile}
           />
@@ -511,10 +526,13 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
               <div className="border-t border-gray-200 bg-gray-50 p-3 space-y-3">
                 {image.dispersionCsvPath && (
                   <div className="bg-white rounded p-2">
-                    <h5 className="text-xs font-medium text-gray-700 mb-2">声子色散数据</h5>
+                    <h5 className="text-xs font-medium text-gray-700 mb-2">
+                      {/* 显示完整文件名（不带扩展名） */}
+                      {image.dispersionCsvPath.split('/').pop()?.replace(/\.csv$/i, '') || 'phonon_dispersion'}
+                    </h5>
                     <CsvViewer
                       url={resolveFileUrl(image.dispersionCsvPath)}
-                      filename="phonon_dispersion.csv"
+                      filename={image.dispersionCsvPath.split('/').pop() || 'phonon_dispersion.csv'}
                       maxHeight="200px"
                       defaultExpanded={true}
                     />
@@ -522,10 +540,13 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
                 )}
                 {image.dosCsvPath && (
                   <div className="bg-white rounded p-2">
-                    <h5 className="text-xs font-medium text-gray-700 mb-2">声子态密度数据</h5>
+                    <h5 className="text-xs font-medium text-gray-700 mb-2">
+                      {/* 显示完整文件名（不带扩展名） */}
+                      {image.dosCsvPath.split('/').pop()?.replace(/\.csv$/i, '') || 'phonon_dos'}
+                    </h5>
                     <CsvViewer
                       url={resolveFileUrl(image.dosCsvPath)}
-                      filename="phonon_dos.csv"
+                      filename={image.dosCsvPath.split('/').pop() || 'phonon_dos.csv'}
                       maxHeight="200px"
                       defaultExpanded={true}
                     />

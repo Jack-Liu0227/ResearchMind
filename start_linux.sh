@@ -246,7 +246,7 @@ start_mcp_service() {
     popd >/dev/null
     register_pid "$pid"
     sleep 3
-    
+
     if kill -0 "$pid" 2>/dev/null; then
         log_success "${service_name} started (PID ${pid})"
     else
@@ -264,7 +264,7 @@ start_backend() {
     local pid=$!
     register_pid "$pid"
     sleep 4
-    
+
     if kill -0 "$pid" 2>/dev/null; then
         log_success "Backend started (PID ${pid})"
     else

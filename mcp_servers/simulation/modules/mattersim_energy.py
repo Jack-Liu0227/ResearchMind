@@ -29,6 +29,36 @@ from ase.optimize import BFGS
 from ase.constraints import FixAtoms
 from mattersim.forcefield import MatterSimCalculator
 
+# ========================================
+# 🔧 声子谱CSV导出性能优化配置
+# ========================================
+# 在此处修改配置，无需深入函数内部
+
+# 原子数阈值：超过此值将跳过CSV导出（节省时间）
+# 建议值：
+#   - 8: 非常严格，只有小分子导出CSV（最快）
+#   - 10: 严格模式，大多数复杂结构跳过CSV（推荐）
+#   - 15: 平衡模式，中等结构也导出CSV
+#   - 20: 宽松模式，只有非常大的结构跳过CSV
+#   - 50: 几乎不跳过（最慢）
+PHONON_CSV_ATOM_THRESHOLD = 20
+
+# CSV最大行数：超过此值将进行降采样
+# 建议值：
+#   - 500: 超快速（~50KB，适合快速预览）
+#   - 1000: 快速（~100KB，适合可视化）[默认]
+#   - 2000: 平衡（~200KB，较详细）
+#   - 5000: 高细节（~500KB，科研分析）
+#   - -1: 无限制（可能非常慢，不推荐）
+PHONON_CSV_MAX_ROWS = 100
+
+# 是否对大结构跳过CSV导出
+# True: 启用跳过（推荐，节省时间）
+# False: 强制导出所有CSV（可能很慢）
+PHONON_CSV_SKIP_LARGE_STRUCTURES = True
+
+# ========================================
+
 # Import MatterSim applications for relaxation and phonon calculations
 try:
     from mattersim.applications.relax import Relaxer
@@ -60,6 +90,49 @@ PhaseDiagram = None
 # Cache for GNoME data to avoid repeated loading
 _gnome_data_cache = None
 _model_cache = {}
+
+
+def _get_yaml_loader():
+    """获取最快的 YAML 加载器"""
+    try:
+        from yaml import CLoader as Loader
+        logger.info(f"   ⚡ Using fast C-based YAML loader")
+        return Loader
+    except ImportError:
+        from yaml import SafeLoader as Loader
+        logger.info(f"   ⚠️ Using slower Python YAML loader")
+        return Loader
+
+
+def _downsample_dataframe(df, max_rows: int, original_count: int):
+    """对 DataFrame 进行降采样"""
+    if max_rows <= 0 or max_rows == -1 or original_count <= max_rows:
+        if max_rows == -1:
+            logger.info(f"   📊 No downsampling (max_csv_rows=-1), exporting all {original_count} rows")
+        return df, original_count
+
+    logger.info(f"   ✂️ Downsampling from {original_count} to {max_rows} rows...")
+    sample_indices = [0]  # 保留第一个点
+    step = original_count / (max_rows - 2)
+    sample_indices.extend([int(i * step) for i in range(1, max_rows - 1)])
+    sample_indices.append(original_count - 1)  # 保留最后一个点
+
+    df_sampled = df.iloc[sample_indices].reset_index(drop=True)
+    logger.warning(f"   ⚠️ Downsampled: {original_count} → {len(df_sampled)} rows")
+    return df_sampled, original_count
+
+
+def _save_csv_optimized(df, csv_path, start_time=None):
+    """优化的 CSV 保存"""
+    import time
+    csv_write_start = time.time()
+    df.to_csv(csv_path, index=False, float_format='%.6f', chunksize=1000, mode='w')
+    csv_write_time = time.time() - csv_write_start
+
+    if start_time:
+        total_time = time.time() - start_time
+        return csv_write_time, total_time
+    return csv_write_time, csv_write_time
 
 
 def normalize_cif_content(cif_content: str) -> str:
@@ -640,7 +713,7 @@ def _annotate_chemical_system(crystals):
     import json
 
     chemical_systems = []
-    for i, e in enumerate(crystals['Elements']):
+    for e in crystals['Elements']:
         chemsys = json.loads(e.replace("'", '"'))
         chemical_systems.append(tuple(sorted(chemsys)))
     crystals['Chemical System'] = chemical_systems
@@ -753,144 +826,38 @@ def get_calculator_with_cache(model_path: Path, device: str = "cpu") -> MatterSi
 
 
 def validate_structure(structure) -> bool:
-    """
-    Validate ASE structure before calculation.
-
-    Performs MINIMAL validation - only rejects structures that will cause critical failures.
-    Philosophy: If ASE can parse it, we should try to calculate with it.
-    Let MatterSim handle edge cases and provide meaningful physics-based errors.
-
-    Args:
-        structure: ASE Atoms object
-
-    Returns:
-        True if structure passes basic checks, False only for critical failures
-    """
+    """验证 ASE 结构的基本有效性"""
     try:
-        # Check 1: Structure must have atoms (CRITICAL - cannot calculate without atoms)
         if len(structure) == 0:
-            logger.error("❌ CRITICAL: Structure has no atoms - cannot proceed")
+            logger.error("❌ Structure has no atoms")
             return False
 
-        # Check 2: Cell parameters must be finite (CRITICAL - NaN/Inf will crash)
-        cell = structure.get_cell()
-        cell_lengths = np.linalg.norm(cell, axis=1)
-        if not np.all(np.isfinite(cell_lengths)):
-            logger.error("❌ CRITICAL: Structure has non-finite (NaN/Inf) cell parameters")
+        cell_lengths = np.linalg.norm(structure.get_cell(), axis=1)
+        if not np.all(np.isfinite(cell_lengths)) or np.any(cell_lengths < 0.001):
+            logger.error(f"❌ Invalid cell parameters: {cell_lengths}")
             return False
 
-        # Check 3: Cell parameters must be positive (CRITICAL - negative/zero is unphysical)
-        # Use very small threshold (0.001 Å = 0.01 pm) to catch only truly broken structures
-        # This allows molecular systems with small cells while rejecting invalid data
-        if np.any(cell_lengths < 0.001):
-            logger.error(f"❌ CRITICAL: Structure has zero or negative cell parameters: {cell_lengths}")
+        if not np.all(np.isfinite(structure.get_positions())):
+            logger.error("❌ Invalid atomic positions")
             return False
 
-        # Check 4: Atomic positions must be finite (CRITICAL - NaN/Inf will crash)
-        positions = structure.get_positions()
-        if not np.all(np.isfinite(positions)):
-            logger.error("❌ CRITICAL: Structure has non-finite (NaN/Inf) atomic positions")
-            return False
-
-        # Log structure info for debugging (informational only)
         formula = structure.get_chemical_formula()
-        logger.info(f"✅ Structure validation passed: {formula}, {len(structure)} atoms, "
-                   f"cell: {cell_lengths[0]:.2f} × {cell_lengths[1]:.2f} × {cell_lengths[2]:.2f} Å")
-
-        # Log warnings for unusual but potentially valid structures
-        if np.any(cell_lengths < 1.0):
-            logger.warning(f"⚠️ Structure has very small cell parameters: {cell_lengths} Å - may be intentional for molecular systems")
-
-        if np.any(cell_lengths > 1000.0):
-            logger.warning(f"⚠️ Structure has very large cell parameters: {cell_lengths} Å - may be intentional for supercells")
-
-        # INTENTIONALLY NOT CHECKING:
-        # - Overlapping atoms: Bond lengths vary wildly (0.74 Å for H2 to 3+ Å for metals)
-        # - CIF format requirements: ASE already parsed it successfully
-        # - Space group validity: Not required for DFT calculations
-        # - Charge neutrality: Some systems are intentionally charged
-        # - Standard cell shapes: Triclinic cells are perfectly valid
-        # - Atom type validity: Let MatterSim's model handle unknown elements
-
+        logger.info(f"✅ Validated: {formula}, {len(structure)} atoms, "
+                   f"cell: {cell_lengths[0]:.2f}×{cell_lengths[1]:.2f}×{cell_lengths[2]:.2f} Å")
         return True
 
     except Exception as e:
-        logger.error(f"❌ Structure validation failed with exception: {str(e)}")
+        logger.error(f"❌ Validation failed: {e}")
         return False
 
 
 def _clean_cif_content(cif_content: str) -> str:
-    """
-    Clean CIF content to fix common formatting issues.
-
-    This function attempts to normalize CIF files from various sources
-    (Materials Project, ICSD, COD, user-generated, etc.) to a format
-    that ASE can reliably parse.
-
-    Args:
-        cif_content: Raw CIF content string
-
-    Returns:
-        Cleaned CIF content string
-    """
-    # Handle different line endings (Windows \r\n, Unix \n, Mac \r)
+    """简化的 CIF 内容清理"""
     cif_content = cif_content.replace('\r\n', '\n').replace('\r', '\n')
-
-    # 🔧 修复：移除多余的空行（POSCAR 转 CIF 时可能产生）
-    # 将连续的多个空行替换为单个空行
-    import re
     cif_content = re.sub(r'\n\n+', '\n', cif_content)
-
-    lines = cif_content.split('\n')
-    cleaned_lines = []
-
-    for line in lines:
-        # Remove any non-ASCII characters that might cause issues
-        # But preserve the line structure
-        line = line.encode('ascii', 'ignore').decode('ascii')
-
-        # Remove trailing whitespace but preserve leading whitespace
-        # (important for CIF loop structures)
-        line = line.rstrip()
-
-        # 🔧 修复：处理可能导致 "scaling factors" 错误的对称性标签
-        # ASE 在解析某些空间群名称时可能会出错
-        if line.strip().startswith('_symmetry_space_group_name_H-M'):
-            # 提取空间群名称并规范化
-            parts = line.split(None, 1)  # 分割为标签和值
-            if len(parts) == 2:
-                tag, value = parts
-                # 移除引号并清理空格
-                value = value.strip().strip('"\'')
-                # 🔧 修复下标问题：_1 → 1, _2 → 2, etc.
-                value = value.replace('_1', '1').replace('_2', '2').replace('_3', '3').replace('_4', '4').replace('_6', '6')
-                # 重新格式化为带引号的形式
-                line = f"{tag} '{value}'"
-                logger.info(f"🔧 Normalized space group name: {value}")
-
-        # 🔧 修复：移除可能导致解析错误的 _symmetry_Int_Tables_number
-        # 某些 CIF 文件中这个字段格式不正确
-        if line.strip().startswith('_symmetry_Int_Tables_number'):
-            logger.info("🔧 Removing _symmetry_Int_Tables_number (may cause parsing issues)")
-            continue  # 跳过这一行
-
-        # 🔧 修复：移除可能导致解析错误的 _space_group_IT_number
-        # 与 _symmetry_Int_Tables_number 类似
-        if line.strip().startswith('_space_group_IT_number'):
-            logger.info("🔧 Removing _space_group_IT_number (may cause parsing issues)")
-            continue
-
-        # Skip empty lines (but keep first line if it's empty for data_ block)
-        if line.strip() or not cleaned_lines:
-            cleaned_lines.append(line)
-
-    # Ensure proper line endings
-    cleaned_content = '\n'.join(cleaned_lines)
-
-    # Ensure the CIF has a data_ block (required by CIF standard)
-    cleaned_content = normalize_cif_content(cleaned_content)
-
-    return cleaned_content
+    lines = [line.encode('ascii', 'ignore').decode('ascii').rstrip()
+             for line in cif_content.split('\n') if line.strip()]
+    return normalize_cif_content('\n'.join(lines))
 
 
 def relax_structure_impl(
@@ -1291,7 +1258,10 @@ def calculate_phonon_impl(
     supercell_matrix: Optional[List[int]] = None,
     amplitude: float = 0.01,
     find_prim: bool = False,
-    output_dir: Optional[str] = None
+    output_dir: Optional[str] = None,
+    max_csv_rows: int = 1000,
+    skip_csv_for_large_structures: bool = True,
+    large_structure_threshold: int = 10
 ) -> Dict[str, Any]:
     """
     Calculate phonon dispersion using MatterSim.
@@ -1309,10 +1279,33 @@ def calculate_phonon_impl(
         amplitude: Displacement amplitude for phonon calculation (default: 0.01 Å)
         find_prim: Whether to find primitive cell before calculation
         output_dir: Target directory for saving images (if None, uses default phonon_results/)
+        max_csv_rows: Maximum rows in CSV files (default: 1000). If exceeded, data will be downsampled.
+                     Set to 0 to disable CSV export entirely.
+                     Recommended values:
+                     - 500: Ultra-fast export (~50KB CSV, minimal detail)
+                     - 1000: Fast export, suitable for visualization (~100KB CSV) [DEFAULT]
+                     - 2000: Balanced performance (~200KB CSV)
+                     - 5000: High detail (~500KB CSV)
+                     - -1: No limit (may be very slow for large datasets)
+        skip_csv_for_large_structures: If True, skip CSV export for structures with more atoms than threshold (default: True)
+        large_structure_threshold: Number of atoms threshold for skipping CSV export (default: 10)
 
     Returns:
         Dict with phonon calculation results including image file paths
+
+    Performance Notes:
+        - CSV export speed depends on YAML parsing (install libyaml for 5-10x speedup)
+        - Large CSV files (>10MB) may take 10-30 seconds to save
+        - Images are saved instantly via file move operations
+        - Downsampling preserves data quality for visualization while improving performance
     """
+
+    # 使用全局配置（在文件顶部定义，方便修改）
+    # 如果函数参数提供了值，则使用参数值；否则使用全局配置
+    ATOM_THRESHOLD = large_structure_threshold if large_structure_threshold != 10 else PHONON_CSV_ATOM_THRESHOLD
+    MAX_CSV_ROWS = max_csv_rows if max_csv_rows != 1000 else PHONON_CSV_MAX_ROWS
+    SKIP_LARGE_CSV = skip_csv_for_large_structures if skip_csv_for_large_structures != True else PHONON_CSV_SKIP_LARGE_STRUCTURES
+
     if not PHONON_AVAILABLE:
         return {
             "success": False,
@@ -1321,30 +1314,52 @@ def calculate_phonon_impl(
 
     logger.info("Starting MatterSim phonon calculation", filename=cif_filename)
 
-    # Create temporary directory for calculation
-    temp_dir = tempfile.mkdtemp(prefix="mattersim_phonon_")
-    temp_dir_path = Path(temp_dir)
+    # 🔧 优化：为每个计算创建独立的子目录，避免文件名冲突
+    # Generate unique calculation ID (UUID + timestamp)
+    import uuid
+    from datetime import datetime
 
-    # Determine output directory for results
+    calculation_id = str(uuid.uuid4())[:8]  # 短 UUID（8 字符）
+    calculation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # 精确到毫秒
+
+    # Extract base filename for directory naming
+    import re
+    base_filename = Path(cif_filename).stem
+    base_filename = re.sub(r'^relaxed_', '', base_filename)
+    # Sanitize filename (remove special characters)
+    safe_filename = re.sub(r'[^\w\-]', '_', base_filename)
+
+    # Create structure-specific subdirectory
+    # Format: {base_filename}_{calculation_id}
+    structure_dir_name = f"{safe_filename}_{calculation_id}"
+
+    # Determine base output directory
     if output_dir:
-        persistent_dir = Path(output_dir)
-        logger.info(f"📁 Using provided output directory: {persistent_dir}")
+        base_output_dir = Path(output_dir)
+        logger.info(f"📁 Using provided base output directory: {base_output_dir}")
     else:
-        persistent_dir = Path(__file__).parent.parent / "phonon_results"
-        logger.info(f"📁 Using default output directory: {persistent_dir}")
+        base_output_dir = Path(__file__).parent.parent / "phonon_results"
+        logger.info(f"📁 Using default base output directory: {base_output_dir}")
 
+    # Create structure-specific subdirectory
+    persistent_dir = base_output_dir / structure_dir_name
     persistent_dir.mkdir(parents=True, exist_ok=True)
 
-    # Set work directory to temp directory
-    work_dir = str(temp_dir_path / "phonon_work")
+    # 使用持久化目录作为工作目录（不再使用临时目录）
+    work_dir = str(persistent_dir)
+    work_dir_path = persistent_dir
+
+    logger.info(f"✅ Structure-specific directory created: {persistent_dir}")
+    logger.info(f"📋 Calculation ID: {calculation_id}")
+    logger.info(f"⏰ Calculation timestamp: {calculation_timestamp}")
 
     # Set default supercell matrix
     if supercell_matrix is None:
         supercell_matrix = [4, 4, 4]
 
     try:
-        # Step 1: Decode and save CIF file
-        cif_path = temp_dir_path / cif_filename
+        # Step 1: Decode and save CIF file to persistent directory
+        cif_path = work_dir_path / cif_filename
 
         try:
             cif_bytes = base64.b64decode(cif_content)
@@ -1359,7 +1374,7 @@ def calculate_phonon_impl(
 
         with open(cif_path, 'w') as f:
             f.write(cif_text)
-        logger.info("Saved CIF to temporary file", path=str(cif_path))
+        logger.info("✅ Saved CIF to work directory", path=str(cif_path))
 
         # Step 2: Load structure with ASE and validate
         # 🔧 强制使用 CIF 格式，避免 ASE 根据文件名误判
@@ -1381,15 +1396,20 @@ def calculate_phonon_impl(
         composition_str = structure.get_chemical_formula()
         n_atoms = len(structure)
 
+        # 🚀 性能优化：大体系跳过CSV导出或只保存total_dos.dat的CSV
+        skip_large_csv = SKIP_LARGE_CSV and n_atoms > ATOM_THRESHOLD
+        if skip_large_csv:
+            logger.info(f"⚡ Large system detected ({n_atoms} atoms > {ATOM_THRESHOLD}), skipping CSV export")
+            logger.info(f"   Reason: CSV export for large structures is very slow (can take 30+ seconds)")
+            logger.info(f"   Images will still be generated. To force CSV export, set skip_csv_for_large_structures=False")
+            logger.info(f"   💡 Tip: Adjust ATOM_THRESHOLD at the top of calculate_phonon_impl() to change this behavior")
+
         # Extract base name from cif_filename for consistent image naming
         # This ensures image filenames match the original structure name
         # Example: "C.cif" -> "C", "relaxed_C.cif" -> "C"
         import re
         base_filename = Path(cif_filename).stem  # Remove .cif extension
-        # Remove "relaxed_" prefix if present
-        base_filename = re.sub(r'^relaxed_', '', base_filename)
-        # Use this for image naming instead of composition_str to maintain consistency
-        image_name_base = base_filename
+        base_filename = re.sub(r'^relaxed_', '', base_filename)  # Remove "relaxed_" prefix
 
         # Validate structure with detailed error reporting
         if not validate_structure(structure):
@@ -1480,66 +1500,52 @@ def calculate_phonon_impl(
                 "error": f"Phonon calculation failed: {str(e)}"
             }
 
-        # Step 7: Extract phonon results and save to persistent directory
+        # Step 7: 定位声子谱图片文件（保留原始文件名）
         try:
             # PhononWorkflow saves plots with format: {chemical_formula}_phonon_band.png
             # e.g., "Si2_phonon_band.png" for Si2
             work_dir_path = Path(work_dir)
 
-            # Generate timestamp for unique filenames
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # Use image_name_base (from original filename) for consistent naming
-            base_name = f"relaxed_{image_name_base}_"
-
+            # 🔧 保留原始文件名，不进行重命名
             # Find phonon band plot (search for *_phonon_band.png)
             phonon_band_files = list(work_dir_path.glob("*_phonon_band.png"))
 
             if phonon_band_files:
                 source_plot_path = phonon_band_files[0]
-                # Save to persistent directory with timestamp
-                persistent_band_path = persistent_dir / f"{base_name}band_{timestamp}.png"
-                shutil.copy2(source_plot_path, persistent_band_path)
+                # 保留原始文件名，不重命名
                 plot_exists = True
-                plot_relative_path = str(persistent_band_path)  # Use absolute path
-                logger.info("Phonon band plot saved to persistent directory", path=str(persistent_band_path))
+                plot_relative_path = str(source_plot_path)
+                logger.info("✅ Phonon band plot found", path=str(source_plot_path), original_name=source_plot_path.name)
             else:
                 # Fallback: try default name
                 source_plot_path = work_dir_path / "phonon_band.png"
                 if source_plot_path.exists():
-                    persistent_band_path = persistent_dir / f"{base_name}band_{timestamp}.png"
-                    shutil.copy2(source_plot_path, persistent_band_path)
                     plot_exists = True
-                    plot_relative_path = str(persistent_band_path)  # Use absolute path
-                    logger.info("Phonon plot saved to persistent directory (default name)", path=str(persistent_band_path))
+                    plot_relative_path = str(source_plot_path)
+                    logger.info("✅ Phonon plot found (default name)", path=str(source_plot_path))
                 else:
                     plot_relative_path = ""
                     plot_exists = False
-                    logger.warning("Phonon plot not found", work_dir=str(work_dir_path))
+                    logger.warning("⚠️ Phonon plot not found", work_dir=str(work_dir_path))
 
         except Exception as e:
-            logger.warning("Failed to save phonon plot", error=str(e))
+            logger.warning("Failed to process phonon plot", error=str(e))
             plot_relative_path = ""
             plot_exists = False
 
-        # Step 8: Try to find DOS plot as well and save to persistent directory
+        # Step 8: 定位声子态密度图片文件（保留原始文件名）
         dos_relative_path = ""
         dos_exists = False
         try:
             dos_files = list(work_dir_path.glob("*_phonon_dos.png"))
             if dos_files:
                 source_dos_path = dos_files[0]
-                # Save to persistent directory with timestamp
-                persistent_dos_path = persistent_dir / f"{base_name}dos_{timestamp}.png"
-                shutil.copy2(source_dos_path, persistent_dos_path)
+                # 保留原始文件名，不重命名
                 dos_exists = True
-                dos_relative_path = str(persistent_dos_path)  # Use absolute path
-                logger.info("Phonon DOS plot saved to persistent directory", path=str(persistent_dos_path))
+                dos_relative_path = str(source_dos_path)
+                logger.info("✅ Phonon DOS plot found", path=str(source_dos_path), original_name=source_dos_path.name)
         except Exception as e:
-            logger.warning("Failed to save phonon DOS plot", error=str(e))
-
-        # Generate calculation ID
-        calculation_id = str(uuid.uuid4())[:12]
+            logger.warning("Failed to process phonon DOS plot", error=str(e))
 
         # ⚠️ TOKEN OPTIMIZATION: Save phonon frequencies to file instead of returning in response
         phonon_data_file = ""
@@ -1551,16 +1557,19 @@ def calculate_phonon_impl(
             import pandas as pd
             import yaml
 
-            phonon_data_file = persistent_dir / f"{base_name}frequencies_{timestamp}.json"
+            # 🔧 优化：使用标准文件名（在独立目录中）
+            phonon_data_file = persistent_dir / "phonon_frequencies.json"
 
             # Prepare phonon data for saving
             phonon_data = {
                 "frequencies": phonons if isinstance(phonons, list) else str(phonons),
                 "has_imaginary": bool(has_imag),
                 "calculation_id": calculation_id,
+                "calculation_timestamp": calculation_timestamp,
                 "composition": composition_str,
                 "n_atoms": int(n_atoms),
                 "supercell_matrix": supercell_matrix,
+                "cif_filename": cif_filename,
                 "timestamp": datetime.now().isoformat()
             }
 
@@ -1592,93 +1601,126 @@ def calculate_phonon_impl(
 
             # 🆕 Extract and save phonon dispersion data from band.yaml
             try:
-                band_yaml_path = work_dir_path / "band.yaml"
-                if band_yaml_path.exists():
-                    logger.info(f"📊 Extracting phonon dispersion data from band.yaml")
-
-                    with open(band_yaml_path, 'r', encoding='utf-8') as f:
-                        band_data = yaml.safe_load(f)
-
-                    # Extract q-points and frequencies
-                    if band_data and 'phonon' in band_data:
-                        dispersion_rows = []
-                        for phonon_point in band_data['phonon']:
-                            q_point = phonon_point.get('q-position', [0, 0, 0])
-                            distance = phonon_point.get('distance', 0.0)
-                            bands = phonon_point.get('band', [])
-
-                            # Create row with q-point distance and all band frequencies
-                            row = {'q_distance': distance}
-                            for i, band in enumerate(bands):
-                                freq = band.get('frequency', 0.0)
-                                row[f'band_{i+1}'] = freq
-
-                            dispersion_rows.append(row)
-
-                        if dispersion_rows:
-                            # Save to CSV
-                            df_dispersion = pd.DataFrame(dispersion_rows)
-                            phonon_dispersion_csv = persistent_dir / f"{base_name}dispersion_{timestamp}.csv"
-                            df_dispersion.to_csv(phonon_dispersion_csv, index=False, float_format='%.6f')
-                            logger.info(f"✅ Saved phonon dispersion data to: {phonon_dispersion_csv}")
-                            logger.info(f"   Data shape: {df_dispersion.shape[0]} q-points × {df_dispersion.shape[1]-1} bands")
-                        else:
-                            logger.warning("⚠️ No dispersion data found in band.yaml")
-                    else:
-                        logger.warning("⚠️ band.yaml does not contain 'phonon' key")
+                if MAX_CSV_ROWS == 0:
+                    logger.info(f"⏭️ Skipping dispersion CSV export (MAX_CSV_ROWS=0)")
+                elif skip_large_csv:
+                    logger.info(f"⏭️ Skipping band.yaml CSV export (large system: {n_atoms} atoms > {ATOM_THRESHOLD})")
                 else:
-                    logger.warning(f"⚠️ band.yaml not found at: {band_yaml_path}")
+                    band_yaml_path = work_dir_path / "band.yaml"
+                    if not band_yaml_path.exists():
+                        logger.warning(f"⚠️ band.yaml not found")
+                    else:
+                        import time
+                        start_time = time.time()
+                        logger.info(f"📊 Extracting phonon dispersion from band.yaml...")
+
+                        with open(band_yaml_path, 'r', encoding='utf-8') as f:
+                            band_data = yaml.load(f, Loader=_get_yaml_loader())
+                        yaml_load_time = time.time() - start_time
+                        logger.info(f"   ⏱️ YAML loaded in {yaml_load_time:.2f}s")
+
+                        if not band_data or 'phonon' not in band_data:
+                            logger.warning("⚠️ band.yaml missing 'phonon' key")
+                        else:
+                            total_points = len(band_data['phonon'])
+                            logger.info(f"   📈 Processing {total_points} q-points...")
+
+                            dispersion_rows = []
+                            for idx, phonon_point in enumerate(band_data['phonon']):
+                                row = {'q_distance': phonon_point.get('distance', 0.0)}
+                                for i, band in enumerate(phonon_point.get('band', [])):
+                                    row[f'band_{i+1}'] = band.get('frequency', 0.0)
+                                dispersion_rows.append(row)
+                                if (idx + 1) % 1000 == 0:
+                                    logger.info(f"   ⏳ Processed {idx + 1}/{total_points} q-points...")
+
+                            if dispersion_rows:
+                                logger.info(f"   🔄 Building DataFrame from {len(dispersion_rows)} rows...")
+                                df_dispersion = pd.DataFrame(dispersion_rows)
+                                df_dispersion, original_rows = _downsample_dataframe(df_dispersion, MAX_CSV_ROWS, len(df_dispersion))
+
+                                # 🔧 修复：使用与图片文件名一致的命名格式
+                                phonon_dispersion_csv = persistent_dir / f"{composition_str}_phonon_dispersion.csv"
+                                logger.info(f"   💾 Writing CSV file...")
+                                csv_write_time, total_time = _save_csv_optimized(df_dispersion, phonon_dispersion_csv, start_time)
+
+                                logger.info(f"✅ Saved phonon dispersion CSV in {total_time:.2f}s (YAML: {yaml_load_time:.2f}s, CSV: {csv_write_time:.2f}s): {phonon_dispersion_csv}")
+                                logger.info(f"   📊 Data shape: {df_dispersion.shape[0]} q-points × {df_dispersion.shape[1]-1} bands")
+                                if original_rows > MAX_CSV_ROWS > 0:
+                                    logger.info(f"   📉 Original: {original_rows} q-points (downsampled)")
+                            else:
+                                logger.warning("⚠️ No dispersion data found")
             except Exception as e:
-                logger.warning(f"⚠️ Failed to extract phonon dispersion data: {e}")
+                logger.warning(f"⚠️ Failed to extract phonon dispersion: {e}")
 
             # 🆕 Extract and save phonon DOS data from mesh.yaml or total_dos.dat
             try:
-                # Try mesh.yaml first
-                mesh_yaml_path = work_dir_path / "mesh.yaml"
-                dos_dat_path = work_dir_path / "total_dos.dat"
+                if MAX_CSV_ROWS == 0:
+                    logger.info(f"⏭️ Skipping DOS CSV export (MAX_CSV_ROWS=0)")
+                else:
+                    mesh_yaml_path = work_dir_path / "mesh.yaml"
+                    dos_dat_path = work_dir_path / "total_dos.dat"
+                    dos_extracted = False
+                    df_dos = None
+                    original_points = 0
 
-                dos_extracted = False
+                    # 🚀 大体系优化：直接使用 total_dos.dat（跳过慢速的 mesh.yaml）
+                    if skip_large_csv:
+                        logger.info(f"⚡ Large system: skipping mesh.yaml, using total_dos.dat directly")
+                        if dos_dat_path.exists():
+                            import time
+                            start_time = time.time()
+                            logger.info(f"📊 Extracting phonon DOS from total_dos.dat...")
+                            df_dos = pd.read_csv(dos_dat_path, sep=r'\s+', header=None,
+                                               names=['frequency_THz', 'dos'], comment='#', engine='c')
+                            dos_extracted = True
+                            logger.info(f"   ✅ Loaded {len(df_dos)} DOS points in {time.time() - start_time:.2f}s")
+                        else:
+                            logger.warning(f"⚠️ total_dos.dat not found at: {dos_dat_path}")
+                    else:
+                        # 小体系：优先使用 mesh.yaml
+                        if mesh_yaml_path.exists():
+                            import time
+                            start_time = time.time()
+                            logger.info(f"📊 Extracting phonon DOS from mesh.yaml...")
 
-                if mesh_yaml_path.exists():
-                    logger.info(f"📊 Extracting phonon DOS data from mesh.yaml")
+                            with open(mesh_yaml_path, 'r', encoding='utf-8') as f:
+                                mesh_data = yaml.load(f, Loader=_get_yaml_loader())
+                            yaml_load_time = time.time() - start_time
+                            logger.info(f"   ⏱️ YAML loaded in {yaml_load_time:.2f}s")
 
-                    with open(mesh_yaml_path, 'r', encoding='utf-8') as f:
-                        mesh_data = yaml.safe_load(f)
+                            if mesh_data and 'phonon_dos' in mesh_data:
+                                logger.info(f"   📈 Processing {len(mesh_data['phonon_dos'])} DOS points...")
+                                df_dos = pd.DataFrame(np.array(mesh_data['phonon_dos']),
+                                                    columns=['frequency_THz', 'dos'])
+                                dos_extracted = True
 
-                    if mesh_data and 'phonon_dos' in mesh_data:
-                        dos_data = mesh_data['phonon_dos']
-                        frequencies = [point[0] for point in dos_data]
-                        dos_values = [point[1] for point in dos_data]
+                        # Fallback to total_dos.dat
+                        if not dos_extracted and dos_dat_path.exists():
+                            import time
+                            start_time = time.time()
+                            logger.info(f"📊 Extracting phonon DOS from total_dos.dat...")
+                            df_dos = pd.read_csv(dos_dat_path, sep=r'\s+', header=None,
+                                               names=['frequency_THz', 'dos'], comment='#', engine='c')
+                            dos_extracted = True
 
-                        df_dos = pd.DataFrame({
-                            'frequency_THz': frequencies,
-                            'dos': dos_values
-                        })
+                    # Save DOS data
+                    if dos_extracted and df_dos is not None:
+                        df_dos, original_points = _downsample_dataframe(df_dos, max_csv_rows, len(df_dos))
+                        # 🔧 修复：使用与图片文件名一致的命名格式
+                        phonon_dos_csv = persistent_dir / f"{composition_str}_phonon_dos.csv"
+                        logger.info(f"   💾 Writing CSV file...")
+                        csv_write_time, total_time = _save_csv_optimized(df_dos, phonon_dos_csv, start_time if 'start_time' in locals() else None)
 
-                        phonon_dos_csv = persistent_dir / f"{base_name}dos_{timestamp}.csv"
-                        df_dos.to_csv(phonon_dos_csv, index=False, float_format='%.6f')
-                        logger.info(f"✅ Saved phonon DOS data to: {phonon_dos_csv}")
-                        logger.info(f"   Data points: {len(frequencies)}")
-                        dos_extracted = True
-
-                # Fallback to total_dos.dat
-                if not dos_extracted and dos_dat_path.exists():
-                    logger.info(f"📊 Extracting phonon DOS data from total_dos.dat")
-
-                    df_dos = pd.read_csv(dos_dat_path, sep=r'\s+', header=None,
-                                        names=['frequency_THz', 'dos'], comment='#')
-
-                    phonon_dos_csv = persistent_dir / f"{base_name}dos_{timestamp}.csv"
-                    df_dos.to_csv(phonon_dos_csv, index=False, float_format='%.6f')
-                    logger.info(f"✅ Saved phonon DOS data to: {phonon_dos_csv}")
-                    logger.info(f"   Data points: {len(df_dos)}")
-                    dos_extracted = True
-
-                if not dos_extracted:
-                    logger.warning(f"⚠️ No DOS data files found (mesh.yaml or total_dos.dat)")
+                        logger.info(f"✅ Saved phonon DOS CSV in {total_time:.2f}s: {phonon_dos_csv}")
+                        logger.info(f"   📊 Data points: {len(df_dos)}")
+                        if original_points > max_csv_rows > 0:
+                            logger.info(f"   📉 Original: {original_points} points (downsampled)")
+                    else:
+                        logger.warning(f"⚠️ No DOS data files found")
 
             except Exception as e:
-                logger.warning(f"⚠️ Failed to extract phonon DOS data: {e}")
+                logger.warning(f"⚠️ Failed to extract phonon DOS: {e}")
 
         except Exception as e:
             logger.warning(f"Failed to save phonon frequencies: {e}")
@@ -1688,6 +1730,13 @@ def calculate_phonon_impl(
 
         return {
             "success": True,
+
+            # 🆕 Calculation metadata
+            "calculation_id": calculation_id,
+            "calculation_timestamp": calculation_timestamp,
+            "structure_directory": structure_dir_name,
+            "output_directory": str(persistent_dir),
+
             # Phonon results
             "has_imaginary_modes": bool(has_imag),
             "stability_status": "UNSTABLE" if has_imag else "STABLE",
@@ -1715,6 +1764,7 @@ def calculate_phonon_impl(
             # Structure properties
             "composition": composition_str,
             "n_atoms": int(n_atoms),
+            "cif_filename": cif_filename,
 
             # Calculation parameters
             "supercell_matrix": supercell_matrix,
@@ -1738,9 +1788,6 @@ def calculate_phonon_impl(
         }
 
     finally:
-        # Always cleanup temporary directory (results are saved to persistent storage)
-        try:
-            shutil.rmtree(temp_dir)
-            logger.info("Cleaned up temporary directory, phonon results saved to persistent storage")
-        except Exception as e:
-            logger.warning("Failed to cleanup temporary directory", error=str(e))
+        # 🔧 优化：不再需要清理临时目录，因为直接使用持久化目录作为工作目录
+        # 所有文件（图片、YAML、CSV）都已保存在持久化目录中
+        logger.info("✅ Phonon calculation completed, all results saved to persistent storage")

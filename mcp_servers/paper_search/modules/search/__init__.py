@@ -4,6 +4,7 @@ Search Agent Tools (搜索代理工具)
 包含所有搜索相关的工具：
 - ArXiv 搜索
 - Tavily 搜索
+- Semantic Scholar 搜索
 """
 from .arxiv import (
     search_arxiv_papers,
@@ -21,6 +22,10 @@ from .tavily import (
     is_tavily_available,
 )
 
+from .semantic_scholar import (
+    search_semantic_scholar_papers,
+)
+
 __all__ = [
     # ArXiv
     'search_arxiv_papers',
@@ -35,5 +40,8 @@ __all__ = [
     'search_academic_web',
     'search_news',
     'is_tavily_available',
+
+    # Semantic Scholar
+    'search_semantic_scholar_papers',
 ]
 

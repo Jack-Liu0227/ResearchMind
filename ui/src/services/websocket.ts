@@ -321,6 +321,25 @@ class WebSocketService {
   }
 
   /**
+   * 🆕 发送停止请求
+   */
+  sendStopRequest(agentId?: string, sessionId?: string): void {
+    const message: any = {
+      type: 'stop_response',
+      agentId,
+      sessionId,
+      timestamp: new Date().toISOString(),
+    }
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message))
+      console.log('🛑 发送停止请求:', { agentId, sessionId })
+    } else {
+      console.warn('WebSocket is not connected')
+    }
+  }
+
+  /**
    * 🆕 发送认证信息（基于 Cookie）
    * 在 WebSocket 连接成功后立即调用
    *

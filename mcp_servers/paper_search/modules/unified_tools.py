@@ -17,7 +17,7 @@ SyncSearchHandler = Callable[[str, int, Optional[str]], Union[SearchResultList, 
 AsyncSearchHandler = Callable[[str, int, Optional[str]], Awaitable[Union[SearchResultList, Dict[str, Any]]]]
 
 SOURCE_REGISTRY: Dict[str, Dict[str, Any]] = {}
-DEFAULT_SOURCES = ['arxiv', 'tavily_academic']
+DEFAULT_SOURCES = ['arxiv', 'tavily_academic', 'semantic_scholar']
 
 
 def register_search_source(
@@ -84,6 +84,16 @@ def _ensure_default_sources() -> None:
             search_web,
             is_async=True,
             description='Tavily general web search'
+        )
+
+    if 'semantic_scholar' not in SOURCE_REGISTRY:
+        from .search.semantic_scholar import search_semantic_scholar_papers
+
+        register_search_source(
+            'semantic_scholar',
+            search_semantic_scholar_papers,
+            is_async=True,
+            description='Semantic Scholar academic paper search'
         )
 
 
@@ -254,29 +264,31 @@ async def search_papers(
 # 统一内容获取接口
 # ============================================================================
 
-def get_paper_content(
+async def get_paper_content_async(
     paper: Dict[str, Any],
-    prefer_fulltext: bool = True
+    prefer_fulltext: bool = True,
+    timeout: int = 30
 ) -> Dict[str, Any]:
     """
-    统一的文献内容获取接口
-    
+    统一的文献内容获取接口（异步）
+
     Args:
         paper: 论文信息字典（包含paper_id, source, url等）
         prefer_fulltext: 是否优先获取全文（否则只返回摘要）
-    
+        timeout: 请求超时时间（秒）
+
     Returns:
         Dict containing:
         - status: 'success' or 'error'
         - content: 文本内容
         - metadata: 元数据（source_type, fallback等）
     """
-    from .paper_manager.content_fetcher import get_paper_content_by_source
-    
+    from .paper_manager.content_fetcher import get_paper_content_by_source_async
+
     try:
         paper_id = paper.get('paper_id', 'unknown')
         source = paper.get('source', 'unknown')
-        
+
         if not prefer_fulltext:
             # 只返回摘要
             abstract = paper.get('abstract', '')
@@ -288,16 +300,16 @@ def get_paper_content(
                     'fallback': False
                 }
             }
-        
+
         # 获取全文
-        result = get_paper_content_by_source(paper, source)
-        
+        result = await get_paper_content_by_source_async(paper, source, timeout=timeout)
+
         logger.info(f"Got content for {paper_id} from {source}")
         return result
-    
+
     except Exception as e:
         logger.error(f"Failed to get content for {paper.get('paper_id', 'unknown')}: {e}")
-        
+
         # 回退到摘要
         abstract = paper.get('abstract', '')
         return {

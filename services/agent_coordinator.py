@@ -89,6 +89,7 @@ class AgentCoordinator:
         self.current_tool_calls: Dict[str, List[Dict[str, Any]]] = {}  # 跟踪当前消息的工具调用
         self.message_billing_data: Dict[str, Dict[str, Any]] = {}  # 跟踪每条消息的计费数据 (session_key -> billing_data)
         self.message_start_billing: Dict[str, Dict[str, Any]] = {}  # 记录消息开始时的计费状态
+        self.stop_flags: Dict[str, bool] = {}  # 🆕 停止标志 (session_key -> should_stop)
 
     async def process_chat_message(
         self,
@@ -122,6 +123,9 @@ class AgentCoordinator:
 
             # Create session key
             session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
+
+            # 🆕 清除停止标志（开始新的处理）
+            self.clear_stop_flag(session_key)
 
             # Create or get session
             if session_key not in self.session_services:
@@ -287,21 +291,20 @@ class AgentCoordinator:
                                 file_bytes = base64.b64decode(content_b64)
                                 file_path = upload_dir / filename
 
-                                # 🆕 如果文件已存在，添加序号避免覆盖
+                                # 🔧 修复：如果文件已存在，使用时间戳避免覆盖，保持原始文件名结构
                                 if file_path.exists():
+                                    from datetime import datetime
                                     base_name = file_path.stem
                                     suffix = file_path.suffix
-                                    counter = 1
-                                    while file_path.exists():
-                                        file_path = upload_dir / f"{base_name}_{counter}{suffix}"
-                                        counter += 1
-                                    logger.info(f"File already exists, using new name: {file_path.name}")
+                                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    file_path = upload_dir / f"{base_name}_{timestamp}{suffix}"
+                                    logger.info(f"File already exists, using timestamped name: {file_path.name}")
 
                                 file_path.write_bytes(file_bytes)
 
                                 saved_files.append({
                                     'filename': original_filename,  # 保留原始文件名用于显示
-                                    'saved_filename': filename,  # 保存的文件名
+                                    'saved_filename': file_path.name,  # 🔧 修复：使用实际保存的文件名
                                     'path': str(file_path),
                                     'size': len(file_bytes),
                                     'mime_type': att.get('mime_type', 'application/octet-stream')
@@ -318,21 +321,20 @@ class AgentCoordinator:
                                 try:
                                     file_path = upload_dir / filename
 
-                                    # 🆕 如果文件已存在，添加序号避免覆盖
+                                    # 🔧 修复：如果文件已存在，使用时间戳避免覆盖，保持原始文件名结构
                                     if file_path.exists():
+                                        from datetime import datetime
                                         base_name = file_path.stem
                                         suffix = file_path.suffix
-                                        counter = 1
-                                        while file_path.exists():
-                                            file_path = upload_dir / f"{base_name}_{counter}{suffix}"
-                                            counter += 1
-                                        logger.info(f"File already exists, using new name: {file_path.name}")
+                                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                        file_path = upload_dir / f"{base_name}_{timestamp}{suffix}"
+                                        logger.info(f"File already exists, using timestamped name: {file_path.name}")
 
                                     file_path.write_text(text_content, encoding='utf-8')
 
                                     saved_files.append({
                                         'filename': original_filename,  # 保留原始文件名用于显示
-                                        'saved_filename': filename,  # 保存的文件名
+                                        'saved_filename': file_path.name,  # 🔧 修复：使用实际保存的文件名
                                         'path': str(file_path),
                                         'size': len(text_content.encode('utf-8')),
                                         'mime_type': att.get('mime_type', 'text/plain')
@@ -394,6 +396,20 @@ class AgentCoordinator:
                         session_id=session.id,
                         new_message=user_message
                     ):
+                        # 🆕 检查停止标志
+                        if self.should_stop(session_key):
+                            logger.info(f"🛑 检测到停止标志，中断处理: {session_key}")
+                            self.clear_stop_flag(session_key)
+                            await MessageHandler.send_message(
+                                websocket,
+                                "status",
+                                {
+                                    "status": "stopped",
+                                    "message": "已停止响应"
+                                }
+                            )
+                            return
+
                         event_count += 1
                         logger.info(f"🔍 [Event {event_count}] Type: {type(event).__name__}")
                         logger.info(f"🔍 [Event {event_count}] Attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
@@ -1183,6 +1199,8 @@ class AgentCoordinator:
             del self.adk_sessions[session_key]
             if session_key in self.session_message_counts:
                 del self.session_message_counts[session_key]
+            # 🆕 清除停止标志
+            self.clear_stop_flag(session_key)
             logger.info(f"🗑️ Cleared session: {session_key}")
 
     def clear_all_sessions(self, client_id: str):
@@ -1203,6 +1221,8 @@ class AgentCoordinator:
             del self.adk_sessions[key]
             if key in self.session_message_counts:
                 del self.session_message_counts[key]
+            # 🆕 清除停止标志
+            self.clear_stop_flag(key)
 
         logger.info(f"🗑️ Cleared {len(keys_to_remove)} sessions for client {client_id}")
 
@@ -1239,4 +1259,40 @@ class AgentCoordinator:
                 "needs_summary": self.session_message_counts.get(session_key, 0) >= CONTEXT_SUMMARY_THRESHOLD
             }
         return None
+
+    def stop_current_task(self, client_id: str, agent_id: str, session_id: Optional[str] = None):
+        """
+        🆕 停止当前任务
+
+        Args:
+            client_id: Client ID
+            agent_id: Agent ID
+            session_id: Optional session ID
+        """
+        session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
+        self.stop_flags[session_key] = True
+        logger.info(f"🛑 设置停止标志: {session_key}")
+
+    def should_stop(self, session_key: str) -> bool:
+        """
+        🆕 检查是否应该停止
+
+        Args:
+            session_key: Session key
+
+        Returns:
+            True if should stop, False otherwise
+        """
+        return self.stop_flags.get(session_key, False)
+
+    def clear_stop_flag(self, session_key: str):
+        """
+        🆕 清除停止标志
+
+        Args:
+            session_key: Session key
+        """
+        if session_key in self.stop_flags:
+            del self.stop_flags[session_key]
+            logger.info(f"✅ 清除停止标志: {session_key}")
 

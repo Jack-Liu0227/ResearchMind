@@ -191,33 +191,43 @@ class ImageHandler:
 
             # 🆕 添加 CSV 数据路径（如果提供）
             if dispersion_csv:
+                logger.info(f"🔍 Processing dispersion CSV: {dispersion_csv}")
                 # 同样从 CSV 路径中提取相对路径
                 csv_normalized = dispersion_csv.replace('\\', '/')
+                logger.info(f"🔍 Normalized CSV path: {csv_normalized}")
                 if 'session_data/simulation/' in csv_normalized:
                     csv_relative = csv_normalized.split('session_data/simulation/', 1)[1]
                     csv_url = f"/api/images/phonon/{csv_relative}"
+                    logger.info(f"✅ Extracted from session_data/simulation/: {csv_url}")
                 elif '/simulation/' in csv_normalized:
                     csv_relative = csv_normalized.split('/simulation/', 1)[1]
                     csv_url = f"/api/images/phonon/{csv_relative}"
+                    logger.info(f"✅ Extracted from /simulation/: {csv_url}")
                 else:
                     csv_filename = Path(dispersion_csv).name
                     csv_url = f"/api/images/phonon/{csv_filename}"
+                    logger.warning(f"⚠️ Using filename only: {csv_url}")
 
                 image_data["dispersionCsvPath"] = csv_url
                 logger.info(f"📊 Added dispersion CSV path: {csv_url}")
 
             if dos_csv:
+                logger.info(f"🔍 Processing DOS CSV: {dos_csv}")
                 # 同样从 CSV 路径中提取相对路径
                 csv_normalized = dos_csv.replace('\\', '/')
+                logger.info(f"🔍 Normalized CSV path: {csv_normalized}")
                 if 'session_data/simulation/' in csv_normalized:
                     csv_relative = csv_normalized.split('session_data/simulation/', 1)[1]
                     csv_url = f"/api/images/phonon/{csv_relative}"
+                    logger.info(f"✅ Extracted from session_data/simulation/: {csv_url}")
                 elif '/simulation/' in csv_normalized:
                     csv_relative = csv_normalized.split('/simulation/', 1)[1]
                     csv_url = f"/api/images/phonon/{csv_relative}"
+                    logger.info(f"✅ Extracted from /simulation/: {csv_url}")
                 else:
                     csv_filename = Path(dos_csv).name
                     csv_url = f"/api/images/phonon/{csv_filename}"
+                    logger.warning(f"⚠️ Using filename only: {csv_url}")
 
                 image_data["dosCsvPath"] = csv_url
                 logger.info(f"📊 Added DOS CSV path: {csv_url}")

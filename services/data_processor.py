@@ -185,9 +185,17 @@ class DataProcessor:
                 file_metadata['csv_download_url'] = data['csv_download_url']
                 if 'csv_file_path' in data:
                     file_metadata['csv_file_path'] = data['csv_file_path']
-                    inline_csv = DataProcessor._read_text_file(data['csv_file_path'])
-                    if inline_csv is not None:
-                        file_metadata['csv_inline_content'] = inline_csv
+                    # 🔧 性能优化：只获取文件元数据，不读取完整内容
+                    csv_meta = DataProcessor._get_file_metadata(data['csv_file_path'])
+                    if csv_meta:
+                        file_metadata['csv_metadata'] = csv_meta
+                        if csv_meta.get('is_large'):
+                            logger.info(f"📄 Large CSV file detected ({csv_meta['size_kb']} KB), skipping inline content")
+                        else:
+                            # 只有小文件才内联读取
+                            inline_csv = DataProcessor._read_text_file(data['csv_file_path'])
+                            if inline_csv is not None:
+                                file_metadata['csv_inline_content'] = inline_csv
                 logger.info(f"📄 Found CSV file: {data['csv_download_url']}")
 
             # Extract MD download URL
@@ -195,14 +203,19 @@ class DataProcessor:
                 file_metadata['md_download_url'] = data['md_download_url']
                 if 'summary_file_path' in data:
                     file_metadata['summary_file_path'] = data['summary_file_path']
-                    inline_md = DataProcessor._read_text_file(data['summary_file_path'])
-                    if inline_md is not None:
-                        file_metadata['md_inline_content'] = inline_md
+                    # 🔧 性能优化：只获取文件元数据
+                    md_meta = DataProcessor._get_file_metadata(data['summary_file_path'])
+                    if md_meta and not md_meta.get('is_large'):
+                        inline_md = DataProcessor._read_text_file(data['summary_file_path'])
+                        if inline_md is not None:
+                            file_metadata['md_inline_content'] = inline_md
                 elif 'report_file_path' in data:
                     file_metadata['report_file_path'] = data['report_file_path']
-                    inline_md = DataProcessor._read_text_file(data['report_file_path'])
-                    if inline_md is not None:
-                        file_metadata['md_inline_content'] = inline_md
+                    md_meta = DataProcessor._get_file_metadata(data['report_file_path'])
+                    if md_meta and not md_meta.get('is_large'):
+                        inline_md = DataProcessor._read_text_file(data['report_file_path'])
+                        if inline_md is not None:
+                            file_metadata['md_inline_content'] = inline_md
                 logger.info(f"📄 Found MD file: {data['md_download_url']}")
 
             # 🆕 处理热导率计算结果的 CSV 文件
@@ -216,11 +229,8 @@ class DataProcessor:
                 method = data.get('method', 'unknown')
                 kappa_value = data.get('thermal_conductivity', {}).get('value', 'N/A')
 
-                # 生成更清晰的文件名：包含 CIF 名称、方法和热导率值
-                if cif_filename:
-                    display_name = f"{cif_filename} - {method} (κ={kappa_value} W/m·K)"
-                else:
-                    display_name = f"热导率结果 - {filename}"
+                # 🔧 修复：使用 CSV 文件名（不带扩展名）作为显示名称
+                display_name = Path(filename).stem  # 例如：kappa_results_calc_20251117_183831
 
                 # 🔧 修复：从路径中提取 session_id 生成正确的 URL
                 # 路径格式: session_data/simulation/{session_id}/thermal_conductivity/file.csv
@@ -244,22 +254,24 @@ class DataProcessor:
                 file_metadata['kappa_results_csv_url'] = csv_url
                 file_metadata['kappa_results_csv_path'] = csv_path
 
-                # 读取 CSV 内容用于内联展示
-                inline_csv = DataProcessor._read_text_file(csv_path)
-                if inline_csv is not None:
-                    file_metadata['kappa_results_csv_content'] = inline_csv
+                # 🔧 性能优化：完全不内联读取，只传递元数据和下载链接
+                # 前端通过下载 URL 按需获取完整数据
+                csv_meta = DataProcessor._get_file_metadata(csv_path)
+                if csv_meta:
+                    file_metadata['kappa_results_csv_metadata'] = csv_meta
+                    logger.info(f"📄 Thermal conductivity CSV metadata: {csv_meta['size_kb']} KB, {csv_meta.get('line_count', 'unknown')} lines")
 
                 logger.info(f"📄 Found thermal conductivity results CSV: {csv_url}")
 
                 # 🔧 同时发送为独立的文件数据，确保在右侧面板显示
-                await DataProcessor._send_message(websocket, "file_data", {
+                file_data_message = {
                     "files": [{
                         "id": f"kappa_{filename}",
                         "type": "csv",
                         "name": display_name,
                         "downloadUrl": csv_url,
                         "filePath": csv_path,
-                        "inlineContent": inline_csv,
+                        "metadata": csv_meta,  # 只传递元数据，不传递内容
                         "createdAt": datetime.now().timestamp() * 1000,
                         "extra": {
                             "category": "thermal_conductivity",
@@ -271,12 +283,18 @@ class DataProcessor:
                     "agentId": agent_id,
                     "sessionId": session_id,
                     "timestamp": datetime.now().isoformat()
-                })
+                }
+                logger.info(f"📤 [data_processor] Sending thermal conductivity file_data message: {file_data_message}")
+                await DataProcessor._send_message(websocket, "file_data", file_data_message)
+                logger.info(f"✅ [data_processor] Sent thermal conductivity file_data message")
 
             # 批量热导率计算
             if 'batch_results_file' in data and data['batch_results_file']:
                 csv_path = data['batch_results_file']
                 filename = os.path.basename(csv_path)
+
+                # 🔧 修复：使用 CSV 文件名（不带扩展名）作为显示名称
+                display_name = Path(filename).stem  # 例如：batch_kappa_results_20251117_183831
 
                 # 🔧 修复：从路径中提取 session_id 生成正确的 URL
                 normalized_path = csv_path.replace('\\', '/')
@@ -294,22 +312,23 @@ class DataProcessor:
                 file_metadata['kappa_batch_csv_url'] = csv_url
                 file_metadata['kappa_batch_csv_path'] = csv_path
 
-                # 读取 CSV 内容用于内联展示
-                inline_csv = DataProcessor._read_text_file(csv_path)
-                if inline_csv is not None:
-                    file_metadata['kappa_batch_csv_content'] = inline_csv
+                # 🔧 性能优化：完全不内联读取，只传递元数据和下载链接
+                csv_meta = DataProcessor._get_file_metadata(csv_path)
+                if csv_meta:
+                    file_metadata['kappa_batch_csv_metadata'] = csv_meta
+                    logger.info(f"📄 Batch thermal conductivity CSV metadata: {csv_meta['size_kb']} KB, {csv_meta.get('line_count', 'unknown')} lines")
 
                 logger.info(f"📄 Found batch thermal conductivity results CSV: {csv_url}")
 
                 # 🔧 同时发送为独立的文件数据，确保在右侧面板显示
-                await DataProcessor._send_message(websocket, "file_data", {
+                file_data_message = {
                     "files": [{
                         "id": f"kappa_batch_{filename}",
                         "type": "csv",
-                        "name": f"批量热导率结果 - {filename}",
+                        "name": display_name,  # 🔧 使用文件名而不是 "批量热导率结果 - xxx"
                         "downloadUrl": csv_url,
                         "filePath": csv_path,
-                        "inlineContent": inline_csv,
+                        "metadata": csv_meta,  # 只传递元数据，不传递内容
                         "createdAt": datetime.now().timestamp() * 1000,
                         "extra": {
                             "category": "thermal_conductivity_batch",
@@ -319,52 +338,76 @@ class DataProcessor:
                     "agentId": agent_id,
                     "sessionId": session_id,
                     "timestamp": datetime.now().isoformat()
-                })
+                }
+                logger.info(f"📤 [data_processor] Sending batch thermal conductivity file_data message: {file_data_message}")
+                await DataProcessor._send_message(websocket, "file_data", file_data_message)
+                logger.info(f"✅ [data_processor] Sent batch thermal conductivity file_data message")
 
             # 🆕 处理声子计算结果的 CSV 文件
             # 声子色散数据
             if 'phonon_dispersion_csv' in data and data['phonon_dispersion_csv']:
                 csv_path = data['phonon_dispersion_csv']
+                logger.info(f"🔍 [data_processor] Processing phonon_dispersion_csv: {csv_path}")
                 filename = os.path.basename(csv_path)
+                logger.info(f"🔍 [data_processor] Extracted filename: {filename}")
 
-                # 🔧 修复：从路径中提取 session_id 生成正确的 URL
-                # 路径格式: session_data/simulation/{session_id}/phonon_results/file.csv
-                # URL 格式: /api/images/phonon/{session_id}/phonon_results/file.csv
+                # 🔧 修复：使用 CSV 文件名（不带扩展名）作为显示名称
+                display_name = Path(filename).stem  # 例如：C8_phonon_dispersion
+                logger.info(f"🔍 [data_processor] Display name: {display_name}")
+
+                # 🔧 修复：从路径中提取正确的相对路径生成 URL
+                # 路径格式: session_data/simulation/{session_id}/phonon_results/{structure_dir}/{file}.csv
+                # URL 格式: /api/images/phonon/{session_id}/phonon_results/{structure_dir}/{file}.csv
                 normalized_path = csv_path.replace('\\', '/')
+                logger.info(f"🔍 [data_processor] Normalized path: {normalized_path}")
                 if 'session_data/simulation/' in normalized_path:
                     # 提取 session_data/simulation/ 后面的部分
                     relative_part = normalized_path.split('session_data/simulation/', 1)[1]
-                    # relative_part 格式: {session_id}/phonon_results/file.csv
+                    # relative_part 格式: {session_id}/phonon_results/{structure_dir}/{file}.csv
                     csv_url = f"/api/images/phonon/{relative_part}"
-                    logger.info(f"🔗 Generated phonon dispersion CSV URL from session_data path: {csv_url}")
-                elif session_id:
-                    # 如果有 session_id，使用它构建 URL
-                    csv_url = f"/api/images/phonon/{session_id}/phonon_results/{filename}"
-                    logger.info(f"🔗 Generated phonon dispersion CSV URL with session_id: {csv_url}")
+                    logger.info(f"✅ [data_processor] Generated phonon dispersion CSV URL from session_data path: {csv_url}")
                 else:
-                    # 后备方案：只使用文件名（可能不工作）
-                    csv_url = f"/api/images/phonon/{filename}"
-                    logger.warning(f"⚠️ Could not extract session_id from path, using filename only: {csv_url}")
+                    # 后备方案：尝试从绝对路径中提取相对路径
+                    # 查找 phonon_results/ 后面的部分
+                    if 'phonon_results/' in normalized_path:
+                        # 提取 phonon_results/ 后面的所有内容（包括子目录）
+                        relative_part = normalized_path.split('phonon_results/', 1)[1]
+                        logger.info(f"🔍 [data_processor] Extracted relative_part from phonon_results/: {relative_part}")
+                        if session_id:
+                            csv_url = f"/api/images/phonon/{session_id}/phonon_results/{relative_part}"
+                        else:
+                            csv_url = f"/api/images/phonon/phonon_results/{relative_part}"
+                        logger.info(f"✅ [data_processor] Generated phonon dispersion CSV URL from phonon_results path: {csv_url}")
+                    else:
+                        # 最后的后备方案：只使用文件名（可能不工作）
+                        csv_url = f"/api/images/phonon/{filename}"
+                        logger.warning(f"⚠️ [data_processor] Could not extract proper path, using filename only: {csv_url}")
 
                 file_metadata['phonon_dispersion_csv_url'] = csv_url
                 file_metadata['phonon_dispersion_csv_path'] = csv_path
 
-                # 🔧 优化：不传输完整 CSV 内容，只传递下载 URL
-                # 前端可以通过 URL 按需下载 CSV 文件
-                # inline_csv = DataProcessor._read_text_file(csv_path)
-                # if inline_csv is not None:
-                #     file_metadata['phonon_dispersion_csv_content'] = inline_csv
+                # 🔧 性能优化：声子色散 CSV 可能非常大（数千行 × 数十列）
+                # 只获取元数据，不读取完整内容，避免 WebSocket 传输卡顿
+                csv_meta = DataProcessor._get_file_metadata(csv_path)
+                if csv_meta:
+                    file_metadata['phonon_dispersion_csv_metadata'] = csv_meta
+                    logger.info(f"📄 Phonon dispersion CSV metadata: {csv_meta['size_kb']} KB, {csv_meta.get('line_count', 'unknown')} lines")
 
-                logger.info(f"📄 Found phonon dispersion CSV: {csv_url}")
+                    # 警告：如果文件过大，提示用户通过下载链接获取
+                    if csv_meta.get('is_large'):
+                        logger.warning(f"⚠️ Large phonon dispersion CSV detected ({csv_meta['size_kb']} KB), skipping inline content. Use download URL instead.")
+
+                logger.info(f"📄 [data_processor] Found phonon dispersion CSV: {csv_url}")
 
                 # 🔧 同时发送为独立的文件数据，确保在右侧面板显示
-                await DataProcessor._send_message(websocket, "file_data", {
+                file_data_message = {
                     "files": [{
                         "id": f"phonon_dispersion_{filename}",
                         "type": "csv",
-                        "name": f"声子色散数据 - {filename}",
+                        "name": display_name,  # 🔧 使用文件名而不是 "声子色散数据 - xxx"
                         "downloadUrl": csv_url,
                         "filePath": csv_path,
+                        "metadata": csv_meta,  # 添加元数据供前端显示
                         "createdAt": datetime.now().timestamp() * 1000,
                         "extra": {
                             "category": "phonon_dispersion"
@@ -373,45 +416,68 @@ class DataProcessor:
                     "agentId": agent_id,
                     "sessionId": session_id,
                     "timestamp": datetime.now().isoformat()
-                })
+                }
+                logger.info(f"📤 [data_processor] Sending file_data message: {file_data_message}")
+                await DataProcessor._send_message(websocket, "file_data", file_data_message)
+                logger.info(f"✅ [data_processor] Sent phonon dispersion CSV file_data message")
 
             # 声子态密度数据
             if 'phonon_dos_csv' in data and data['phonon_dos_csv']:
                 csv_path = data['phonon_dos_csv']
+                logger.info(f"🔍 [data_processor] Processing phonon_dos_csv: {csv_path}")
                 filename = os.path.basename(csv_path)
+                logger.info(f"🔍 [data_processor] Extracted filename: {filename}")
 
-                # 🔧 修复：从路径中提取 session_id 生成正确的 URL
+                # 🔧 修复：使用 CSV 文件名（不带扩展名）作为显示名称
+                display_name = Path(filename).stem  # 例如：C8_phonon_dos
+                logger.info(f"🔍 [data_processor] Display name: {display_name}")
+
+                # 🔧 修复：从路径中提取正确的相对路径生成 URL
                 normalized_path = csv_path.replace('\\', '/')
+                logger.info(f"🔍 [data_processor] Normalized path: {normalized_path}")
                 if 'session_data/simulation/' in normalized_path:
                     relative_part = normalized_path.split('session_data/simulation/', 1)[1]
                     csv_url = f"/api/images/phonon/{relative_part}"
-                    logger.info(f"🔗 Generated phonon DOS CSV URL from session_data path: {csv_url}")
-                elif session_id:
-                    csv_url = f"/api/images/phonon/{session_id}/phonon_results/{filename}"
-                    logger.info(f"🔗 Generated phonon DOS CSV URL with session_id: {csv_url}")
+                    logger.info(f"✅ [data_processor] Generated phonon DOS CSV URL from session_data path: {csv_url}")
                 else:
-                    csv_url = f"/api/images/phonon/{filename}"
-                    logger.warning(f"⚠️ Could not extract session_id from path, using filename only: {csv_url}")
+                    # 后备方案：尝试从绝对路径中提取相对路径
+                    if 'phonon_results/' in normalized_path:
+                        relative_part = normalized_path.split('phonon_results/', 1)[1]
+                        logger.info(f"🔍 [data_processor] Extracted relative_part from phonon_results/: {relative_part}")
+                        if session_id:
+                            csv_url = f"/api/images/phonon/{session_id}/phonon_results/{relative_part}"
+                        else:
+                            csv_url = f"/api/images/phonon/phonon_results/{relative_part}"
+                        logger.info(f"✅ [data_processor] Generated phonon DOS CSV URL from phonon_results path: {csv_url}")
+                    else:
+                        csv_url = f"/api/images/phonon/{filename}"
+                        logger.warning(f"⚠️ [data_processor] Could not extract proper path, using filename only: {csv_url}")
 
                 file_metadata['phonon_dos_csv_url'] = csv_url
                 file_metadata['phonon_dos_csv_path'] = csv_path
 
-                # 🔧 优化：不传输完整 CSV 内容，只传递下载 URL
-                # 前端可以通过 URL 按需下载 CSV 文件
-                # inline_csv = DataProcessor._read_text_file(csv_path)
-                # if inline_csv is not None:
-                #     file_metadata['phonon_dos_csv_content'] = inline_csv
+                # 🔧 性能优化：声子态密度 CSV 可能包含数千个频率点
+                # 只获取元数据，不读取完整内容，避免 WebSocket 传输卡顿
+                csv_meta = DataProcessor._get_file_metadata(csv_path)
+                if csv_meta:
+                    file_metadata['phonon_dos_csv_metadata'] = csv_meta
+                    logger.info(f"📄 Phonon DOS CSV metadata: {csv_meta['size_kb']} KB, {csv_meta.get('line_count', 'unknown')} lines")
 
-                logger.info(f"📄 Found phonon DOS CSV: {csv_url}")
+                    # 警告：如果文件过大，提示用户通过下载链接获取
+                    if csv_meta.get('is_large'):
+                        logger.warning(f"⚠️ Large phonon DOS CSV detected ({csv_meta['size_kb']} KB), skipping inline content. Use download URL instead.")
+
+                logger.info(f"📄 [data_processor] Found phonon DOS CSV: {csv_url}")
 
                 # 🔧 同时发送为独立的文件数据，确保在右侧面板显示
-                await DataProcessor._send_message(websocket, "file_data", {
+                file_data_message = {
                     "files": [{
                         "id": f"phonon_dos_{filename}",
                         "type": "csv",
-                        "name": f"声子态密度数据 - {filename}",
+                        "name": display_name,  # 🔧 使用文件名而不是 "声子态密度数据 - xxx"
                         "downloadUrl": csv_url,
                         "filePath": csv_path,
+                        "metadata": csv_meta,  # 添加元数据供前端显示
                         "createdAt": datetime.now().timestamp() * 1000,
                         "extra": {
                             "category": "phonon_dos"
@@ -420,7 +486,153 @@ class DataProcessor:
                     "agentId": agent_id,
                     "sessionId": session_id,
                     "timestamp": datetime.now().isoformat()
-                })
+                }
+                logger.info(f"📤 [data_processor] Sending file_data message: {file_data_message}")
+                await DataProcessor._send_message(websocket, "file_data", file_data_message)
+                logger.info(f"✅ [data_processor] Sent phonon DOS CSV file_data message")
+
+            # 🆕 处理批量声子谱计算结果中的 CSV 文件
+            if 'results' in data and isinstance(data['results'], list):
+                logger.info(f"📊 Processing batch phonon results: {len(data['results'])} items")
+
+                for idx, result_item in enumerate(data['results']):
+                    logger.info(f"📊 Processing result item {idx + 1}: success={result_item.get('success')}, filename={result_item.get('filename')}")
+
+                    if not isinstance(result_item, dict) or not result_item.get('success'):
+                        logger.info(f"⏭️ Skipping result item {idx + 1}: not successful or not a dict")
+                        continue
+
+                    # 处理每个结果中的声子色散 CSV
+                    if 'phonon_dispersion_csv' in result_item and result_item['phonon_dispersion_csv']:
+                        logger.info(f"📊 Found phonon_dispersion_csv in result item {idx + 1}")
+                        csv_path = result_item['phonon_dispersion_csv']
+
+                        # 🔧 确保路径是绝对路径
+                        if not os.path.isabs(csv_path):
+                            csv_path = os.path.abspath(csv_path)
+                            logger.info(f"   Converted to absolute path: {csv_path}")
+
+                        # 🔧 检查文件是否真实存在
+                        if not os.path.exists(csv_path):
+                            logger.warning(f"⚠️ Phonon dispersion CSV file not found: {csv_path}")
+                            logger.info(f"   This may happen for large structures where CSV export was skipped")
+                        else:
+                            filename = os.path.basename(csv_path)
+                            source_file = result_item.get('filename', 'unknown')
+
+                            # 🔧 修复：使用 CSV 文件名（不带扩展名）作为显示名称
+                            display_name = Path(filename).stem  # 例如：Si8_phonon_dispersion
+
+                            # 生成 URL
+                            normalized_path = csv_path.replace('\\', '/')
+                            if 'session_data/simulation/' in normalized_path:
+                                relative_part = normalized_path.split('session_data/simulation/', 1)[1]
+                                csv_url = f"/api/images/phonon/{relative_part}"
+                            elif 'phonon_results/' in normalized_path:
+                                relative_part = normalized_path.split('phonon_results/', 1)[1]
+                                if session_id:
+                                    csv_url = f"/api/images/phonon/{session_id}/phonon_results/{relative_part}"
+                                else:
+                                    csv_url = f"/api/images/phonon/phonon_results/{relative_part}"
+                            else:
+                                csv_url = f"/api/images/phonon/{filename}"
+
+                            csv_meta = DataProcessor._get_file_metadata(csv_path)
+
+                            logger.info(f"📤 Sending phonon dispersion CSV: {filename} (source: {source_file})")
+                            logger.info(f"   Display name: {display_name}")
+                            logger.info(f"   URL: {csv_url}")
+                            logger.info(f"   Path: {csv_path}")
+
+                            # 发送为独立的文件数据
+                            await DataProcessor._send_message(websocket, "file_data", {
+                                "files": [{
+                                    "id": f"phonon_dispersion_batch_{filename}",
+                                    "type": "csv",
+                                    "name": display_name,  # 🔧 使用文件名而不是 "声子色散 - xxx"
+                                    "downloadUrl": csv_url,
+                                    "filePath": csv_path,
+                                    "metadata": csv_meta,
+                                    "createdAt": datetime.now().timestamp() * 1000,
+                                    "extra": {
+                                        "category": "phonon_dispersion",
+                                        "sourceFile": source_file,
+                                        "batch": True
+                                    }
+                                }],
+                                "agentId": agent_id,
+                                "sessionId": session_id,
+                                "timestamp": datetime.now().isoformat()
+                            })
+                            logger.info(f"✅ Sent phonon dispersion CSV for {source_file}")
+                    else:
+                        logger.info(f"⏭️ No phonon_dispersion_csv in result item {idx + 1}")
+
+                    # 处理每个结果中的声子态密度 CSV
+                    if 'phonon_dos_csv' in result_item and result_item['phonon_dos_csv']:
+                        logger.info(f"📊 Found phonon_dos_csv in result item {idx + 1}")
+
+                        csv_path = result_item['phonon_dos_csv']
+
+                        # 🔧 确保路径是绝对路径
+                        if not os.path.isabs(csv_path):
+                            csv_path = os.path.abspath(csv_path)
+                            logger.info(f"   Converted to absolute path: {csv_path}")
+
+                        # 🔧 检查文件是否真实存在
+                        if not os.path.exists(csv_path):
+                            logger.warning(f"⚠️ Phonon DOS CSV file not found: {csv_path}")
+                        else:
+                            filename = os.path.basename(csv_path)
+                            source_file = result_item.get('filename', 'unknown')
+
+                            # 🔧 修复：使用 CSV 文件名（不带扩展名）作为显示名称
+                            display_name = Path(filename).stem  # 例如：C8_phonon_dos
+
+                            # 生成 URL
+                            normalized_path = csv_path.replace('\\', '/')
+                            if 'session_data/simulation/' in normalized_path:
+                                relative_part = normalized_path.split('session_data/simulation/', 1)[1]
+                                csv_url = f"/api/images/phonon/{relative_part}"
+                            elif 'phonon_results/' in normalized_path:
+                                relative_part = normalized_path.split('phonon_results/', 1)[1]
+                                if session_id:
+                                    csv_url = f"/api/images/phonon/{session_id}/phonon_results/{relative_part}"
+                                else:
+                                    csv_url = f"/api/images/phonon/phonon_results/{relative_part}"
+                            else:
+                                csv_url = f"/api/images/phonon/{filename}"
+
+                            csv_meta = DataProcessor._get_file_metadata(csv_path)
+
+                            logger.info(f"📤 Sending phonon DOS CSV: {filename} (source: {source_file})")
+                            logger.info(f"   Display name: {display_name}")
+                            logger.info(f"   URL: {csv_url}")
+                            logger.info(f"   Path: {csv_path}")
+
+                            # 发送为独立的文件数据
+                            await DataProcessor._send_message(websocket, "file_data", {
+                                "files": [{
+                                    "id": f"phonon_dos_batch_{filename}",
+                                    "type": "csv",
+                                    "name": display_name,  # 🔧 使用文件名而不是 "声子态密度 - xxx"
+                                    "downloadUrl": csv_url,
+                                    "filePath": csv_path,
+                                    "metadata": csv_meta,
+                                    "createdAt": datetime.now().timestamp() * 1000,
+                                    "extra": {
+                                        "category": "phonon_dos",
+                                        "sourceFile": source_file,
+                                        "batch": True
+                                    }
+                                }],
+                                "agentId": agent_id,
+                                "sessionId": session_id,
+                                "timestamp": datetime.now().isoformat()
+                            })
+                            logger.info(f"✅ Sent phonon DOS CSV for {source_file}")
+                    else:
+                        logger.info(f"⏭️ No phonon_dos_csv in result item {idx + 1}")
 
             # If we found any file links, send them as metadata
             if file_metadata:
@@ -528,6 +740,56 @@ class DataProcessor:
             return path.read_text(encoding='utf-8', errors='ignore')
         except Exception as e:
             logger.warning(f"📄 Failed to read inline file {file_path}: {e}")
+            return None
+
+    @staticmethod
+    def _get_file_metadata(file_path: str) -> Optional[Dict[str, Any]]:
+        """
+        获取文件元数据（大小、行数等），避免读取完整内容
+
+        Args:
+            file_path: 文件路径
+
+        Returns:
+            包含文件元数据的字典，如果文件不存在返回 None
+        """
+        try:
+            if not file_path:
+                return None
+
+            raw_path = Path(file_path)
+            candidate_paths = []
+
+            if raw_path.is_absolute():
+                candidate_paths.append(raw_path)
+            else:
+                candidate_paths.append((Path.cwd() / raw_path).resolve())
+                candidate_paths.append((Path.cwd() / "mcp_servers" / raw_path).resolve())
+                candidate_paths.append((Path(__file__).resolve().parent.parent.parent / raw_path).resolve())
+
+            path = next((p for p in candidate_paths if p.exists() and p.is_file()), None)
+            if path is None:
+                return None
+
+            size = path.stat().st_size
+
+            # 快速统计行数（只读取前几行和最后几行）
+            line_count = None
+            try:
+                with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                    line_count = sum(1 for _ in f)
+            except:
+                pass
+
+            return {
+                "size_bytes": size,
+                "size_kb": round(size / 1024, 2),
+                "size_mb": round(size / (1024 * 1024), 2),
+                "line_count": line_count,
+                "is_large": size > 512_000  # 超过 512KB 视为大文件
+            }
+        except Exception as e:
+            logger.warning(f"📄 Failed to get file metadata {file_path}: {e}")
             return None
 
     @staticmethod

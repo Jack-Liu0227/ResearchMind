@@ -253,13 +253,13 @@ const PhononVisualization: React.FC<Props> = ({
   // 下载图片
   const handleDownload = async () => {
     if (!currentImage) return
-    
+
     try {
       const url = getImageUrl(currentImage)
       const response = await fetch(url)
       const blob = await response.blob()
       const downloadUrl = URL.createObjectURL(blob)
-      
+
       const a = document.createElement('a')
       a.href = downloadUrl
       a.download = `${getDisplayName(currentImage).replace(/\s+/g, '_')}.png`
@@ -554,7 +554,10 @@ const PhononVisualization: React.FC<Props> = ({
               <div className="bg-gray-800 rounded-lg p-4">
                 <div className="flex items-center space-x-2 mb-3">
                   <ChevronDown className="w-4 h-4 text-blue-400" />
-                  <h4 className="text-white font-medium">声子色散数据 (Phonon Dispersion)</h4>
+                  <h4 className="text-white font-medium">
+                    {/* 显示完整文件名（不带扩展名） */}
+                    {dispersionCsvPath.split('/').pop()?.replace(/\.csv$/i, '') || 'phonon_dispersion'}
+                  </h4>
                   <span className="text-xs text-gray-400">
                     q-点坐标 × 声子模式频率 (THz)
                   </span>
@@ -564,7 +567,7 @@ const PhononVisualization: React.FC<Props> = ({
                 </div>
                 <CsvViewer
                   url={dispersionCsvPath}
-                  filename="phonon_dispersion.csv"
+                  filename={dispersionCsvPath.split('/').pop() || 'phonon_dispersion.csv'}
                   maxHeight="300px"
                   defaultExpanded={true}
                 />
@@ -576,7 +579,10 @@ const PhononVisualization: React.FC<Props> = ({
               <div className="bg-gray-800 rounded-lg p-4">
                 <div className="flex items-center space-x-2 mb-3">
                   <ChevronDown className="w-4 h-4 text-green-400" />
-                  <h4 className="text-white font-medium">声子态密度数据 (Phonon DOS)</h4>
+                  <h4 className="text-white font-medium">
+                    {/* 显示完整文件名（不带扩展名） */}
+                    {dosCsvPath.split('/').pop()?.replace(/\.csv$/i, '') || 'phonon_dos'}
+                  </h4>
                   <span className="text-xs text-gray-400">
                     频率 (THz) × 态密度
                   </span>
@@ -586,7 +592,7 @@ const PhononVisualization: React.FC<Props> = ({
                 </div>
                 <CsvViewer
                   url={dosCsvPath}
-                  filename="phonon_dos.csv"
+                  filename={dosCsvPath.split('/').pop() || 'phonon_dos.csv'}
                   maxHeight="300px"
                   defaultExpanded={true}
                 />

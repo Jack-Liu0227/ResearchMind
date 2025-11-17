@@ -145,17 +145,34 @@ def search_arxiv_papers(topic: str, max_results: int = 5, session_id: str = None
 
         file_path = os.path.join(path, "papers_info.json")
 
-        # Try to load existing papers info
+        # Try to load existing papers info (用于去重)
         try:
             with open(file_path, "r", encoding='utf-8') as json_file:
                 papers_info = json.load(json_file)
         except (FileNotFoundError, json.JSONDecodeError):
             papers_info = {}
 
+        # 用于URL去重
+        existing_urls = set()
+        for existing_paper in papers_info.values():
+            url = existing_paper.get('url', '') or existing_paper.get('pdf_url', '')
+            if url:
+                existing_urls.add(url)
+
         # Process each paper and add to papers_info
         paper_results = []
+        new_papers_count = 0
         for paper in papers:
             arxiv_id = paper.get_short_id()
+            paper_url = paper.entry_id
+
+            # URL去重检查
+            if paper_url in existing_urls:
+                logger.info(f"Skipping duplicate paper by URL: {arxiv_id} ({paper_url})")
+                # 仍然添加到paper_results以保持返回结果的完整性
+                if arxiv_id in papers_info:
+                    paper_results.append(papers_info[arxiv_id])
+                continue
 
             # Unified field format
             paper_info = {
@@ -177,16 +194,35 @@ def search_arxiv_papers(topic: str, max_results: int = 5, session_id: str = None
             }
             papers_info[arxiv_id] = paper_info
             paper_results.append(paper_info)
+            existing_urls.add(paper_url)
+            new_papers_count += 1
 
         # Save updated papers_info to json file
         with open(file_path, "w", encoding='utf-8') as json_file:
             json.dump(papers_info, json_file, indent=2, ensure_ascii=False)
+
+        # 同时保存到CSV文件（追加模式）
+        if session_id:
+            try:
+                from ..paper_manager.export_tools import save_papers_to_csv
+                csv_result = save_papers_to_csv(
+                    papers=paper_results,
+                    session_id=session_id,
+                    topic=topic,
+                    file_prefix='arxiv_papers',
+                    append_mode=True  # 启用追加模式，合并到 all_papers.csv
+                )
+                logger.info(f"CSV save result: {csv_result.get('message', 'Unknown')}")
+            except Exception as csv_error:
+                logger.warning(f"Failed to save CSV: {csv_error}")
 
         logger.info(
             "ArXiv search completed",
             topic=topic,
             requested_max_results=max_results,
             actual_results=len(paper_results),
+            new_papers=new_papers_count,
+            total_in_json=len(papers_info),
             file_path=file_path
         )
         return paper_results

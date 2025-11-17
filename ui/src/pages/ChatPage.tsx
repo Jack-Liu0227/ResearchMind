@@ -139,14 +139,14 @@ const ChatPage: React.FC = () => {
       'csv',
       metadata.kappa_results_csv_url,
       metadata.kappa_results_csv_path,
-      '热导率计算结果'
+      metadata.kappa_results_csv_path ? extractFileName(metadata.kappa_results_csv_path) : undefined
     )
 
     pushFile(
       'csv',
       metadata.kappa_batch_csv_url,
       metadata.kappa_batch_csv_path,
-      '批量热导率计算结果'
+      metadata.kappa_batch_csv_path ? extractFileName(metadata.kappa_batch_csv_path) : undefined
     )
 
     // 🆕 声子计算结果 CSV 文件
@@ -154,14 +154,14 @@ const ChatPage: React.FC = () => {
       'csv',
       metadata.phonon_dispersion_csv_url,
       metadata.phonon_dispersion_csv_path,
-      '声子色散数据'
+      metadata.phonon_dispersion_csv_path ? extractFileName(metadata.phonon_dispersion_csv_path) : undefined
     )
 
     pushFile(
       'csv',
       metadata.phonon_dos_csv_url,
       metadata.phonon_dos_csv_path,
-      '声子态密度数据'
+      metadata.phonon_dos_csv_path ? extractFileName(metadata.phonon_dos_csv_path) : undefined
     )
 
     console.log('📄 [createSessionFilesFromMetadata] 创建了', files.length, '个文件:', files.map(f => f.name))

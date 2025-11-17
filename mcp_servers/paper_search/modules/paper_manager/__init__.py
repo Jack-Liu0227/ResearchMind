@@ -13,8 +13,8 @@ from ..search.arxiv import (
 )
 
 from .content_fetcher import (
-    fetch_content_from_url,
-    get_paper_content_by_source,
+    fetch_content_from_url_async,
+    get_paper_content_by_source_async,
 )
 
 from .analysis import (
@@ -48,9 +48,9 @@ __all__ = [
     'download_paper',
     'get_arxiv_paper_content',
 
-    # 内容获取
-    'fetch_content_from_url',
-    'get_paper_content_by_source',
+    # 内容获取（异步）
+    'fetch_content_from_url_async',
+    'get_paper_content_by_source_async',
 
     # 分析
     'analyze_paper_content',

@@ -431,6 +431,22 @@ const ChatInterface: React.FC = () => {
     }
   }, [messages, setIsLoading])
 
+  // 停止当前响应
+  const handleStopResponse = () => {
+    if (!currentAgent || !currentSession) {
+      return
+    }
+
+    // 发送停止请求到后端
+    wsService.sendStopRequest(currentAgent.id, currentSession.id)
+
+    // 立即更新UI状态
+    setIsLoading(false)
+    setLoadingMessage('')
+
+    toast.success('已停止响应')
+  }
+
   // 重新生成消息
   const handleRegenerate = async (messageId: string) => {
     if (!currentAgent || !connected || !currentSession) {
@@ -548,15 +564,25 @@ const ChatInterface: React.FC = () => {
                 disabled={!currentAgent || !connected}
               />
 
-              {/* 发送按钮 */}
-              <button
-                onClick={hasFiles ? handleSendWithFile : handleSendMessage}
-                disabled={(!inputValue.trim() && !hasFiles) || !currentAgent || !connected || isLoading}
-                className="absolute right-2 bottom-2 p-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title={hasFiles ? '发送消息和文件 (Enter)' : '发送消息 (Enter)'}
-              >
-                <Send className="w-4 h-4" />
-              </button>
+              {/* 发送/停止按钮 */}
+              {isLoading ? (
+                <button
+                  onClick={handleStopResponse}
+                  className="absolute right-2 bottom-2 p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  title="停止响应"
+                >
+                  <Square className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={hasFiles ? handleSendWithFile : handleSendMessage}
+                  disabled={(!inputValue.trim() && !hasFiles) || !currentAgent || !connected}
+                  className="absolute right-2 bottom-2 p-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title={hasFiles ? '发送消息和文件 (Enter)' : '发送消息 (Enter)'}
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              )}
             </div>
 
             {/* 复制输入内容 */}

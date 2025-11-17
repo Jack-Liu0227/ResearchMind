@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import List
@@ -517,7 +517,10 @@ class HTTPServer:
         @self.app.post("/api/upload")
         async def unified_upload(
             files: List[UploadFile] = File(...),
-            type: str = "structure",
+            type: str = Query("structure"),
+            session_id: Optional[str] = Query(None),
+            topic: Optional[str] = Query(None),
+            client_id: Optional[str] = Query(None),
             user_message: Optional[str] = Form(None)
         ):
             """
@@ -526,6 +529,10 @@ class HTTPServer:
             Args:
                 files: Files to upload
                 type: Upload type (structure, structures, documents)
+                session_id: Session ID (optional, for documents)
+                topic: Topic (optional, for documents)
+                client_id: Client ID (optional, for WebSocket notification)
+                user_message: User message (optional)
 
             Returns:
                 Upload response with processed files
@@ -544,7 +551,12 @@ class HTTPServer:
                     return await upload_multiple_structures(files, user_message=user_message)
             elif type == "documents":
                 # Handle document uploads
-                return await upload_documents(files=files)
+                return await upload_documents(
+                    files=files,
+                    session_id=session_id,
+                    topic=topic,
+                    client_id=client_id
+                )
             else:
                 raise HTTPException(
                     status_code=400,
@@ -660,8 +672,6 @@ class HTTPServer:
                     status_code=500,
                     detail=f"Upload failed: {str(e)}"
                 )
-
-        from fastapi import Query
 
         @self.app.post("/api/upload/documents")
         async def upload_documents(

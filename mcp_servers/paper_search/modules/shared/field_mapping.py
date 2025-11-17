@@ -48,13 +48,22 @@ def normalize_paper_fields(paper: Dict[str, Any], source: str = None) -> Dict[st
         'doi': _extract_doi(paper),
         'categories': _extract_categories(paper),
     }
-    
+
     # Add optional fields if present
-    if 'score' in paper:
-        normalized['score'] = paper['score']
-    if 'published_date' in paper:
-        normalized['published_date'] = paper['published_date']
-    
+    optional_fields = [
+        'score',
+        'published_date',
+        'citation_count',
+        'publication_types',
+        'external_ids',
+        'id',  # 保留原始 ID
+        'summary',  # 保留摘要的别名
+    ]
+
+    for field in optional_fields:
+        if field in paper and paper[field] is not None:
+            normalized[field] = paper[field]
+
     return normalized
 
 

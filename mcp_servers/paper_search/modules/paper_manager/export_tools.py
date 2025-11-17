@@ -5,9 +5,11 @@ Export Tools Module (导出工具模块)
 1. 保存论文信息到CSV
 2. 保存总结到文件
 3. 保存报告到文件
+4. 清理CSV中的无效数据
 """
 import os
-from typing import Dict, Any, List
+import shutil
+from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 import structlog
 
@@ -57,6 +59,7 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
                 # 重命名字段以匹配标准格式
                 if key == 'ID':
                     paper['paper_id'] = paper.pop('ID')
+                    paper['id'] = paper['paper_id']  # 兼容性
                 elif key == 'Title':
                     paper['title'] = paper.pop('Title')
                 elif key == 'Authors':
@@ -68,12 +71,45 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
                         paper['authors'] = []
                 elif key == 'Abstract':
                     paper['abstract'] = paper.pop('Abstract')
+                    paper['summary'] = paper['abstract']  # 兼容性
                 elif key == 'URL':
                     paper['url'] = paper.pop('URL')
+                elif key == 'PDF_URL':
+                    paper['pdf_url'] = paper.pop('PDF_URL')
                 elif key == 'Published':
                     paper['published'] = paper.pop('Published')
+                    paper['published_date'] = paper['published']  # 兼容性
                 elif key == 'Source':
                     paper['source'] = paper.pop('Source')
+                elif key == 'Categories':
+                    categories_str = paper.pop('Categories')
+                    # 将CSV中的分类字符串转换为列表
+                    if isinstance(categories_str, str) and categories_str.strip():
+                        paper['categories'] = [cat.strip() for cat in categories_str.split(',')]
+                    else:
+                        paper['categories'] = []
+                elif key == 'DOI':
+                    paper['doi'] = paper.pop('DOI')
+                elif key == 'CitationCount':
+                    citation_count = paper.pop('CitationCount')
+                    # 转换为整数
+                    if citation_count and str(citation_count).strip():
+                        try:
+                            paper['citation_count'] = int(citation_count)
+                        except (ValueError, TypeError):
+                            paper['citation_count'] = 0
+                    else:
+                        paper['citation_count'] = 0
+                elif key == 'Score':
+                    score = paper.pop('Score')
+                    # 转换为浮点数
+                    if score and str(score).strip():
+                        try:
+                            paper['score'] = float(score)
+                        except (ValueError, TypeError):
+                            paper['score'] = 0.0
+                    else:
+                        paper['score'] = 0.0
                 elif key == 'LocalFile':
                     # 恢复本地文件路径（用于上传文件）
                     local_file = paper.pop('LocalFile')
@@ -90,6 +126,14 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
                     if full_text and isinstance(full_text, str) and full_text.strip():
                         paper['full_text'] = full_text
                         paper['content'] = full_text  # 同时设置 content 字段以兼容旧代码
+                # 兼容旧列名（Published_Date）
+                elif key == 'Published_Date':
+                    # 如果 published 字段为空，使用 Published_Date
+                    if not paper.get('published'):
+                        paper['published'] = paper.pop('Published_Date')
+                        paper['published_date'] = paper['published']
+                    else:
+                        paper.pop('Published_Date')  # 删除重复字段
 
         logger.info(f"Successfully read {len(papers)} papers from CSV: {csv_file_path}")
         return papers
@@ -234,8 +278,15 @@ def save_summary_to_file(
                 if output_path:
                     saved_file_path = output_path
                 else:
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.md')
+                    # 检查 file_prefix 是否已经包含时间戳（格式：YYYYMMDD_HHMMSS）
+                    import re
+                    if re.search(r'\d{8}_\d{6}$', file_prefix):
+                        # 已包含时间戳，直接使用
+                        saved_file_path = os.path.join(save_dir, f'{file_prefix}.md')
+                    else:
+                        # 未包含时间戳，添加时间戳
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.md')
 
                 # 保存文件
                 with open(saved_file_path, 'w', encoding='utf-8') as f:
@@ -327,8 +378,15 @@ def save_report_to_file(
                 if output_path:
                     saved_file_path = output_path
                 else:
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.md')
+                    # 检查 file_prefix 是否已经包含时间戳（格式：YYYYMMDD_HHMMSS）
+                    import re
+                    if re.search(r'\d{8}_\d{6}$', file_prefix):
+                        # 已包含时间戳，直接使用
+                        saved_file_path = os.path.join(save_dir, f'{file_prefix}.md')
+                    else:
+                        # 未包含时间戳，添加时间戳
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.md')
 
                 # 保存文件
                 with open(saved_file_path, 'w', encoding='utf-8') as f:
@@ -459,25 +517,42 @@ def save_papers_to_csv(
             if full_text:
                 full_text = ' '.join(full_text.split())
 
+            # 提取 PDF URL（与 URL 分开）
+            pdf_url = paper.get('pdf_url', '')
+
+            # 提取 DOI
+            doi = paper.get('doi', '')
+
+            # 提取引用次数（保留数字类型，避免空字符串）
+            citation_count = paper.get('citation_count')
+            if citation_count is None or citation_count == '':
+                citation_count = ''  # 空值用空字符串表示
+            else:
+                citation_count = int(citation_count) if citation_count else ''
+
+            # 合并 Published 和 Published_Date（优先使用 published）
+            published = paper.get('published', '') or paper.get('published_date', '')
+
             # 构建行数据
             row = {
                 'ID': paper_id,
                 'Title': title,
                 'Authors': authors_str,
                 'Abstract': abstract,
-                'FullText': full_text,  # 新增：完整文本（用于报告生成）
                 'URL': download_url,
-                'Published': paper.get('published', ''),
+                'PDF_URL': pdf_url,  # 新增：PDF 下载链接
+                'Published': published,  # 合并后的发表日期
                 'Source': paper.get('source', 'unknown'),
                 'Categories': categories_str,
+                'DOI': doi,  # 新增：DOI 标识符
+                'CitationCount': citation_count,  # 新增：引用次数
+                'FullText': full_text,  # 完整文本（用于报告生成）
                 'LocalFile': local_file,  # 本地文件路径（用于上传文件）
             }
 
             # 添加可选字段
             if 'score' in paper:
                 row['Score'] = paper.get('score', '')
-            if 'published_date' in paper:
-                row['Published_Date'] = paper.get('published_date', '')
 
             data.append(row)
 
@@ -487,6 +562,14 @@ def save_papers_to_csv(
         # 去除所有值都为空的行（排除列名）
         # 将空字符串、None、NaN都视为空值
         df = df.replace('', pd.NA).dropna(how='all')
+
+        # 清理无效行（在保存前）
+        logger.info(f"清理前共 {len(df)} 行数据")
+        df_cleaned = df[~df.apply(is_invalid_paper_row, axis=1)]
+        invalid_count = len(df) - len(df_cleaned)
+        if invalid_count > 0:
+            logger.info(f"清理了 {invalid_count} 个无效行")
+        df = df_cleaned
 
         # 转换为CSV字符串
         csv_content = df.to_csv(index=False, encoding='utf-8-sig')
@@ -543,6 +626,14 @@ def save_papers_to_csv(
                             duplicates_removed = before_dedup - after_dedup
                             logger.info(f"去重：移除 {duplicates_removed} 篇重复论文")
 
+                        # 清理无效行（在合并后）
+                        before_clean = len(combined_df)
+                        combined_df_cleaned = combined_df[~combined_df.apply(is_invalid_paper_row, axis=1)]
+                        invalid_removed = before_clean - len(combined_df_cleaned)
+                        if invalid_removed > 0:
+                            logger.info(f"清理：移除 {invalid_removed} 个无效行")
+                        combined_df = combined_df_cleaned
+
                         # 更新统计信息
                         total_papers = len(combined_df)
                         papers_added = total_papers - len(existing_df) + duplicates_removed
@@ -598,10 +689,11 @@ def save_analysis_results_to_csv(
     output_dir: str = None,
     session_id: str = None,
     topic: str = None,
-    file_prefix: str = 'analysis_results'
+    file_prefix: str = 'analysis_results',
+    append_mode: bool = True
 ) -> Dict[str, Any]:
     """
-    保存论文分析结果到CSV文件
+    保存论文分析结果到CSV文件（支持追加模式和去重）
 
     Args:
         analysis_results: 分析结果列表,每个结果包含:
@@ -616,6 +708,9 @@ def save_analysis_results_to_csv(
         session_id: 会话ID
         topic: 主题
         file_prefix: 文件名前缀(默认: 'analysis_results')
+        append_mode: 是否启用追加模式（默认: True）
+                    - True: 合并到现有 CSV 文件，基于ID和URL去重后保存
+                    - False: 创建新的带时间戳的 CSV 文件
 
     Returns:
         包含CSV数据和文件路径的字典
@@ -704,6 +799,9 @@ def save_analysis_results_to_csv(
 
         # 保存到文件
         saved_file_path = None
+        papers_added = len(data)
+        total_papers = len(data)
+
         if session_id or output_dir:
             try:
                 from ..shared.session_folder_manager import get_session_folder, PAPER_DIR
@@ -724,8 +822,63 @@ def save_analysis_results_to_csv(
                 if output_path:
                     saved_file_path = output_path
                 else:
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.csv')
+                    # 检查 file_prefix 是否已经包含时间戳（格式：YYYYMMDD_HHMMSS）
+                    import re
+                    has_timestamp = re.search(r'\d{8}_\d{6}$', file_prefix)
+
+                    if has_timestamp:
+                        # file_prefix 已包含时间戳，直接使用（无论 append_mode 是什么）
+                        saved_file_path = os.path.join(save_dir, f'{file_prefix}.csv')
+                    elif append_mode:
+                        # 追加模式且无时间戳：使用固定文件名
+                        # analysis_results -> analysis_results.csv
+                        # report_papers -> report_papers.csv
+                        saved_file_path = os.path.join(save_dir, f'{file_prefix}.csv')
+                    else:
+                        # 非追加模式且无时间戳：添加时间戳
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.csv')
+
+                # 追加模式：合并现有数据并去重
+                if append_mode and os.path.exists(saved_file_path):
+                    logger.info(f"追加模式：读取现有分析结果CSV文件: {saved_file_path}")
+                    try:
+                        # 读取现有CSV
+                        existing_df = pd.read_csv(saved_file_path, encoding='utf-8-sig')
+                        logger.info(f"现有CSV包含 {len(existing_df)} 条分析结果")
+
+                        # 合并新旧数据
+                        combined_df = pd.concat([existing_df, df], ignore_index=True)
+
+                        # 去重：基于 ID 和 URL 列，保留最后出现的（最新的）
+                        before_dedup = len(combined_df)
+
+                        # 先基于ID去重
+                        if 'ID' in combined_df.columns:
+                            combined_df = combined_df.drop_duplicates(subset=['ID'], keep='last')
+
+                        # 再基于URL去重（处理ID不同但URL相同的情况）
+                        if 'URL' in combined_df.columns:
+                            # 过滤掉URL为空或N/A的行后再去重
+                            url_mask = (combined_df['URL'].notna()) & (combined_df['URL'] != '') & (combined_df['URL'] != 'N/A')
+                            url_duplicates = combined_df[url_mask].duplicated(subset=['URL'], keep='last')
+                            combined_df = combined_df[~url_duplicates | ~url_mask]
+
+                        after_dedup = len(combined_df)
+                        duplicates_removed = before_dedup - after_dedup
+                        logger.info(f"去重：移除 {duplicates_removed} 条重复分析结果")
+
+                        # 更新统计信息
+                        total_papers = len(combined_df)
+                        papers_added = total_papers - len(existing_df) + duplicates_removed
+
+                        # 使用合并后的数据
+                        df = combined_df
+                        csv_content = df.to_csv(index=False, encoding='utf-8-sig')
+
+                        logger.info(f"合并后共 {total_papers} 条分析结果（新增 {papers_added} 条）")
+                    except Exception as e:
+                        logger.warning(f"读取现有CSV失败，将创建新文件: {e}")
 
                 # 保存文件
                 with open(saved_file_path, 'w', encoding='utf-8-sig') as f:
@@ -737,13 +890,23 @@ def save_analysis_results_to_csv(
 
         logger.info(f"成功生成 {len(data)} 条分析结果的CSV数据")
 
+        # 构建返回消息
+        if append_mode and papers_added < len(data):
+            message = f'已追加 {papers_added} 条分析结果到 CSV，当前共 {total_papers} 条'
+        else:
+            message = f'成功生成 {total_papers} 条分析结果的CSV数据'
+
+        if saved_file_path:
+            message += f'，已保存到 {saved_file_path}'
+
         return {
             'status': 'success',
-            'total_results': len(data),
+            'total_results': total_papers,
+            'papers_added': papers_added,
             'csv_content': csv_content,
             'columns': list(df.columns),
             'file_path': saved_file_path,
-            'message': f'成功生成 {len(data)} 条分析结果的CSV数据' + (f'，已保存到 {saved_file_path}' if saved_file_path else '')
+            'message': message
         }
 
     except Exception as e:
@@ -754,147 +917,223 @@ def save_analysis_results_to_csv(
         }
 
 
-def save_report_papers_to_csv(
-    papers: List[Dict[str, Any]],
-    output_path: str = None,
-    output_dir: str = None,
-    session_id: str = None,
-    topic: str = None,
-    file_prefix: str = 'report_papers'
-) -> Dict[str, Any]:
+# ============================================================================
+# CSV 数据清理功能
+# ============================================================================
+
+def is_invalid_paper_row(row: pd.Series) -> bool:
     """
-    保存报告中引用的论文信息到CSV文件（专门用于研究报告）
+    判断论文行是否无效
+
+    无效行的定义：
+    1. ID 包含 'unknown'
+    2. Title 是 'Unknown Title' 且 Abstract 为空
+    3. Source 是 'unknown' 且其他关键字段为空
+    4. 所有关键字段都为空
 
     Args:
-        papers: 论文列表,每篇论文包含:
-            - paper_id: 论文ID
-            - title: 标题
-            - authors: 作者列表
-            - abstract: 摘要
-            - published: 发表时间
-            - source: 来源
-            - url: URL
-        output_path: 输出文件路径(可选)
-        output_dir: 输出目录(可选)
-        session_id: 会话ID
-        topic: 主题
-        file_prefix: 文件名前缀(默认: 'report_papers')
+        row: DataFrame 的一行
 
     Returns:
-        包含CSV数据和文件路径的字典
+        True 如果是无效行，False 否则
+    """
+    # 检查 ID 是否包含 unknown
+    if pd.notna(row.get('ID')) and 'unknown' in str(row['ID']).lower():
+        return True
+
+    # 检查 Title 是否是 Unknown Title 且 Abstract 为空
+    title = str(row.get('Title', '')).strip()
+    abstract = str(row.get('Abstract', '')).strip()
+    if title == 'Unknown Title' and (pd.isna(row.get('Abstract')) or not abstract):
+        return True
+
+    # 检查 Source 是否是 unknown 且 Abstract 为空
+    source = str(row.get('Source', '')).strip()
+    if source == 'unknown' and (pd.isna(row.get('Abstract')) or not abstract):
+        return True
+
+    # 检查所有关键字段是否都为空
+    key_fields = ['ID', 'Title', 'Authors', 'Abstract', 'URL']
+    all_empty = all(
+        pd.isna(row.get(field)) or str(row.get(field, '')).strip() == ''
+        for field in key_fields
+    )
+    if all_empty:
+        return True
+
+    return False
+
+
+def clean_csv_file(
+    csv_path: str,
+    backup: bool = True,
+    dry_run: bool = False
+) -> Dict[str, Any]:
+    """
+    清理 CSV 文件中的无效行
+
+    Args:
+        csv_path: CSV 文件路径
+        backup: 是否备份原文件（默认 True）
+        dry_run: 是否只检查不修改（默认 False）
+
+    Returns:
+        Dict containing:
+        - status: 'success' or 'error'
+        - original_count: 原始行数
+        - valid_count: 有效行数
+        - invalid_count: 无效行数
+        - invalid_rows: 无效行的详细信息
+        - backup_path: 备份文件路径（如果创建了备份）
+        - message: 消息
     """
     if not PANDAS_AVAILABLE:
         return {
             'status': 'error',
-            'error': 'pandas not installed, cannot export to CSV'
+            'error': 'pandas not available'
         }
 
     try:
-        import pandas as pd
-
-        if not papers:
+        # 检查文件是否存在
+        if not os.path.exists(csv_path):
             return {
                 'status': 'error',
-                'error': 'No papers provided'
+                'error': f'CSV file not found: {csv_path}'
             }
 
-        # 构建CSV数据
-        data = []
-        for i, paper in enumerate(papers, 1):
-            # 提取作者
-            authors = paper.get('authors', [])
-            if isinstance(authors, list):
-                authors_str = ', '.join(str(a) for a in authors)
-            else:
-                authors_str = str(authors)
+        # 读取 CSV
+        df = pd.read_csv(csv_path, encoding='utf-8-sig')
+        original_count = len(df)
 
-            # 清理摘要中的换行符
-            abstract = paper.get('abstract', '')
-            if abstract:
-                abstract = ' '.join(abstract.split())
+        # 查找无效行
+        invalid_mask = df.apply(is_invalid_paper_row, axis=1)
+        invalid_df = df[invalid_mask]
+        valid_df = df[~invalid_mask]
 
-            # 清理标题中的换行符
-            title = paper.get('title', 'Unknown Title')
-            if title:
-                title = ' '.join(title.split())
+        invalid_count = len(invalid_df)
+        valid_count = len(valid_df)
 
-            # 提取发表年份
-            published = paper.get('published', 'Unknown')
-            year = published[:4] if published and len(published) >= 4 else 'Unknown'
+        # 收集无效行信息
+        invalid_rows = []
+        for idx, row in invalid_df.iterrows():
+            invalid_rows.append({
+                'row_number': int(idx) + 2,  # +2 因为 CSV 有表头且索引从0开始
+                'ID': str(row.get('ID', '')),
+                'Title': str(row.get('Title', ''))[:50],
+                'Source': str(row.get('Source', '')),
+                'Abstract': str(row.get('Abstract', ''))[:50] if pd.notna(row.get('Abstract')) else ''
+            })
 
-            # 获取URL,优先使用url,其次使用pdf_url
-            url = paper.get('url', '') or paper.get('pdf_url', '')
+        result = {
+            'status': 'success',
+            'original_count': original_count,
+            'valid_count': valid_count,
+            'invalid_count': invalid_count,
+            'invalid_rows': invalid_rows,
+            'csv_path': csv_path
+        }
 
-            # 构建行数据
-            row = {
-                'No.': i,
-                'ID': paper.get('paper_id', 'unknown'),
-                'Title': title,
-                'Authors': authors_str,
-                'Year': year,
-                'Source': paper.get('source', 'unknown'),
-                'URL': url or '',
-                'Abstract': abstract,
+        # 如果是 dry_run，只返回检查结果
+        if dry_run:
+            result['message'] = f'检查完成：发现 {invalid_count} 个无效行（未修改文件）'
+            return result
+
+        # 如果没有无效行，直接返回
+        if invalid_count == 0:
+            result['message'] = '没有发现无效行'
+            return result
+
+        # 备份原文件
+        if backup:
+            backup_path = csv_path + '.backup'
+            shutil.copy2(csv_path, backup_path)
+            result['backup_path'] = backup_path
+            logger.info(f"已备份 CSV 文件到: {backup_path}")
+
+        # 保存清理后的数据
+        valid_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+
+        result['message'] = f'清理完成：移除 {invalid_count} 个无效行，保留 {valid_count} 个有效行'
+        logger.info(f"清理 CSV 文件: {csv_path}, 移除 {invalid_count} 个无效行")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"清理 CSV 文件失败: {e}")
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+
+def clean_all_csv_files(
+    session_dir: str = None,
+    backup: bool = True,
+    dry_run: bool = False
+) -> Dict[str, Any]:
+    """
+    清理指定目录或所有会话目录中的 CSV 文件
+
+    Args:
+        session_dir: 会话目录路径（如果为 None，清理所有会话）
+        backup: 是否备份原文件
+        dry_run: 是否只检查不修改
+
+    Returns:
+        Dict containing:
+        - status: 'success' or 'error'
+        - cleaned_files: 清理的文件列表
+        - total_invalid: 总共移除的无效行数
+        - results: 每个文件的清理结果
+    """
+    from pathlib import Path
+    from ..shared.session_folder_manager import PAPER_DIR
+
+    try:
+        # 确定要清理的目录
+        if session_dir:
+            search_dirs = [Path(session_dir)]
+        else:
+            search_dirs = [Path(PAPER_DIR)]
+
+        # 查找所有 CSV 文件
+        csv_files = []
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                csv_files.extend(search_dir.glob('*/all_papers.csv'))
+
+        if not csv_files:
+            return {
+                'status': 'success',
+                'cleaned_files': [],
+                'total_invalid': 0,
+                'message': '没有找到 CSV 文件'
             }
 
-            data.append(row)
+        # 清理每个文件
+        results = []
+        total_invalid = 0
+        cleaned_files = []
 
-        # 创建DataFrame
-        df = pd.DataFrame(data)
+        for csv_path in csv_files:
+            result = clean_csv_file(str(csv_path), backup=backup, dry_run=dry_run)
+            results.append(result)
 
-        # 去除所有值都为空的行（排除列名）
-        # 将空字符串、None、NaN都视为空值
-        df = df.replace('', pd.NA).dropna(how='all')
-
-        # 转换为CSV字符串
-        csv_content = df.to_csv(index=False, encoding='utf-8-sig')
-
-        # 保存到文件
-        saved_file_path = None
-        if session_id or output_dir:
-            try:
-                from ..shared.session_folder_manager import get_session_folder, PAPER_DIR
-
-                # 确定保存目录
-                if session_id and topic:
-                    save_dir = get_session_folder(session_id, topic)
-                elif output_dir:
-                    save_dir = output_dir
-                else:
-                    # 使用 MCP server 的 papers 目录作为后备
-                    save_dir = PAPER_DIR
-
-                # 确保目录存在
-                os.makedirs(save_dir, exist_ok=True)
-
-                # 确定文件路径
-                if output_path:
-                    saved_file_path = output_path
-                else:
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.csv')
-
-                # 保存文件
-                with open(saved_file_path, 'w', encoding='utf-8-sig') as f:
-                    f.write(csv_content)
-
-                logger.info(f"成功保存报告论文CSV到文件: {saved_file_path}")
-            except Exception as e:
-                logger.error(f"保存报告论文CSV文件失败: {e}")
-
-        logger.info(f"成功生成 {len(data)} 篇报告论文的CSV数据")
+            if result['status'] == 'success' and result['invalid_count'] > 0:
+                total_invalid += result['invalid_count']
+                cleaned_files.append(str(csv_path))
 
         return {
             'status': 'success',
-            'total_papers': len(data),
-            'csv_content': csv_content,
-            'columns': list(df.columns),
-            'file_path': saved_file_path,
-            'message': f'成功生成 {len(data)} 篇报告论文的CSV数据' + (f'，已保存到 {saved_file_path}' if saved_file_path else '')
+            'cleaned_files': cleaned_files,
+            'total_invalid': total_invalid,
+            'total_files': len(csv_files),
+            'results': results,
+            'message': f'清理完成：处理 {len(csv_files)} 个文件，移除 {total_invalid} 个无效行'
         }
 
     except Exception as e:
-        logger.error(f"生成报告论文CSV数据失败: {e}")
+        logger.error(f"批量清理 CSV 文件失败: {e}")
         return {
             'status': 'error',
             'error': str(e)

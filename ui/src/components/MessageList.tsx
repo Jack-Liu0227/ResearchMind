@@ -20,9 +20,13 @@ import { ToolExecutionCard } from './ToolExecutionCard'
 
 /**
  * Tool Calls 折叠显示组件
+ * 默认展开所有工具调用，显示输出结果
  */
 const ToolCallsDisplay: React.FC<{ toolCalls: any[] }> = ({ toolCalls }) => {
-  const [expandedCalls, setExpandedCalls] = useState<Set<number>>(new Set())
+  // 默认展开所有工具调用
+  const [expandedCalls, setExpandedCalls] = useState<Set<number>>(
+    new Set(toolCalls.map((_, index) => index))
+  )
 
   const toggleCall = (index: number) => {
     const newExpanded = new Set(expandedCalls)
@@ -184,7 +188,7 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
       links.push({
         type: 'csv',
         url: resolvedCsvUrl,
-        filename: metadata.kappa_results_csv_path ? metadata.kappa_results_csv_path.split('/').pop() : '热导率计算结果.csv',
+        filename: metadata.kappa_results_csv_path ? metadata.kappa_results_csv_path.split('/').pop() : 'kappa_results.csv',
         content: typeof metadata.kappa_results_csv_content === 'string' ? metadata.kappa_results_csv_content : undefined
       })
     }
@@ -196,7 +200,7 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
       links.push({
         type: 'csv',
         url: resolvedCsvUrl,
-        filename: metadata.kappa_batch_csv_path ? metadata.kappa_batch_csv_path.split('/').pop() : '批量热导率计算结果.csv',
+        filename: metadata.kappa_batch_csv_path ? metadata.kappa_batch_csv_path.split('/').pop() : 'kappa_batch_results.csv',
         content: typeof metadata.kappa_batch_csv_content === 'string' ? metadata.kappa_batch_csv_content : undefined
       })
     }
@@ -208,7 +212,7 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
       links.push({
         type: 'csv',
         url: resolvedCsvUrl,
-        filename: metadata.phonon_dispersion_csv_path ? metadata.phonon_dispersion_csv_path.split('/').pop() : '声子色散数据.csv',
+        filename: metadata.phonon_dispersion_csv_path ? metadata.phonon_dispersion_csv_path.split('/').pop() : 'phonon_dispersion.csv',
         content: typeof metadata.phonon_dispersion_csv_content === 'string' ? metadata.phonon_dispersion_csv_content : undefined
       })
     }
@@ -220,7 +224,7 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
       links.push({
         type: 'csv',
         url: resolvedCsvUrl,
-        filename: metadata.phonon_dos_csv_path ? metadata.phonon_dos_csv_path.split('/').pop() : '声子态密度数据.csv',
+        filename: metadata.phonon_dos_csv_path ? metadata.phonon_dos_csv_path.split('/').pop() : 'phonon_dos.csv',
         content: typeof metadata.phonon_dos_csv_content === 'string' ? metadata.phonon_dos_csv_content : undefined
       })
     }
@@ -695,24 +699,8 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {imageData.map((image, index) => {
-                      // 处理显示名称 - 更好的中文化处理
+                      // 使用原始文件名（去除扩展名）
                       let displayName = image.name.replace(/\.(png|jpg|jpeg)$/i, '')
-                        .replace(/_/g, ' ')
-                        .replace(/phonon_dispersion/i, '声子色散')
-                        .replace(/phonon_dos/i, '声子态密度')
-                        .replace(/phonon/i, '声子谱')
-                        .replace(/band_structure/i, '能带结构')
-                        .replace(/band/i, '能带')
-                        .replace(/dos/i, '态密度')
-                        .replace(/thermal_conductivity/i, '热导率')
-                        .replace(/kappa/i, '热导率')
-                        .replace(/energy/i, '能量')
-                        .replace(/structure/i, '结构')
-                      
-                      // 如果名称还是很技术化，提供一个通用描述
-                      if (displayName.length < 3 || /^[a-zA-Z0-9_\-\s]+$/.test(displayName)) {
-                        displayName = '计算结果图'
-                      }
 
                       return (
                         <div key={index} className="bg-white border border-gray-200 rounded-lg p-3">
@@ -730,8 +718,12 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
                                 : ''
                             }
                             alt={displayName}
-                            className="w-full h-auto rounded border"
-                            style={{ maxWidth: '400px', maxHeight: '300px', objectFit: 'contain' }}
+                            className="h-auto rounded border"
+                            style={{
+                              width: '60%',           // 图片宽度为对话框的 60%
+                              maxWidth: '100%',       // 不超过容器宽度
+                              objectFit: 'contain'    // 保持宽高比
+                            }}
                             onError={(e) => {
                               console.error('Failed to load image:', image.path || (image as any).url)
                               const target = e.target as HTMLImageElement

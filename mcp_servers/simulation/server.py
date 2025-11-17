@@ -615,6 +615,13 @@ async def calculate_phonon_from_directory(
         # Find all CIF files in directory
         cif_files = list(cif_dir.glob('*.cif')) + list(cif_dir.glob('*.CIF'))
 
+        # 🔧 修复：去重，避免重复计算同一个文件
+        # 使用 set 去重（基于文件路径）
+        cif_files = list(set(cif_files))
+
+        # 按文件名排序，确保顺序一致
+        cif_files.sort(key=lambda x: x.name)
+
         if not cif_files:
             return {
                 "success": False,
@@ -623,12 +630,13 @@ async def calculate_phonon_from_directory(
                 "timestamp": datetime.now().isoformat()
             }
 
-        logger.info(f"📁 Found {len(cif_files)} CIF files for phonon calculation in {cif_directory}")
+        logger.info(f"📁 Found {len(cif_files)} unique CIF files for phonon calculation in {cif_directory}")
 
         # Calculate phonon for each CIF file
         results = []
         completed = 0
         failed = 0
+        all_images = []  # 🆕 收集所有图片用于前端展示
 
         for i, cif_file in enumerate(cif_files, 1):
             logger.info(f"🔄 Processing {i}/{len(cif_files)}: {cif_file.name}")
@@ -663,15 +671,107 @@ async def calculate_phonon_from_directory(
                 if result.get("success"):
                     completed += 1
                     logger.info(f"✅ Completed {i}/{len(cif_files)}: {cif_file.name}")
+
+                    # 🆕 构建图片信息用于前端展示
+                    structure_dir_name = result.get("structure_directory")
+                    calculation_id = result.get("calculation_id")
+
+                    logger.info(f"📊 Processing result for {cif_file.name}: structure_dir={structure_dir_name}, calc_id={calculation_id}")
+
+                    if structure_dir_name:
+                        url_prefix = f"/api/images/phonon/{session_id or 'default'}/phonon_results/{structure_dir_name}"
+
+                        # 🔧 修复：提取 CSV 文件路径，使用实际文件名而不是硬编码
+                        dispersion_csv_path = result.get("phonon_dispersion_csv")
+                        dos_csv_path = result.get("phonon_dos_csv")
+
+                        # 从完整路径中提取文件名
+                        if dispersion_csv_path:
+                            dispersion_csv_filename = Path(dispersion_csv_path).name
+                            dispersion_csv_url = f"{url_prefix}/{dispersion_csv_filename}"
+                        else:
+                            dispersion_csv_url = None
+
+                        if dos_csv_path:
+                            dos_csv_filename = Path(dos_csv_path).name
+                            dos_csv_url = f"{url_prefix}/{dos_csv_filename}"
+                        else:
+                            dos_csv_url = None
+
+                        logger.info(f"📊 CSV paths - dispersion: {dispersion_csv_path}, dos: {dos_csv_path}")
+                        logger.info(f"📊 CSV URLs - dispersion: {dispersion_csv_url}, dos: {dos_csv_url}")
+
+                        # 🔧 修复：添加声子色散图（放宽条件，只要路径存在就添加）
+                        band_plot_path = result.get("phonon_band_plot_path")
+                        if band_plot_path:
+                            band_path = Path(band_plot_path)
+                            # 检查文件是否真实存在
+                            if band_path.exists():
+                                image_data = {
+                                    "name": f"{cif_file.stem} - Phonon Dispersion",
+                                    "path": str(band_path),
+                                    "type": "phonon_dispersion",
+                                    "url": f"{url_prefix}/{band_path.name}",
+                                    "filename": band_path.name,
+                                    "available": True,
+                                    "dispersionCsvPath": dispersion_csv_url,
+                                    "dosCsvPath": dos_csv_url,
+                                    "calculationId": calculation_id,
+                                    "structureDirectory": structure_dir_name,
+                                    "sourceFile": cif_file.name
+                                }
+                                all_images.append(image_data)
+                                logger.info(f"✅ Added phonon dispersion image: {band_path.name}")
+                            else:
+                                logger.warning(f"⚠️ Phonon band plot path exists in result but file not found: {band_path}")
+                        else:
+                            logger.warning(f"⚠️ No phonon_band_plot_path in result for {cif_file.name}")
+
+                        # 🔧 修复：添加声子态密度图（放宽条件，只要路径存在就添加）
+                        dos_plot_path = result.get("phonon_dos_plot_path")
+                        if dos_plot_path:
+                            dos_path = Path(dos_plot_path)
+                            # 检查文件是否真实存在
+                            if dos_path.exists():
+                                image_data = {
+                                    "name": f"{cif_file.stem} - Phonon DOS",
+                                    "path": str(dos_path),
+                                    "type": "phonon_dos",
+                                    "url": f"{url_prefix}/{dos_path.name}",
+                                    "filename": dos_path.name,
+                                    "available": True,
+                                    "dispersionCsvPath": dispersion_csv_url,
+                                    "dosCsvPath": dos_csv_url,
+                                    "calculationId": calculation_id,
+                                    "structureDirectory": structure_dir_name,
+                                    "sourceFile": cif_file.name
+                                }
+                                all_images.append(image_data)
+                                logger.info(f"✅ Added phonon DOS image: {dos_path.name}")
+                            else:
+                                logger.warning(f"⚠️ Phonon DOS plot path exists in result but file not found: {dos_path}")
+                        else:
+                            logger.warning(f"⚠️ No phonon_dos_plot_path in result for {cif_file.name}")
+                    else:
+                        logger.warning(f"⚠️ No structure_directory in result for {cif_file.name}")
                 else:
                     failed += 1
                     logger.warning(f"❌ Failed {i}/{len(cif_files)}: {cif_file.name} - {result.get('error', 'Unknown error')}")
 
-                results.append({
+                # 🔧 添加日志，检查 CSV 路径是否存在
+                result_entry = {
                     "filename": cif_file.name,
                     "index": i,
                     **result
-                })
+                }
+
+                # 🔧 调试日志：检查 CSV 字段
+                if result.get("success"):
+                    logger.info(f"📊 Result entry for {cif_file.name}:")
+                    logger.info(f"   - phonon_dispersion_csv: {result_entry.get('phonon_dispersion_csv')}")
+                    logger.info(f"   - phonon_dos_csv: {result_entry.get('phonon_dos_csv')}")
+
+                results.append(result_entry)
 
             except Exception as e:
                 failed += 1
@@ -683,17 +783,25 @@ async def calculate_phonon_from_directory(
                     "error": str(e)
                 })
 
+        # 🔧 添加详细日志，帮助调试图片收集问题
+        logger.info(f"📊 Batch calculation completed: {completed} successful, {failed} failed")
+        logger.info(f"📊 Total images collected: {len(all_images)}")
+        for img in all_images:
+            logger.info(f"  - {img['name']} ({img['type']}): {img['url']}")
+
         return {
             "success": completed > 0,
             "total": len(cif_files),
             "completed": completed,
             "failed": failed,
             "results": results,
+            "images": all_images,  # 🆕 添加图片列表用于前端展示
             "summary": {
                 "total_structures": len(cif_files),
                 "successful": completed,
                 "failed": failed,
-                "success_rate": f"{(completed/len(cif_files)*100):.1f}%" if cif_files else "0%"
+                "success_rate": f"{(completed/len(cif_files)*100):.1f}%" if cif_files else "0%",
+                "total_images": len(all_images)  # 🆕 添加图片总数
             }
         }
 
@@ -822,15 +930,11 @@ async def calculate_phonon(
         data_type="phonon_results",
         create=True
     )
-    # 🔧 修复：生成正确的 URL 前缀，包含 session_id 和 phonon_results 路径
-    # 挂载点: /api/images/phonon -> session_data/simulation/
-    # 文件路径: session_data/simulation/{session_id}/phonon_results/file.png
-    # URL: /api/images/phonon/{session_id}/phonon_results/file.png
-    url_prefix = f"/api/images/phonon/{session_id or 'default'}/phonon_results"
-    logger.info(f"📁 Target phonon directory: {phonon_dir}")
-    logger.info(f"🔗 URL prefix: {url_prefix}")
+
+    logger.info(f"📁 Base phonon directory: {phonon_dir}")
 
     # 调用实现函数，传入目标目录以避免重复保存
+    # 注意：calculate_phonon_impl 会在 phonon_dir 下创建结构特定的子目录
     result = calculate_phonon_impl(
         cif_content, cif_filename, device, supercell_matrix,
         amplitude, find_prim, output_dir=str(phonon_dir)
@@ -840,23 +944,39 @@ async def calculate_phonon(
     if result.get("success"):
         images = []
 
+        # 🆕 获取结构特定的子目录名称
+        structure_dir_name = result.get("structure_directory")
+        calculation_id = result.get("calculation_id")
+
+        # 🔧 优化：生成正确的 URL 前缀，包含结构子目录
+        # 挂载点: /api/images/phonon -> session_data/simulation/
+        # 文件路径: session_data/simulation/{session_id}/phonon_results/{structure_dir}/file.png
+        # URL: /api/images/phonon/{session_id}/phonon_results/{structure_dir}/file.png
+        url_prefix = f"/api/images/phonon/{session_id or 'default'}/phonon_results/{structure_dir_name}"
+        logger.info(f"🔗 URL prefix: {url_prefix}")
+        logger.info(f"📋 Calculation ID: {calculation_id}")
+
         # 🆕 提取 CSV 文件路径（用于原始数据展示）
         dispersion_csv_path = result.get("phonon_dispersion_csv")
         dos_csv_path = result.get("phonon_dos_csv")
 
-        # 转换为前端可访问的 URL
-        dispersion_csv_url = None
-        dos_csv_url = None
-
+        # 🔧 修复：从完整路径中提取实际文件名，而不是硬编码
         if dispersion_csv_path:
-            csv_filename = Path(dispersion_csv_path).name
-            dispersion_csv_url = f"{url_prefix}/{csv_filename}"
-            logger.info(f"📊 Phonon dispersion CSV: {csv_filename} -> {dispersion_csv_url}")
+            dispersion_csv_filename = Path(dispersion_csv_path).name
+            dispersion_csv_url = f"{url_prefix}/{dispersion_csv_filename}"
+        else:
+            dispersion_csv_url = None
 
         if dos_csv_path:
-            csv_filename = Path(dos_csv_path).name
-            dos_csv_url = f"{url_prefix}/{csv_filename}"
-            logger.info(f"📊 Phonon DOS CSV: {csv_filename} -> {dos_csv_url}")
+            dos_csv_filename = Path(dos_csv_path).name
+            dos_csv_url = f"{url_prefix}/{dos_csv_filename}"
+        else:
+            dos_csv_url = None
+
+        if dispersion_csv_url:
+            logger.info(f"📊 Phonon dispersion CSV: {dispersion_csv_url}")
+        if dos_csv_url:
+            logger.info(f"📊 Phonon DOS CSV: {dos_csv_url}")
 
         # 处理声子色散图
         if result.get("phonon_band_plot_path") and result.get("phonon_band_plot_available"):
@@ -870,9 +990,11 @@ async def calculate_phonon(
                 "url": f"{url_prefix}/{filename}",
                 "filename": filename,
                 "available": True,
-                # 🆕 添加 CSV 数据路径
+                # 🆕 添加 CSV 数据路径和计算元数据
                 "dispersionCsvPath": dispersion_csv_url,
-                "dosCsvPath": dos_csv_url
+                "dosCsvPath": dos_csv_url,
+                "calculationId": calculation_id,
+                "structureDirectory": structure_dir_name
             })
             logger.info(f"📊 Phonon band plot: {filename} -> {url_prefix}/{filename}")
 
@@ -888,9 +1010,11 @@ async def calculate_phonon(
                 "url": f"{url_prefix}/{filename}",
                 "filename": filename,
                 "available": True,
-                # 🆕 添加 CSV 数据路径
+                # 🆕 添加 CSV 数据路径和计算元数据
                 "dispersionCsvPath": dispersion_csv_url,
-                "dosCsvPath": dos_csv_url
+                "dosCsvPath": dos_csv_url,
+                "calculationId": calculation_id,
+                "structureDirectory": structure_dir_name
             })
             logger.info(f"📊 Phonon DOS plot: {filename} -> {url_prefix}/{filename}")
 
@@ -955,11 +1079,15 @@ async def extract_and_validate_cif(
     Args:
         session_id: Session ID (required) - identifies which session's uploads to read
         filename: Optional specific filename to validate. If not provided, will process all .cif files in the upload directory.
+                 Supports both exact filename match and pattern matching for timestamped files.
+                 Example: "LiH.cif" will match both "LiH.cif" and "LiH_20251117_123456.cif"
 
     Returns:
         Dict containing:
         - success: bool - Whether extraction and validation succeeded
-        - cif_filename: str - Filename
+        - cif_filename: str - Actual saved filename (may include timestamp)
+        - original_filename: str - Original filename without timestamp
+        - saved_filename: str - Same as cif_filename (for clarity)
         - file_path: str - Path to the saved CIF file
         - is_valid: bool - Whether CIF format is valid
         - error: str - Error message if failed
@@ -967,6 +1095,7 @@ async def extract_and_validate_cif(
     Example:
         # User uploads a file via web interface, then you call:
         result = await extract_and_validate_cif(session_id="abc123", filename="structure.cif")
+        # Returns: {"success": True, "original_filename": "structure.cif", "saved_filename": "structure_20251117_123456.cif", ...}
     """
     try:
         from pathlib import Path
@@ -987,13 +1116,29 @@ async def extract_and_validate_cif(
 
         # Find CIF files
         if filename:
-            cif_files = [upload_dir / filename]
-            if not cif_files[0].exists():
-                return {
-                    "success": False,
-                    "error": f"未找到文件 {filename}。请确保文件已上传。",
-                    "is_valid": False
-                }
+            # 🔧 修复：支持查找原始文件名或带时间戳的文件名
+            # 如果用户指定了文件名，先尝试精确匹配
+            exact_match = upload_dir / filename
+            if exact_match.exists():
+                cif_files = [exact_match]
+            else:
+                # 如果精确匹配失败，尝试查找带时间戳的版本
+                # 例如：LiH.cif -> LiH_20251117_123456.cif
+                base_name = Path(filename).stem
+                suffix = Path(filename).suffix
+                pattern = f"{base_name}_*{suffix}"
+                cif_files = list(upload_dir.glob(pattern))
+
+                if not cif_files:
+                    return {
+                        "success": False,
+                        "error": f"未找到文件 {filename}。请确保文件已上传。",
+                        "is_valid": False
+                    }
+
+                # 如果找到多个匹配，使用最新的（按文件名排序，时间戳在后面）
+                cif_files.sort(key=lambda x: x.name, reverse=True)
+                logger.info(f"📂 Found timestamped file: {cif_files[0].name} (original: {filename})")
         else:
             cif_files = list(upload_dir.glob("*.cif"))
             if not cif_files:
@@ -1007,6 +1152,17 @@ async def extract_and_validate_cif(
         cif_file = cif_files[0]
         cif_content = cif_file.read_text(encoding='utf-8')
         cif_filename = cif_file.name
+
+        # 🆕 尝试提取原始文件名（去除时间戳）
+        original_filename = filename if filename else cif_filename
+        if not filename:
+            # 如果文件名包含时间戳模式 (例如 LiH_20251117_123456.cif)
+            # 尝试提取原始文件名
+            import re
+            match = re.match(r'^(.+?)_\d{8}_\d{6}(\.\w+)$', cif_filename)
+            if match:
+                original_filename = f"{match.group(1)}{match.group(2)}"
+                logger.info(f"📂 Detected original filename: {original_filename} (saved as: {cif_filename})")
 
         logger.info(f"📂 Reading CIF file: {cif_file}")
 
@@ -1066,6 +1222,12 @@ async def extract_and_validate_cif(
         validation_result = _validate_cif_content(cif_content, cif_filename)
         validation_result["file_path"] = str(cif_file)
         validation_result["session_id"] = session_id
+        validation_result["original_filename"] = original_filename  # 🆕 添加原始文件名
+        validation_result["saved_filename"] = cif_filename  # 🆕 添加实际保存的文件名
+
+        # 🆕 如果原始文件名和保存的文件名不同，添加提示信息
+        if original_filename != cif_filename:
+            validation_result["message"] = validation_result.get("message", "") + f"\n💡 文件已保存为: {cif_filename}"
 
         return validation_result
 
@@ -1498,7 +1660,8 @@ async def generate_crystal_structure(
     num_samples: int = 1,
     top_k: int = 10,
     max_new_tokens: int = 2000,
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None,
+    spacegroup: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Generate crystal structure from chemical composition using CrystaLLM.
@@ -1517,6 +1680,7 @@ async def generate_crystal_structure(
         top_k: Top-k sampling parameter for generation diversity (default: 10)
         max_new_tokens: Maximum tokens to generate (default: 2000)
         session_id: Session ID for unified storage (optional)
+        spacegroup: Space group constraint (optional, e.g., "P4/nmm", "Fd-3m", "P4_2/n")
 
     Returns:
         Dict containing:
@@ -1526,12 +1690,18 @@ async def generate_crystal_structure(
         - cif_directory: str - Directory containing all generated CIF files
         - composition: str - Input composition
         - generation_id: str - Unique generation ID
+        - spacegroup: str - Space group constraint (if specified)
         - num_generated: int - Number of structures generated
         - frontend_structures: List[Dict] - Frontend-compatible structure data (includes cifContent for visualization)
         - error: str - Error message if failed
 
     Example:
+        # Generate without space group constraint
         result = await generate_crystal_structure(composition="GaN", num_samples=3, session_id="session_123")
+
+        # Generate with space group constraint
+        result = await generate_crystal_structure(composition="Na2Cl2", spacegroup="P4/nmm", num_samples=3)
+
         if result["success"]:
             # Use file paths for downstream calculations
             for cif_path in result["cif_file_paths"]:
@@ -1547,7 +1717,8 @@ async def generate_crystal_structure(
         num_samples=num_samples,
         top_k=top_k,
         max_new_tokens=max_new_tokens,
-        session_id=session_id
+        session_id=session_id,
+        spacegroup=spacegroup
     )
 
     # 如果生成成功且包含frontend_structures，记录到全局缓存

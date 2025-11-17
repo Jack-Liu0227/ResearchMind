@@ -52,7 +52,8 @@ def generate_crystal_from_composition(
     num_samples: int = 1,
     top_k: int = 10,
     max_new_tokens: int = 2000,
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None,
+    spacegroup: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Generate crystal structure from chemical composition using CrystaLLM.
@@ -64,6 +65,7 @@ def generate_crystal_from_composition(
         top_k: Top-k sampling parameter (default: 10)
         max_new_tokens: Maximum tokens to generate (default: 2000)
         session_id: Session ID for unified storage (optional)
+        spacegroup: Space group constraint (optional, e.g., "P4/nmm", "Fd-3m")
 
     Returns:
         Dict containing:
@@ -72,6 +74,7 @@ def generate_crystal_from_composition(
         - cif_filename: str - Generated CIF filename
         - composition: str - Input composition
         - generation_id: str - Unique generation ID
+        - spacegroup: str - Space group constraint (if specified)
         - error: str - Error message if failed
     """
     import uuid
@@ -176,13 +179,15 @@ def generate_crystal_from_composition(
             'device': device
         }
 
-        logger.info("Generation parameters", params=crystal_params, bin_dir=str(bin_dir))
-        
+        logger.info("Generation parameters", params=crystal_params, bin_dir=str(bin_dir), spacegroup=spacegroup)
+
         # Step 6: Generate structures
         logger.info("Initializing CrystalStructureGenerator")
-        generator = CrystalStructureGenerator(composition, params=crystal_params)
+        generator = CrystalStructureGenerator(composition, params=crystal_params, spacegroup=spacegroup)
 
         logger.info("Running generation pipeline - this may take several minutes...")
+        if spacegroup:
+            logger.info(f"Using space group constraint: {spacegroup}")
         logger.info("Progress: Generating prompt...")
         
         # Use the enhanced run_pipeline with frontend format export

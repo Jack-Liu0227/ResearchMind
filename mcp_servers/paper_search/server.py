@@ -169,7 +169,7 @@ from modules import (
 # Import unified tools
 from modules.unified_tools import (
     search_papers as search_papers_unified,
-    get_paper_content as get_paper_content_unified,
+    get_paper_content_async as get_paper_content_unified,
     download_paper_file as download_paper_unified,
     get_paper_info as get_paper_info_unified,
 )
@@ -419,25 +419,18 @@ async def search_papers(
     """
     logger.info("Unified search", query=query, sources=sources, max_results=max_results, session_id=session_id, expand_query=expand_query)
 
-    # 如果没有提供 session_id，使用query生成一个唯一的session_id
+    # 如果没有提供 session_id，生成一个唯一的 session_id
     if not session_id:
-        import hashlib
-        import uuid
-        from datetime import datetime
+        import time
+        import random
+        import string
 
-        # 使用 query + 时间戳 + 随机UUID 生成唯一的 session_id
-        query_clean = query.lower().replace(' ', '_').replace('-', '_')
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        unique_id = str(uuid.uuid4())[:8]  # 使用UUID的前8位确保唯一性
+        # 统一使用 session_{timestamp}_{random_id} 格式
+        timestamp = int(time.time() * 1000)  # 毫秒级时间戳
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+        session_id = f"session_{timestamp}_{random_id}"
 
-        # 限制session_id长度为50字符,避免路径过长
-        if len(query_clean) > 30:
-            # 如果query太长,只使用部分query + 时间戳 + unique_id
-            session_id = f"{query_clean[:30]}_{unique_id}"
-        else:
-            session_id = f"{query_clean}_{unique_id}"
-
-        logger.info(f"Generated unique session_id from query: {session_id}")
+        logger.info(f"Generated unique session_id: {session_id} for query: {query}")
 
     # 如果 expand_query=True，生成多个检索词
     queries_to_search = [query]
@@ -1264,40 +1257,33 @@ async def batch_paper_analysis(
                                 except Exception as e:
                                     logger.error(f"Error reading metadata from {session_folder}: {e}")
 
-        # 如果还是没有 session_id，使用 topic 生成一个唯一的
-        if not session_id and topic:
-            import hashlib
-            import uuid
-            from datetime import datetime
+        # 如果还是没有 session_id，生成一个唯一的
+        if not session_id:
+            import time
+            import random
+            import string
 
-            # 使用 topic + UUID 生成唯一的 session_id
-            topic_clean = topic.lower().replace(' ', '_').replace('-', '_')
-            unique_id = str(uuid.uuid4())[:8]  # 使用UUID的前8位确保唯一性
+            # 统一使用 session_{timestamp}_{random_id} 格式
+            timestamp = int(time.time() * 1000)  # 毫秒级时间戳
+            random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+            session_id = f"session_{timestamp}_{random_id}"
 
-            # 限制session_id长度为50字符,避免路径过长
-            if len(topic_clean) > 30:
-                # 如果topic太长,只使用部分topic + unique_id
-                session_id = f"{topic_clean[:30]}_{unique_id}"
-            else:
-                session_id = f"{topic_clean}_{unique_id}"
-
-            logger.info(f"Generated unique session_id from topic: {session_id}")
-        elif not session_id:
-            # 如果都没有，生成一个随机的 session_id
-            import uuid
-            session_id = str(uuid.uuid4())[:8]
-            logger.info(f"Generated random session_id: {session_id}")
+            logger.info(f"Generated unique session_id: {session_id} for topic: {topic}")
 
     # 执行批量分析（异步并发执行）
     result = await batch_paper_analysis_impl(papers=papers)
 
     # 保存总结到 Markdown 文件
     if result.get('status') == 'success':
+        # 生成统一的时间戳，用于MD和CSV文件
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
         summary_result = save_summary_to_file(
             summary_result=result,
             session_id=session_id,
             topic=topic,
-            file_prefix='analysis'
+            file_prefix=f'analysis_{timestamp}'  # 使用带时间戳的文件名
         )
         if summary_result.get('file_path'):
             file_path = summary_result['file_path']
@@ -1305,18 +1291,21 @@ async def batch_paper_analysis(
             # 使用新的 get_download_url 函数生成下载URL
             result['md_download_url'] = get_download_url(file_path)
 
-        # 保存分析结果到 CSV 文件（包含中文摘要和关键信息）
+        # 保存分析结果到 CSV 文件（包含结构化分析数据）
         csv_result = save_analysis_results_to_csv(
             analysis_results=result.get('results', []),
             session_id=session_id,
             topic=topic,
-            file_prefix='analysis_results'
+            file_prefix=f'analysis_results_{timestamp}',  # 使用带时间戳的文件名
+            append_mode=True  # 使用追加模式，但由于文件名包含时间戳，实际上是新文件
         )
         if csv_result.get('file_path'):
             file_path = csv_result['file_path']
             result['csv_file_path'] = file_path
             # 使用新的 get_download_url 函数生成下载URL
             result['csv_download_url'] = get_download_url(file_path)
+            logger.info(f"✅ Analysis results CSV saved: {result['csv_download_url']}")
+            logger.info(f"   Added {csv_result.get('papers_added', 0)} new analyses, total {csv_result.get('total_results', 0)}")
 
         # 简化results字段,只保留重要信息
         if 'results' in result:
@@ -1421,7 +1410,7 @@ async def generate_research_report(
         - md_download_url: MD文件下载链接
         - csv_download_url: CSV文件下载链接
     """
-    from modules.paper_manager.export_tools import save_report_to_file, save_report_papers_to_csv, read_papers_from_csv
+    from modules.paper_manager.export_tools import save_report_to_file, save_analysis_results_to_csv, read_papers_from_csv
 
     # 优先使用CSV文件
     if csv_file_path:
@@ -1512,27 +1501,18 @@ async def generate_research_report(
                                 except Exception as e:
                                     logger.error(f"Error reading metadata from {session_folder}: {e}")
 
-        # 如果还是没有 session_id，使用 topic 生成一个唯一的
-        if not session_id and topic:
-            import uuid
+        # 如果还是没有 session_id，生成一个唯一的
+        if not session_id:
+            import time
+            import random
+            import string
 
-            # 使用 topic + UUID 生成唯一的 session_id
-            topic_clean = topic.lower().replace(' ', '_').replace('-', '_')
-            unique_id = str(uuid.uuid4())[:8]  # 使用UUID的前8位确保唯一性
+            # 统一使用 session_{timestamp}_{random_id} 格式
+            timestamp = int(time.time() * 1000)  # 毫秒级时间戳
+            random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+            session_id = f"session_{timestamp}_{random_id}"
 
-            # 限制session_id长度为50字符,避免路径过长
-            if len(topic_clean) > 30:
-                # 如果topic太长,只使用部分topic + unique_id
-                session_id = f"{topic_clean[:30]}_{unique_id}"
-            else:
-                session_id = f"{topic_clean}_{unique_id}"
-
-            logger.info(f"Generated unique session_id from topic: {session_id}")
-        elif not session_id:
-            # 如果都没有，生成一个随机的 session_id
-            import uuid
-            session_id = str(uuid.uuid4())[:8]
-            logger.info(f"Generated random session_id: {session_id}")
+            logger.info(f"Generated unique session_id: {session_id} for topic: {topic}")
 
     try:
         result = await generate_research_report_with_data_collection(
@@ -1543,10 +1523,15 @@ async def generate_research_report(
 
         # 保存报告到 Markdown 文件
         if result.get('status') == 'success':
+            # 生成统一的时间戳，用于MD和CSV文件
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
             report_result = save_report_to_file(
                 report_result=result,
                 session_id=session_id,
-                topic=topic
+                topic=topic,
+                file_prefix=f'report_{timestamp}'  # 使用带时间戳的文件名
             )
             if report_result.get('file_path'):
                 file_path = report_result['file_path']
@@ -1561,26 +1546,35 @@ async def generate_research_report(
                 # 使用新的 get_download_url 函数生成下载URL
                 result['md_download_url'] = get_download_url(file_path)
 
-            # 保存论文信息到 CSV 文件（使用专门的报告论文保存函数）
+            # 保存报告的结构化分析数据到 report_papers_<timestamp>.csv
             try:
-                csv_result = save_report_papers_to_csv(
-                    papers=papers_info,
-                    session_id=session_id,
-                    topic=topic,
-                    file_prefix='report_papers'
-                )
+                # 获取结构化分析数据
+                structured_analyses = result.get('structured_analyses', [])
 
-                if csv_result.get('status') == 'success' and csv_result.get('file_path'):
-                    file_path = csv_result['file_path']
-                    result['csv_file_path'] = file_path
-                    # 使用新的 get_download_url 函数生成下载URL
-                    result['csv_download_url'] = get_download_url(file_path)
-                    logger.info(f"✅ CSV file saved and download URL generated: {result['csv_download_url']}")
+                if structured_analyses:
+                    csv_result = save_analysis_results_to_csv(
+                        analysis_results=structured_analyses,
+                        session_id=session_id,
+                        topic=topic,
+                        file_prefix=f'report_papers_{timestamp}',  # 使用带时间戳的文件名
+                        append_mode=True  # 使用追加模式，但由于文件名包含时间戳，实际上是新文件
+                    )
+
+                    if csv_result.get('status') == 'success' and csv_result.get('file_path'):
+                        file_path = csv_result['file_path']
+                        result['csv_file_path'] = file_path
+                        result['csv_download_url'] = get_download_url(file_path)
+                        logger.info(f"✅ Report papers CSV saved: {result['csv_download_url']}")
+                        logger.info(f"   Added {csv_result.get('papers_added', 0)} new analyses, total {csv_result.get('total_results', 0)}")
+                    else:
+                        logger.warning(f"⚠️ Report papers CSV save failed: {csv_result}")
                 else:
-                    logger.warning(f"⚠️ CSV save failed or no file path: {csv_result}")
-                    
+                    logger.warning("⚠️ No structured analyses available for CSV export")
+
             except Exception as csv_error:
-                logger.error(f"❌ Failed to save CSV file: {csv_error}")
+                logger.error(f"❌ Failed to save report papers CSV: {csv_error}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 # 不让CSV保存失败影响整个报告生成
                 result['csv_error'] = str(csv_error)
 
@@ -1590,6 +1584,10 @@ async def generate_research_report(
                 # 只保留前500个字符作为摘要
                 result['report_summary'] = report_content[:500] + '...' if len(report_content) > 500 else report_content
                 del result['report']
+
+            # 删除内部使用的结构化分析数据（已保存到CSV）
+            if 'structured_analyses' in result:
+                del result['structured_analyses']
 
         # 清理返回数据，防止 JSON 解析错误
         return sanitize_tool_response(result)
@@ -1725,8 +1723,78 @@ async def semantic_search_papers(
         return []
 
 
+@mcp.tool()
+async def clean_csv_data(
+    session_id: str = None,
+    csv_path: str = None,
+    backup: bool = True,
+    dry_run: bool = False
+) -> Dict[str, Any]:
+    """
+    清理 CSV 文件中的无效数据行
+
+    无效行的定义：
+    1. ID 包含 'unknown'
+    2. Title 是 'Unknown Title' 且 Abstract 为空
+    3. Source 是 'unknown' 且其他关键字段为空
+    4. 所有关键字段都为空
+
+    Args:
+        session_id: 会话ID（可选，如果提供则清理该会话的 CSV）
+        csv_path: CSV 文件路径（可选，如果提供则清理指定文件）
+        backup: 是否备份原文件（默认 True）
+        dry_run: 是否只检查不修改（默认 False）
+
+    Returns:
+        Dict containing:
+        - status: 'success' or 'error'
+        - message: 清理结果消息
+        - original_count: 原始行数
+        - valid_count: 有效行数
+        - invalid_count: 无效行数
+        - invalid_rows_sample: 无效行的详细信息（最多显示10个）
+        - backup_path: 备份文件路径（如果创建了备份）
+    """
+    from modules.paper_manager.export_tools import clean_csv_file, clean_all_csv_files
+    from modules.shared.session_folder_manager import get_session_folder
+
+    try:
+        # 如果提供了 csv_path，清理指定文件
+        if csv_path:
+            result = clean_csv_file(csv_path, backup=backup, dry_run=dry_run)
+        # 如果提供了 session_id，清理该会话的 CSV
+        elif session_id:
+            session_folder = get_session_folder(session_id)
+            csv_file = os.path.join(session_folder, 'all_papers.csv')
+            if os.path.exists(csv_file):
+                result = clean_csv_file(csv_file, backup=backup, dry_run=dry_run)
+            else:
+                result = {
+                    'status': 'error',
+                    'error': f'CSV file not found in session {session_id}'
+                }
+        # 否则清理所有 CSV 文件
+        else:
+            result = clean_all_csv_files(backup=backup, dry_run=dry_run)
+
+        # 限制返回的无效行数量（避免响应过大）
+        if 'invalid_rows' in result and len(result['invalid_rows']) > 10:
+            result['invalid_rows_sample'] = result['invalid_rows'][:10]
+            result['invalid_rows_total'] = len(result['invalid_rows'])
+            del result['invalid_rows']
+
+        return result
+
+    except Exception as e:
+        logger.error(f"清理 CSV 数据失败: {e}")
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+
 # ============================================================================
-# 工具优化完成 - 18 个核心工具
+# 工具优化完成 - 19 个核心工具
 # ============================================================================
 # 1. 规划类 (1个): generate_research_plan
 # 2. 检索类 (8个):
@@ -1737,7 +1805,7 @@ async def semantic_search_papers(
 # 3. 文献下载 (1个): download_paper
 # 4. 内容获取 (2个): fetch_paper_content_from_url, get_paper_content
 # 5. 批量汇总 (1个): batch_paper_analysis
-# 6. 导出工具 (1个): save_papers_to_csv
+# 6. 导出工具 (2个): save_papers_to_csv, clean_csv_data
 # 7. 获取全文生成报告 (1个): generate_research_report
 # 8. 向量化工具 (2个): ingest_papers_to_vector_store, semantic_search_papers
 # ============================================================================
@@ -1749,6 +1817,7 @@ async def semantic_search_papers(
 # - ✅ LLM 翻译摘要
 # - ✅ 通用 URL 全文提取（PDF 和 HTML）
 # - ✅ 失败时自动回退到摘要
+# - ✅ CSV 数据清理（移除无效行）
 # ============================================================================
 
 
