@@ -28,13 +28,23 @@ CONTEXT_SUMMARY_THRESHOLD = 15  # 超过15条消息时开始总结
 
 # 🆕 工具名称到功能类型的映射（用于按功能扣费）
 TOOL_FEATURE_MAPPING = {
+    # 数据库查询工具（1 光子/次）
+    'materials_project_query_tool': 'database',     # 1 光子
+    'get_oqmd_phases': 'database',                  # 1 光子
+    'search_cod_by_formula': 'database',            # 1 光子
+    'get_aflow_data': 'database',                   # 1 光子
+    'batch_database_search': 'database',            # 1 光子（批量查询按单次计费）
+    'get_structure_recommendations': 'database',    # 1 光子
+
+    # 文献搜索工具（1 光子/次）
+    'search_papers': 'search',                      # 1 光子
     # 结构生成与弛豫
     'generate_crystal_structure': 'structure_gen',  # 10 光子
     'relax_structure': 'relaxation',                # 5 光子
 
     # 声子谱与热导率计算
     'calculate_phonon': 'phonon',                   # 5 光子
-    'calculate_phonon_from_directory': 'phonon',    # 5 光子（单次调用，批量处理）
+    'calculate_phonon_from_directory': 'batch_phonon', # 4 光子（批量优惠）
     'calculate_kappa_from_cif': 'kappa',            # 5 光子
     'calculate_kappa_from_directory': 'batch_kappa', # 4 光子（批量优惠）
     'batch_calculate_kappa': 'batch_kappa',         # 4 光子（批量优惠）
@@ -45,13 +55,19 @@ TOOL_FEATURE_MAPPING = {
 
     # 文献分析
     'analyze_paper_content': 'analysis',            # 15 光子
+    'batch_paper_analysis': 'analysis',             # 15 光子
 
     # 免费工具（不在映射中的工具默认免费）
-    # 'search_papers': 0,
-    # 'query_materials_project': 0,
-    # 'query_aflow': 0,
-    # 'extract_and_validate_cif': 0,
-    # 'calculate_energy_from_cif': 0,
+    # 'get_paper_info': 0,                          # 获取论文信息（免费）
+    # 'get_paper_content': 0,                       # 获取论文内容（免费）
+    # 'download_paper': 0,                          # 下载论文（免费）
+    # 'save_papers_to_csv': 0,                      # 保存到CSV（免费）
+    # 'ingest_papers_to_vector_store': 0,           # 向量化存储（免费）
+    # 'semantic_search_papers': 0,                  # 语义搜索（免费）
+    # 'generate_research_plan': 0,                  # 生成研究计划（免费）
+    # 'extract_and_validate_cif': 0,                # CIF验证（免费）
+    # 'calculate_energy_from_cif': 0,               # 能量计算（免费）
+    # 'health_check': 0,                            # 健康检查（免费）
 }
 
 
@@ -172,7 +188,16 @@ class AgentCoordinator:
             logger.info(f"🤖 Running agent: {agent_id} (message #{self.session_message_counts[session_key]})")
 
             # 创建用户消息 - 需要使用 types.Content 包装 types.Part
-            parts = [types.Part(text=content)]
+            parts = []
+
+            # 🔧 对于 deep_research_agent，在消息开头添加 session_id 信息
+            # 这样 Agent 可以在所有操作中使用相同的 session_id
+            if agent_id == 'deep_research_agent' and session_id:
+                session_info = f"[系统信息] 当前会话 session_id=\"{session_id}\"，所有工具调用必须使用此 session_id\n\n"
+                parts.append(types.Part(text=session_info))
+
+            parts.append(types.Part(text=content))
+
             # Attach optional file/text parts (e.g., CIF content) so agents can parse them
             if attachments:
                 # 对于 deep_research_agent 和 simulation_agent，保存文件到磁盘
@@ -184,15 +209,17 @@ class AgentCoordinator:
                     import base64
                     from pathlib import Path
 
-                    # 确保 session_id 存在（如果为 None，使用 session_key 的一部分）
+                    # 确保 session_id 存在（如果为 None，生成一个唯一的）
                     actual_session_id = session_id
                     if not actual_session_id:
-                        # 从 session_key 中提取或生成 session_id
-                        import uuid
-                        from datetime import datetime
-                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                        unique_id = str(uuid.uuid4())[:8]
-                        actual_session_id = f"upload_{timestamp}_{unique_id}"
+                        # 统一使用 session_{timestamp}_{random_id} 格式
+                        import time
+                        import random
+                        import string
+
+                        timestamp = int(time.time() * 1000)  # 毫秒级时间戳
+                        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                        actual_session_id = f"session_{timestamp}_{random_id}"
                         logger.info(f"📝 Generated session_id for file upload: {actual_session_id}")
 
                     # 根据 agent 类型选择不同的上传目录 - 使用统一存储
@@ -205,21 +232,30 @@ class AgentCoordinator:
                         upload_dir = get_session_storage_path(
                             session_id=actual_session_id,
                             data_type="papers",
-                            create=True
+                            create=True,
+                            session_type="upload",
+                            created_by="user",
+                            topic=None  # 上传时通常没有明确的 topic
                         ) / "uploads"
                     elif agent_id == 'simulation_agent':
                         # 模拟 agent 使用 cif 目录
                         upload_dir = get_session_storage_path(
                             session_id=actual_session_id,
                             data_type="cif",
-                            create=True
+                            create=True,
+                            session_type="upload",
+                            created_by="user",
+                            topic=None
                         )
                     else:
                         # 默认使用 papers 目录
                         upload_dir = get_session_storage_path(
                             session_id=actual_session_id,
                             data_type="papers",
-                            create=True
+                            create=True,
+                            session_type="upload",
+                            created_by="user",
+                            topic=None
                         ) / "uploads"
 
                     upload_dir.mkdir(parents=True, exist_ok=True)

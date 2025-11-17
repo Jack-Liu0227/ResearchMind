@@ -20,19 +20,20 @@ from typing import Dict, Any
 
 FEATURE_PRICING: Dict[str, int] = {
     # ===== 永久免费功能 =====
-    'search': 0,           # 文献搜索（ArXiv、Google Scholar、Tavily）
-    'database': 0,         # 数据库查询（Materials Project、OQMD、COD、AFLOW）
+
     'export': 0,           # 文件导出（CIF、CSV、Markdown）
 
     # ===== Agent 对话功能 =====
     'chat': 0,             # Agent 对话（Deep Research / Database / Simulation Agent）
-
+    'database': 1,         # 数据库查询（Materials Project、OQMD、COD、AFLOW）
     # ===== 高级计算功能 =====
+    'search': 1,           # 文献搜索（ArXiv、semantic cholar、Tavily）
     'report': 30,  # 文献调研报告（全文报告分析 + Markdown 报告生成）
     "analysis":15,        # 文献分析报告 （摘要简单分析+ Markdown 报告生成）
     'structure_gen': 10,   # 结构生成（CrystaLLM 晶体结构生成）
     'relaxation': 5,       # 结构弛豫（MatterSim 结构优化）
     'phonon': 5,          # 声子谱计算（声子色散 + 态密度）
+    'batch_phonon': 4,     # 批量声子谱计算（每个结构，享受 20% 折扣）
     'kappa': 5,           # 热导率计算（AI4Kappa 预测）
     'batch_kappa': 4,      # 批量热导率计算（每个结构，享受 20% 折扣）
 }
@@ -75,7 +76,8 @@ INVITATION_VALID_HOURS: int = 72  # 新用户需在 72 小时内填写学术码
 # ============================================================================
 
 BATCH_DISCOUNT: Dict[str, float] = {
-    'batch_kappa': 0.20,  # 批量热导率计算享受 20% 折扣
+    'batch_phonon': 0.20,  # 批量声子谱计算享受 20% 折扣
+    'batch_kappa': 0.20,   # 批量热导率计算享受 20% 折扣
 }
 
 # ============================================================================
@@ -173,20 +175,7 @@ PRICING_CHANGELOG = [
     {
         'version': 'v1.0',
         'date': '2025-11-14',
-        'changes': [
-            '初始版本',
-            'Agent 对话：1 光子/次',
-            '文献分析报告：30 光子/次',
-            '结构生成：10 光子/次',
-            '结构弛豫：5 光子/次',
-            '声子谱计算：20 光子/次',
-            '热导率计算：10 光子/次',
-            '批量热导率：8 光子/结构（20% 折扣）',
-            '邀请奖励（遵循 Bohrium 平台规则 activityId=1200000）：',
-            '  - 邀请人：每邀请 1 人获得 7 日体验会员（1000 光子 + 10GB 云盘，有效期 7 天）',
-            '  - 受邀请人：填写学术码后获得 500 光子（有效期 30 天）',
-            '  - 邀请多人时会员时长累加',
-        ],
+        'description': '初始版本 - 定价配置详见 FEATURE_PRICING 字典',
         'author': 'ResearchMind Team',
     },
 ]

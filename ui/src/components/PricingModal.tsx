@@ -81,12 +81,15 @@ const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose }) => {
 
   const getFeatureUnit = (key: string): string => {
     const units: Record<string, string> = {
+      search: '/次',
+      database: '/次',
       chat: '/次',
       report: '/次',
       analysis: '/次',
       structure_gen: '/次',
       relaxation: '/次',
       phonon: '/次',
+      batch_phonon: '/结构',
       kappa: '/次',
       batch_kappa: '/结构',
     }
