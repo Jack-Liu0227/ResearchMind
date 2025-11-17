@@ -142,7 +142,7 @@ class ResearchReportGenerator:
             # 如果有需要获取内容的论文，则并行获取
             if papers_needing_content:
                 # 内存优化：减少并发任务数量以降低API压力
-                MAX_CONCURRENT_TASKS = 5  # 设置为5个并发任务以降低API压力和超时风险
+                MAX_CONCURRENT_TASKS = 10# 设置为5个并发任务以降低API压力和超时风险
 
                 async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> tuple:
                     """异步获取单篇论文的全文（带超时控制）"""

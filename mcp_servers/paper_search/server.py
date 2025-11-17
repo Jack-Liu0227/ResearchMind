@@ -395,15 +395,20 @@ async def search_papers(
 
     ⚠️ 推荐使用：默认搜索所有源，自动去重和标准化字段
     ⚠️ 自动保存：自动调用 save_papers_to_csv 保存检索结果
-    ⚠️ 新功能：支持自动生成多个检索词进行综合搜索（expand_query=True）
+    ⚠️ 并行搜索：
+       - 支持多个检索词并行搜索（用逗号、分号或换行符分隔）
+       - 支持自动生成多个检索词进行综合搜索（expand_query=True）
+       - 多个数据源自动并行执行
 
     Args:
         query: 搜索查询（建议使用英文关键词）
+               支持多个检索词，用逗号、分号或换行符分隔，例如：
+               "machine learning, deep learning, neural networks"
         sources: 搜索源列表 ['arxiv', 'tavily_academic', 'tavily']
                 如果为None，则搜索所有可用源
         max_results: 每个源的最大结果数（默认: 3，以节省资源）
         session_id: 会话ID（用于保存搜索结果到文件，可选）
-        expand_query: 是否自动生成多个检索词（默认: False）
+        expand_query: 是否使用LLM自动生成多个检索词（默认: False）
         num_expanded_queries: 生成的检索词数量（默认: 3）
 
     Returns:
@@ -414,7 +419,7 @@ async def search_papers(
         - total_results: 总结果数
         - csv_file_path: CSV文件路径（服务器端）
         - csv_content: CSV文件内容（供下载）
-        - queries_used: 使用的检索词列表（如果 expand_query=True）
+        - queries_used: 使用的检索词列表
         - message: 消息
     """
     logger.info("Unified search", query=query, sources=sources, max_results=max_results, session_id=session_id, expand_query=expand_query)
@@ -432,13 +437,25 @@ async def search_papers(
 
         logger.info(f"Generated unique session_id: {session_id} for query: {query}")
 
-    # 如果 expand_query=True，生成多个检索词
-    queries_to_search = [query]
-    if expand_query:
+    # 处理多个检索词（支持分隔符：逗号、分号、换行符）
+    import re
+    queries_to_search = []
+
+    # 先检查是否包含分隔符
+    if any(sep in query for sep in [',', ';', '\n']):
+        # 使用正则表达式分割多个检索词
+        raw_queries = re.split(r'[,;\n]+', query)
+        queries_to_search = [q.strip() for q in raw_queries if q.strip()]
+        logger.info(f"Detected {len(queries_to_search)} queries from input: {queries_to_search}")
+    elif expand_query:
+        # 如果 expand_query=True，使用 LLM 生成多个检索词
         logger.info(f"Expanding query: {query}")
         expanded_queries = await _generate_expanded_queries(query, num_expanded_queries)
         queries_to_search = expanded_queries
-        logger.info(f"Generated {len(queries_to_search)} queries: {queries_to_search}")
+        logger.info(f"Generated {len(queries_to_search)} expanded queries: {queries_to_search}")
+    else:
+        # 单个检索词
+        queries_to_search = [query]
 
     # 异步并行搜索多个检索词
     import asyncio
@@ -519,8 +536,10 @@ async def search_papers(
         final_result['csv_download_url'] = download_url
         final_result['csv_file_path'] = csv_result['file_path']
 
-    if expand_query:
+    # 始终返回使用的检索词列表（用于追踪和调试）
+    if len(queries_to_search) > 1:
         final_result['queries_used'] = queries_to_search
+        final_result['num_queries'] = len(queries_to_search)
 
     return sanitize_tool_response(final_result)
 
