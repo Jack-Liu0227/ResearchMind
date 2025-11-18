@@ -59,6 +59,11 @@ SIMULATION_AGENT_INSTRUCTION = """You are a computational materials scientist wi
   2. `relax_structure(session_id=session_id, cif_filename="sample_1.cif")` → 🆕 直接使用生成的文件名
   3. `calculate_energy_from_cif(session_id=session_id, cif_filename="relaxed_*.cif")`
 
+- **使用空间群约束生成结构**:
+  1. `generate_crystal_structure(composition="Na2Cl2", spacegroup="P4/nmm", session_id=session_id)` → 生成指定空间群的结构
+  2. `relax_structure(session_id=session_id, cif_filename="sample_1.cif")`
+  3. 继续后续计算（声子谱、能量等）
+
 ### 快速计算 (跳过弛豫)
 - **直接计算热导率**:
   - `generate_crystal_structure(composition)` → `calculate_kappa_from_cif(cif_content)`
@@ -93,7 +98,8 @@ SIMULATION_AGENT_INSTRUCTION = """You are a computational materials scientist wi
   result = calculate_phonon_from_directory(
       session_id=session_id,
       cif_directory=cif_dir,
-      supercell_matrix=[4, 4, 4]
+      supercell_matrix=[2, 2, 2],
+      find_prim=True
   )
   # 所有声子谱图片和 CSV 数据会自动展示在前端
   ```
@@ -140,8 +146,11 @@ SIMULATION_AGENT_INSTRUCTION = """You are a computational materials scientist wi
 ## 可用工具
 
 ### 结构生成与处理
-- `generate_crystal_structure(composition, session_id, num_structures=1)`: 根据化学式生成晶体结构, 可指定生成数量
+- `generate_crystal_structure(composition, session_id, num_structures=1, spacegroup=None)`: 根据化学式生成晶体结构, 可指定生成数量和空间群约束
   - 🔴 session_id 是必需参数
+  - composition: 化学式（如 "GaN", "Na2Cl2"）
+  - num_structures: 生成结构数量（默认1）
+  - spacegroup: 可选的空间群约束（如 "P4/nmm", "Fd-3m", "P4_2/n"）
   - 返回生成的 CIF 文件名列表（如 `["sample_1.cif", "sample_2.cif"]`）
   - 文件保存在 `session_data/simulation/{session_id}/generated/{composition}_{generation_id}/generated/` 或 `processed/` 下
 - `extract_and_validate_cif(session_id, filename)`: 从用户上传的文件中提取并验证 CIF
@@ -154,14 +163,18 @@ SIMULATION_AGENT_INSTRUCTION = """You are a computational materials scientist wi
   - 无需手动复制文件到上传目录
 
 ### 性质计算
-- `calculate_phonon(session_id, cif_filename, supercell_matrix=[4,4,4])`: 计算单个 CIF 文件的声子谱和声子态密度
+- `calculate_phonon(session_id, cif_filename, supercell_matrix=[2,2,2], find_prim=True)`: 计算单个 CIF 文件的声子谱和声子态密度
   - 🔴 session_id 是必需参数
   - 💡 建议先调用 `relax_structure()` 优化结构
+  - supercell_matrix: 超胞矩阵，默认 [2,2,2]
+  - find_prim: 是否寻找原胞，默认 True
 
-- `calculate_phonon_from_directory(session_id, cif_directory, supercell_matrix=[4,4,4])`: 批量计算文件夹中所有 CIF 文件的声子谱
+- `calculate_phonon_from_directory(session_id, cif_directory, supercell_matrix=[2,2,2], find_prim=True)`: 批量计算文件夹中所有 CIF 文件的声子谱
   - 🔴 session_id 是必需参数
   - cif_directory: 包含 CIF 文件的文件夹路径（通常是 `session_data/simulation/{session_id}/cif`）
   - 💡 **强烈建议**先对每个 CIF 文件调用 `relax_structure()` 进行弛豫，然后再批量计算
+  - supercell_matrix: 超胞矩阵，默认 [2,2,2]
+  - find_prim: 是否寻找原胞，默认 True
   - 返回所有结构的声子谱图片和 CSV 数据，自动展示在前端
   - 自动处理错误，继续计算其他结构
 

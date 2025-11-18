@@ -554,10 +554,10 @@ async def relax_structure(
 @app.tool
 async def calculate_phonon_from_directory(
     cif_directory: str,
-    device: str = "cuda",
+    device: str = "cpu",
     supercell_matrix: Optional[List[int]] = None,
     amplitude: float = 0.01,
-    find_prim: bool = False,
+    find_prim: bool = True,
     session_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -569,9 +569,9 @@ async def calculate_phonon_from_directory(
         cif_directory: 包含 CIF 文件的文件夹路径（绝对路径或相对于项目根目录）
                       例如: "mcp_servers/simulation/cif/session_xxx/relax"
         device: 计算设备 ('cuda' 或 'cpu')
-        supercell_matrix: 超胞矩阵 (默认: [4, 4, 4])
+        supercell_matrix: 超胞矩阵 (默认: [2, 2, 2])
         amplitude: 位移幅度 (默认: 0.01 Å)
-        find_prim: 是否在计算前寻找原胞
+        find_prim: 是否在计算前寻找原胞 (默认: True)
         session_id: 会话 ID（可选，用于结果文件命名）
 
     Returns:
@@ -586,7 +586,8 @@ async def calculate_phonon_from_directory(
     Example:
         result = await calculate_phonon_from_directory(
             cif_directory="mcp_servers/simulation/cif/session_xxx/relax",
-            supercell_matrix=[4, 4, 4]
+            supercell_matrix=[2, 2, 2],
+            find_prim=True
         )
     """
     if not MATTERSIM_AVAILABLE:
@@ -662,7 +663,7 @@ async def calculate_phonon_from_directory(
                     cif_content=cif_content,
                     cif_filename=cif_file.name,
                     device=device,
-                    supercell_matrix=supercell_matrix or [4, 4, 4],
+                    supercell_matrix=supercell_matrix or [2, 2, 2],
                     amplitude=amplitude,
                     find_prim=find_prim,
                     output_dir=str(phonon_dir)
@@ -818,10 +819,10 @@ async def calculate_phonon_from_directory(
 async def calculate_phonon(
     session_id: str,
     cif_filename: str,
-    device: str = "cuda",
+    device: str = "cpu",
     supercell_matrix: Optional[List[int]] = None,
     amplitude: float = 0.01,
-    find_prim: bool = False
+    find_prim: bool = True
 ) -> Dict[str, Any]:
     """
     Calculate phonon dispersion using MatterSim for a single CIF file.
@@ -852,7 +853,8 @@ async def calculate_phonon(
         phonon_result = await calculate_phonon(
             session_id="abc123",
             cif_filename=relax_result["relaxed_cif_filename"],  # ⚠️ 使用弛豫后的文件名
-            supercell_matrix=[4, 4, 4]
+            supercell_matrix=[2, 2, 2],
+            find_prim=True
         )
     ```
 
@@ -861,9 +863,9 @@ async def calculate_phonon(
         cif_filename: CIF filename in the session directory (e.g., "relaxed_structure_20251105_220000.cif")
                      ⚠️ 应该使用 relax_structure() 返回的 relaxed_cif_filename
         device: Computing device ('cuda' or 'cpu')
-        supercell_matrix: Supercell matrix for phonon calculation (default: [4, 4, 4])
+        supercell_matrix: Supercell matrix for phonon calculation (default: [2, 2, 2])
         amplitude: Displacement amplitude for phonon calculation (default: 0.01 Å)
-        find_prim: Whether to find primitive cell before calculation
+        find_prim: Whether to find primitive cell before calculation (default: True)
 
     Returns:
         Dict with phonon calculation results:
@@ -888,7 +890,8 @@ async def calculate_phonon(
         result = await calculate_phonon(
             session_id="abc123",
             cif_filename="relaxed_C_20251105_220000.cif",
-            supercell_matrix=[4, 4, 4]
+            supercell_matrix=[2, 2, 2],
+            find_prim=True
         )
     """
     if not MATTERSIM_AVAILABLE:
@@ -936,7 +939,7 @@ async def calculate_phonon(
     # 调用实现函数，传入目标目录以避免重复保存
     # 注意：calculate_phonon_impl 会在 phonon_dir 下创建结构特定的子目录
     result = calculate_phonon_impl(
-        cif_content, cif_filename, device, supercell_matrix,
+        cif_content, cif_filename, device, supercell_matrix or [2, 2, 2],
         amplitude, find_prim, output_dir=str(phonon_dir)
     )
 

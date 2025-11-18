@@ -1257,7 +1257,7 @@ def calculate_phonon_impl(
     device: str = "cpu",
     supercell_matrix: Optional[List[int]] = None,
     amplitude: float = 0.01,
-    find_prim: bool = False,
+    find_prim: bool = True,
     output_dir: Optional[str] = None,
     max_csv_rows: int = 1000,
     skip_csv_for_large_structures: bool = True,
@@ -1269,15 +1269,17 @@ def calculate_phonon_impl(
     Results are saved to the specified output directory (or default persistent directory).
     This avoids duplicate file saves and ensures images go directly to the target location.
 
+    ⚠️ 注意：计算完成后，YAML文件会被自动清理，只保留图片和CSV文件。
+
     Based on: https://microsoft.github.io/mattersim/examples/phonon_example.html
 
     Args:
         cif_content: CIF file content (base64 or plain text)
         cif_filename: Original filename
         device: Computing device ('cuda' or 'cpu')
-        supercell_matrix: Supercell matrix for phonon calculation (default: [4, 4, 4])
+        supercell_matrix: Supercell matrix for phonon calculation (default: [2, 2, 2])
         amplitude: Displacement amplitude for phonon calculation (default: 0.01 Å)
-        find_prim: Whether to find primitive cell before calculation
+        find_prim: Whether to find primitive cell before calculation (default: True)
         output_dir: Target directory for saving images (if None, uses default phonon_results/)
         max_csv_rows: Maximum rows in CSV files (default: 1000). If exceeded, data will be downsampled.
                      Set to 0 to disable CSV export entirely.
@@ -1355,7 +1357,7 @@ def calculate_phonon_impl(
 
     # Set default supercell matrix
     if supercell_matrix is None:
-        supercell_matrix = [4, 4, 4]
+        supercell_matrix = [2, 2, 2]
 
     try:
         # Step 1: Decode and save CIF file to persistent directory
@@ -1599,7 +1601,7 @@ def calculate_phonon_impl(
                 min_freq = None
                 max_freq = None
 
-            # 🆕 Extract and save phonon dispersion data from band.yaml
+            # 🆕 Extract and save phonon dispersion data from band.yaml (YAML文件稍后会被清理)
             try:
                 if MAX_CSV_ROWS == 0:
                     logger.info(f"⏭️ Skipping dispersion CSV export (MAX_CSV_ROWS=0)")
@@ -1788,6 +1790,20 @@ def calculate_phonon_impl(
         }
 
     finally:
-        # 🔧 优化：不再需要清理临时目录，因为直接使用持久化目录作为工作目录
-        # 所有文件（图片、YAML、CSV）都已保存在持久化目录中
-        logger.info("✅ Phonon calculation completed, all results saved to persistent storage")
+        # 🔧 清理YAML文件，只保留图片和CSV文件
+        try:
+            if 'persistent_dir' in locals():
+                yaml_files = list(Path(persistent_dir).glob("*.yaml"))
+                for yaml_file in yaml_files:
+                    try:
+                        yaml_file.unlink()
+                        logger.info(f"🗑️ Removed YAML file: {yaml_file.name}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to remove YAML file {yaml_file.name}: {e}")
+
+                if yaml_files:
+                    logger.info(f"✅ Cleaned up {len(yaml_files)} YAML file(s)")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to clean up YAML files: {e}")
+
+        logger.info("✅ Phonon calculation completed, images and CSV files saved to persistent storage")
