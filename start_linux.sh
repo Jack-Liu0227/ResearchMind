@@ -1,21 +1,20 @@
 #!/bin/bash
 
 # =============================================================================
-# ResearchMind unified launcher for Linux
+# ResearchMind 统一启动器 (Linux)
 # =============================================================================
-# Starts every component (backend, MCP servers, frontend) using the variables
-# defined in .env or .env.remote. It also handles log redirection, process 
-# tracking, and graceful shutdown on Ctrl+C.
+# 启动所有组件（后端、MCP 服务器、前端），使用 .env 或 .env.remote 中定义的变量。
+# 处理日志重定向、进程跟踪、优雅关闭，并支持自动重启和健康检查。
 #
-# Usage:
+# 使用方法:
 #   bash start_linux.sh
 #
-# NOTE: Nginx should be configured separately using setup_nginx.sh
+# 注意: Nginx 需要使用 setup_nginx.sh 单独配置
 # =============================================================================
 
 set -euo pipefail
 
-# ----------------------------- Colour definitions ----------------------------
+# ----------------------------- 颜色定义 ----------------------------
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -23,51 +22,94 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# ----------------------------- Logging utilities -----------------------------
+# ----------------------------- 全局配置 -----------------------------
+# 重启配置
+MAX_RESTART_ATTEMPTS=3          # 最大重启尝试次数
+RESTART_DELAY_BASE=5            # 基础重启延迟（秒）
+HEALTH_CHECK_TIMEOUT=30         # 健康检查超时（秒）
+HEALTH_CHECK_INTERVAL=2         # 健康检查间隔（秒）
+PORT_WAIT_TIMEOUT=30            # 端口释放等待超时（秒）
+PORT_CHECK_INTERVAL=1           # 端口检查间隔（秒）
+
+# 日志文件
+STARTUP_LOG="logs/startup.log"
+RESTART_LOG="logs/restart.log"
+
+# ----------------------------- 日志工具 -----------------------------
+# 确保日志目录存在
+ensure_log_dir() {
+    if [ ! -d "logs" ]; then
+        mkdir -p logs
+    fi
+}
+
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    ensure_log_dir
+    local msg="[信息] $1"
+    echo -e "${BLUE}${msg}${NC}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${msg}" >> "$STARTUP_LOG"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    ensure_log_dir
+    local msg="[成功] $1"
+    echo -e "${GREEN}${msg}${NC}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${msg}" >> "$STARTUP_LOG"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    ensure_log_dir
+    local msg="[警告] $1"
+    echo -e "${YELLOW}${msg}${NC}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${msg}" >> "$STARTUP_LOG"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    ensure_log_dir
+    local msg="[错误] $1"
+    echo -e "${RED}${msg}${NC}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${msg}" >> "$STARTUP_LOG"
 }
 
 log_config() {
-    echo -e "${CYAN}[CONFIG]${NC} $1"
+    ensure_log_dir
+    local msg="[配置] $1"
+    echo -e "${CYAN}${msg}${NC}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${msg}" >> "$STARTUP_LOG"
 }
 
-# ----------------------------- Cleanup handling ------------------------------
-# Store tail PIDs for cleanup
+log_restart() {
+    ensure_log_dir
+    local msg="$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${msg}" >> "$RESTART_LOG"
+}
+
+# ----------------------------- 清理处理 ------------------------------
+# 存储 tail 进程 PID 用于清理
 TAIL_PIDS=()
+# 存储服务重启计数
+declare -A SERVICE_RESTART_COUNT
 
 cleanup() {
-    log_warning "Stopping all managed processes..."
+    log_warning "正在停止所有托管进程..."
 
-    # Kill tail processes first
+    # 首先终止 tail 进程
     for tail_pid in "${TAIL_PIDS[@]}"; do
         if [ -n "$tail_pid" ] && kill -0 "$tail_pid" 2>/dev/null; then
             kill "$tail_pid" 2>/dev/null || true
         fi
     done
 
-    # Kill all service processes
+    # 终止所有服务进程
     if [ -f .service_pids ]; then
         while read -r pid; do
             if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                log_info "Stopping PID $pid"
-                kill "$pid" 2>/dev/null || true
+                log_info "正在停止 PID $pid"
+                kill -15 "$pid" 2>/dev/null || true
                 sleep 0.5
-                # Force kill if still running
+                # 如果仍在运行则强制终止
                 if kill -0 "$pid" 2>/dev/null; then
-                    log_warning "Force killing PID $pid"
+                    log_warning "强制终止 PID $pid"
                     kill -9 "$pid" 2>/dev/null || true
                 fi
             fi
@@ -75,26 +117,26 @@ cleanup() {
         rm -f .service_pids
     fi
 
-    # Additional cleanup for any remaining processes
+    # 额外清理任何残留进程
     pkill -f "uv run python main.py" 2>/dev/null || true
     pkill -f "uv run python.*server.py" 2>/dev/null || true
     pkill -f "npm run dev" 2>/dev/null || true
     pkill -f "node.*vite" 2>/dev/null || true
 
-    log_success "All services stopped."
+    log_success "所有服务已停止。"
     exit 0
 }
 
 trap cleanup SIGINT SIGTERM EXIT
 
-# ------------------------------- Load .env file ------------------------------
+# ------------------------------- 加载 .env 文件 ------------------------------
 load_config() {
     # 使用 .env 配置文件
     if [ -f .env ]; then
         ENV_FILE=".env"
-        log_info "Using config: .env"
+        log_info "使用配置文件: .env"
     else
-        log_error ".env file is missing."
+        log_error ".env 文件缺失。"
         exit 1
     fi
 
@@ -108,56 +150,152 @@ load_config() {
     )
     set +a
 
-    log_success "Configuration loaded from $ENV_FILE"
+    log_success "已从 $ENV_FILE 加载配置"
 }
 
-# ------------------------------ Pre-flight checks ---------------------------
+# ------------------------------ 启动前检查 ---------------------------
 print_banner() {
     echo -e "${GREEN}"
     echo "============================================================"
-    echo "   ResearchMind Linux Launcher v2.0"
-    echo "   Production-ready | Distributed | Remote access"
+    echo "   ResearchMind Linux 启动器 v2.1"
+    echo "   生产就绪 | 分布式 | 远程访问 | 自动重启"
     echo "============================================================"
     echo -e "${NC}"
 }
 
 check_dependencies() {
-    log_info "Checking runtime dependencies..."
+    log_info "检查运行时依赖..."
 
     if ! command -v uv >/dev/null 2>&1; then
-        log_error "uv is not installed. Install it from https://docs.astral.sh/uv/"
+        log_error "uv 未安装。请从 https://docs.astral.sh/uv/ 安装"
         exit 1
     fi
-    log_success "uv available: $(uv --version)"
+    log_success "uv 可用: $(uv --version)"
 
     if ! command -v npm >/dev/null 2>&1; then
-        log_error "npm is not installed. Install Node.js first."
+        log_error "npm 未安装。请先安装 Node.js"
         exit 1
     fi
-    log_success "npm available: $(npm --version)"
+    log_success "npm 可用: $(npm --version)"
 
     if ! command -v python3 >/dev/null 2>&1; then
-        log_error "python3 is not installed."
+        log_error "python3 未安装。"
         exit 1
     fi
-    log_success "python3 available: $(python3 --version)"
+    log_success "python3 可用: $(python3 --version)"
 }
 
 prepare_workspace() {
     mkdir -p logs
     : > .service_pids
+    : > "$STARTUP_LOG"
+    : > "$RESTART_LOG"
+    log_info "工作空间已准备就绪"
+}
+
+# ----------------------------- 端口管理工具 -----------------------------
+# 检查端口是否被占用
+is_port_in_use() {
+    local port=$1
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -ti:$port >/dev/null 2>&1
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -tuln | grep -q ":$port "
+    elif command -v ss >/dev/null 2>&1; then
+        ss -tuln | grep -q ":$port "
+    else
+        return 1
+    fi
+}
+
+# 等待端口释放
+wait_for_port_release() {
+    local port=$1
+    local timeout=$PORT_WAIT_TIMEOUT
+    local elapsed=0
+
+    log_info "等待端口 $port 释放..."
+
+    while is_port_in_use "$port"; do
+        if [ $elapsed -ge $timeout ]; then
+            log_error "等待端口 $port 释放超时（${timeout}秒）"
+            return 1
+        fi
+        sleep $PORT_CHECK_INTERVAL
+        elapsed=$((elapsed + PORT_CHECK_INTERVAL))
+    done
+
+    log_success "端口 $port 已释放"
+    return 0
+}
+
+# 强制释放端口
+force_release_port() {
+    local port=$1
+    local killed=false
+
+    log_info "正在强制释放端口 $port..."
+
+    # 优先使用 lsof
+    if command -v lsof >/dev/null 2>&1; then
+        local pids=$(lsof -ti:$port 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            for pid in $pids; do
+                if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                    local cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+                    log_warning "端口 $port 被 PID $pid ($cmd) 占用，正在终止..."
+                    kill -15 "$pid" 2>/dev/null || true
+                    sleep 0.5
+                    # 如果进程仍在运行，强制终止
+                    if kill -0 "$pid" 2>/dev/null; then
+                        log_warning "强制终止 PID $pid (端口 $port)"
+                        kill -9 "$pid" 2>/dev/null || true
+                    fi
+                    killed=true
+                fi
+            done
+        fi
+    # 备用方案：使用 fuser
+    elif command -v fuser >/dev/null 2>&1; then
+        local pids=$(fuser $port/tcp 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            for pid in $pids; do
+                if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                    log_warning "端口 $port 被 PID $pid 占用，正在终止..."
+                    kill -15 "$pid" 2>/dev/null || true
+                    sleep 0.5
+                    if kill -0 "$pid" 2>/dev/null; then
+                        log_warning "强制终止 PID $pid (端口 $port)"
+                        kill -9 "$pid" 2>/dev/null || true
+                    fi
+                    killed=true
+                fi
+            done
+        fi
+    fi
+
+    if [ "$killed" = true ]; then
+        # 等待端口真正释放
+        sleep 1
+        if ! wait_for_port_release "$port"; then
+            return 1
+        fi
+        log_success "端口 $port 已成功释放"
+    fi
+    return 0
 }
 
 kill_stale_processes() {
-    log_info "Cleaning up stale processes and occupied ports..."
+    log_info "清理陈旧进程和占用端口..."
 
     # 首先尝试优雅地停止已知的进程
-    pkill -f "uv run python main.py" 2>/dev/null || true
-    pkill -f "uv run python.*server.py" 2>/dev/null || true
-    pkill -f "npm run dev" 2>/dev/null || true
-    pkill -f "node.*vite" 2>/dev/null || true
+    log_info "优雅停止已知进程..."
+    pkill -15 -f "uv run python main.py" 2>/dev/null || true
+    pkill -15 -f "uv run python.*server.py" 2>/dev/null || true
+    pkill -15 -f "npm run dev" 2>/dev/null || true
+    pkill -15 -f "node.*vite" 2>/dev/null || true
 
-    sleep 1
+    sleep 2
 
     # 收集所有需要清理的端口（从环境变量中读取）
     local ports_to_clean=(
@@ -174,161 +312,377 @@ kill_stale_processes() {
 
     # 清理占用端口的进程
     for port in "${unique_ports[@]}"; do
-        local killed=false
-
-        # 优先使用 lsof
-        if command -v lsof >/dev/null 2>&1; then
-            local pids=$(lsof -ti:$port 2>/dev/null || true)
-            if [ -n "$pids" ]; then
-                for pid in $pids; do
-                    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                        log_warning "Port $port is occupied by PID $pid, terminating..."
-                        kill -15 "$pid" 2>/dev/null || true
-                        sleep 0.5
-                        # 如果进程仍在运行，强制终止
-                        if kill -0 "$pid" 2>/dev/null; then
-                            log_warning "Force killing PID $pid on port $port"
-                            kill -9 "$pid" 2>/dev/null || true
-                        fi
-                        killed=true
-                    fi
-                done
+        if is_port_in_use "$port"; then
+            log_warning "端口 $port 仍被占用"
+            if ! force_release_port "$port"; then
+                log_error "无法释放端口 $port，启动可能失败"
             fi
-        # 备用方案：使用 fuser
-        elif command -v fuser >/dev/null 2>&1; then
-            local pids=$(fuser $port/tcp 2>/dev/null || true)
-            if [ -n "$pids" ]; then
-                for pid in $pids; do
-                    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                        log_warning "Port $port is occupied by PID $pid, terminating..."
-                        kill -15 "$pid" 2>/dev/null || true
-                        sleep 0.5
-                        if kill -0 "$pid" 2>/dev/null; then
-                            log_warning "Force killing PID $pid on port $port"
-                            kill -9 "$pid" 2>/dev/null || true
-                        fi
-                        killed=true
-                    fi
-                done
-            fi
-        fi
-
-        if [ "$killed" = true ]; then
-            log_success "Port $port released"
+        else
+            log_info "端口 $port 可用"
         fi
     done
 
     # 最后再次强制清理任何残留的相关进程
+    log_info "最终清理残留进程..."
     pkill -9 -f "uv run python" 2>/dev/null || true
     pkill -9 -f "npm run dev" 2>/dev/null || true
     pkill -9 -f "node.*vite" 2>/dev/null || true
 
     sleep 1
-    log_success "All stale processes and ports cleaned"
+    log_success "所有陈旧进程和端口已清理"
 }
 
-# ---------------------------- Service start helpers -------------------------
+# ---------------------------- 健康检查工具 -------------------------
+# HTTP 健康检查
+check_http_health() {
+    local host=$1
+    local port=$2
+    local endpoint=${3:-"/"}
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -sf "http://${host}:${port}${endpoint}" >/dev/null 2>&1
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O /dev/null "http://${host}:${port}${endpoint}" 2>&1
+    else
+        # 备用方案：检查端口是否监听
+        is_port_in_use "$port"
+    fi
+}
+
+# 等待服务健康
+wait_for_service_health() {
+    local service_name=$1
+    local host=$2
+    local port=$3
+    local endpoint=${4:-"/"}
+    local timeout=$HEALTH_CHECK_TIMEOUT
+    local elapsed=0
+
+    log_info "等待 ${service_name} 健康检查..."
+
+    while ! check_http_health "$host" "$port" "$endpoint"; do
+        if [ $elapsed -ge $timeout ]; then
+            log_error "${service_name} 健康检查超时（${timeout}秒）"
+            return 1
+        fi
+        sleep $HEALTH_CHECK_INTERVAL
+        elapsed=$((elapsed + HEALTH_CHECK_INTERVAL))
+    done
+
+    log_success "${service_name} 健康检查通过"
+    return 0
+}
+
+# ---------------------------- 服务启动助手 -------------------------
 register_pid() {
     echo "$1" >> .service_pids
 }
 
+# 启动 MCP 服务（带重启支持）
+# 参数 6（可选）：is_restart - 如果是重启则不强制释放端口
 start_mcp_service() {
     local service_name=$1
     local script_path=$2
     local log_name=$3
     local host=$4
     local port=$5
+    local is_restart=${6:-false}
 
-    log_info "Starting ${service_name} (${host}:${port})..."
+    # 初始化重启计数（仅首次启动）
+    if [ "$is_restart" != "true" ]; then
+        SERVICE_RESTART_COUNT["$service_name"]=0
+    fi
+
+    log_info "正在启动 ${service_name} (${host}:${port})..."
+
+    # 仅在首次启动时检查并释放端口，重启时跳过（因为进程已崩溃，端口应该已释放）
+    if [ "$is_restart" != "true" ]; then
+        if is_port_in_use "$port"; then
+            log_warning "端口 $port 已被占用，尝试释放..."
+            if ! force_release_port "$port"; then
+                log_error "无法释放端口 $port，${service_name} 启动失败"
+                exit 1
+            fi
+        fi
+    else
+        # 重启时，等待端口释放
+        log_info "等待端口 $port 释放..."
+        local wait_count=0
+        while is_port_in_use "$port" && [ $wait_count -lt 10 ]; do
+            sleep 1
+            wait_count=$((wait_count + 1))
+        done
+        if is_port_in_use "$port"; then
+            log_warning "端口 $port 仍被占用，但继续尝试启动..."
+        fi
+    fi
+
     pushd mcp_servers >/dev/null
-    nohup uv run python "$script_path" > "../logs/${log_name}" 2>&1 &
+
+    # 在 Git Bash/Windows 环境下，使用 --no-project 避免虚拟环境路径问题
+    # 或者清除 VIRTUAL_ENV 变量让 uv 自动检测
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+        log_info "检测到 Windows/Git Bash 环境，使用兼容模式启动..."
+        unset VIRTUAL_ENV
+        nohup uv run --no-project python "$script_path" > "../logs/${log_name}" 2>&1 &
+    else
+        nohup uv run python "$script_path" > "../logs/${log_name}" 2>&1 &
+    fi
+
     local pid=$!
     popd >/dev/null
     register_pid "$pid"
+
+    # 保存最后启动的服务 PID 到全局变量
+    LAST_SERVICE_PID=$pid
+
+    # 等待进程启动
     sleep 3
 
-    if kill -0 "$pid" 2>/dev/null; then
-        log_success "${service_name} started (PID ${pid})"
-    else
-        log_error "${service_name} failed to start"
+    # 检查进程是否存活
+    if ! kill -0 "$pid" 2>/dev/null; then
+        log_error "${service_name} 启动失败（进程已退出）"
+        log_error "查看日志: logs/${log_name}"
+        tail -n 20 "logs/${log_name}" | while read line; do
+            log_error "  $line"
+        done
         exit 1
     fi
+
+    # 健康检查（在 Windows 环境下跳过 HTTP 检查，只检查进程和端口）
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+        log_warning "Windows 环境下跳过 HTTP 健康检查，仅验证进程和端口..."
+        sleep 5
+        if is_port_in_use "$port"; then
+            log_success "${service_name} 端口 $port 已监听"
+        else
+            log_warning "${service_name} 端口 $port 未监听，但进程仍在运行"
+        fi
+    else
+        if ! wait_for_service_health "$service_name" "$host" "$port" "/sse"; then
+            log_error "${service_name} 健康检查失败"
+            log_error "查看日志: logs/${log_name}"
+            tail -n 20 "logs/${log_name}" | while read line; do
+                log_error "  $line"
+            done
+            exit 1
+        fi
+    fi
+
+    log_success "${service_name} 已启动 (PID ${pid})"
 }
 
+# 启动后端服务（带重启支持）
 start_backend() {
-    log_info "Starting backend services..."
-    log_info "WebSocket endpoint: ${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}"
-    log_info "HTTP endpoint:      ${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
+    local service_name="Backend"
 
-    nohup uv run python main.py > logs/backend.log 2>&1 &
+    # 初始化重启计数
+    SERVICE_RESTART_COUNT["$service_name"]=0
+
+    log_info "正在启动后端服务..."
+    log_info "WebSocket 端点: ${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}"
+    log_info "HTTP 端点:      ${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
+
+    # 检查端口是否可用
+    local http_port="${RESEARCHMIND_HTTP_PORT}"
+    if is_port_in_use "$http_port"; then
+        log_warning "端口 $http_port 已被占用，尝试释放..."
+        if ! force_release_port "$http_port"; then
+            log_error "无法释放端口 $http_port，后端启动失败"
+            exit 1
+        fi
+    fi
+
+    # 在 Git Bash/Windows 环境下使用兼容模式
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+        log_info "检测到 Windows/Git Bash 环境，使用兼容模式启动..."
+        unset VIRTUAL_ENV
+        nohup uv run --no-project python main.py > logs/backend.log 2>&1 &
+    else
+        nohup uv run python main.py > logs/backend.log 2>&1 &
+    fi
+
     local pid=$!
     register_pid "$pid"
+
+    # 保存最后启动的服务 PID 到全局变量
+    LAST_SERVICE_PID=$pid
+
+    # 等待进程启动
     sleep 4
 
-    if kill -0 "$pid" 2>/dev/null; then
-        log_success "Backend started (PID ${pid})"
-    else
-        log_error "Backend failed to start. Check logs/backend.log"
+    # 检查进程是否存活
+    if ! kill -0 "$pid" 2>/dev/null; then
+        log_error "后端启动失败（进程已退出）"
+        log_error "查看日志: logs/backend.log"
+        tail -n 20 "logs/backend.log" | while read line; do
+            log_error "  $line"
+        done
         exit 1
     fi
+
+    # 健康检查（Windows 环境下跳过）
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+        log_warning "Windows 环境下跳过 HTTP 健康检查"
+        sleep 3
+    else
+        if ! wait_for_service_health "$service_name" "${RESEARCHMIND_HTTP_HOST}" "$http_port" "/docs"; then
+            log_warning "后端健康检查失败，但进程仍在运行，继续..."
+        fi
+    fi
+
+    log_success "后端已启动 (PID ${pid})"
 }
 
+# 启动前端服务（带重启支持）
 start_frontend() {
-    log_info "Starting frontend..."
+    local service_name="Frontend"
+
+    # 初始化重启计数
+    SERVICE_RESTART_COUNT["$service_name"]=0
+
+    log_info "正在启动前端..."
 
     if [ ! -d "ui/node_modules" ]; then
-        log_info "Installing frontend dependencies..."
+        log_info "安装前端依赖..."
         pushd ui >/dev/null
         npm install
         popd >/dev/null
     fi
 
-    log_info "Launching Vite dev server (${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT})..."
+    # 检查端口是否可用
+    local frontend_port="${VITE_FRONTEND_PORT}"
+    if is_port_in_use "$frontend_port"; then
+        log_warning "端口 $frontend_port 已被占用，尝试释放..."
+        if ! force_release_port "$frontend_port"; then
+            log_error "无法释放端口 $frontend_port，前端启动失败"
+            exit 1
+        fi
+    fi
+
+    log_info "启动 Vite 开发服务器 (${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT})..."
     pushd ui >/dev/null
     nohup npm run dev -- --host "${VITE_FRONTEND_HOST}" --port "${VITE_FRONTEND_PORT}" > ../logs/frontend.log 2>&1 &
     local pid=$!
     popd >/dev/null
     register_pid "$pid"
-    sleep 3
-    
-    if kill -0 "$pid" 2>/dev/null; then
-        log_success "Frontend started (PID ${pid})"
-    else
-        log_error "Frontend failed to start. Check logs/frontend.log"
+
+    # 保存最后启动的服务 PID 到全局变量
+    LAST_SERVICE_PID=$pid
+
+    # 等待进程启动
+    sleep 5
+
+    # 检查进程是否存活
+    if ! kill -0 "$pid" 2>/dev/null; then
+        log_error "前端启动失败（进程已退出）"
+        log_error "查看日志: logs/frontend.log"
+        tail -n 20 "logs/frontend.log" | while read line; do
+            log_error "  $line"
+        done
         exit 1
     fi
+
+    # 健康检查（Windows 环境下跳过）
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+        log_warning "Windows 环境下跳过 HTTP 健康检查"
+        sleep 3
+    else
+        if ! wait_for_service_health "$service_name" "${VITE_FRONTEND_HOST}" "$frontend_port" "/"; then
+            log_warning "前端健康检查失败，但进程仍在运行，继续..."
+        fi
+    fi
+
+    log_success "前端已启动 (PID ${pid})"
+}
+
+# ---------------------------- 服务监控与自动重启 -------------------------
+# 监控服务并在崩溃时重启
+monitor_service() {
+    local service_name=$1
+    local initial_pid=$2
+    local restart_cmd=$3
+    local current_pid=$initial_pid
+
+    while true; do
+        sleep 10
+
+        # 检查进程是否仍在运行
+        if ! kill -0 "$current_pid" 2>/dev/null; then
+            local restart_count=${SERVICE_RESTART_COUNT["$service_name"]:-0}
+
+            if [ $restart_count -ge $MAX_RESTART_ATTEMPTS ]; then
+                log_error "${service_name} 已达到最大重启次数 ($MAX_RESTART_ATTEMPTS)，停止重启"
+                log_restart "${service_name} 达到最大重启次数，已停止"
+                return 1
+            fi
+
+            restart_count=$((restart_count + 1))
+            SERVICE_RESTART_COUNT["$service_name"]=$restart_count
+
+            local delay=$((RESTART_DELAY_BASE * restart_count))
+            log_warning "${service_name} (PID $current_pid) 已崩溃，将在 ${delay} 秒后重启（尝试 ${restart_count}/${MAX_RESTART_ATTEMPTS}）"
+            log_restart "${service_name} 崩溃，PID: $current_pid，重启尝试: ${restart_count}/${MAX_RESTART_ATTEMPTS}"
+
+            sleep $delay
+
+            log_info "正在重启 ${service_name}..."
+
+            # 执行重启命令并获取新的 PID
+            eval "$restart_cmd"
+
+            if [ $? -eq 0 ]; then
+                # 获取最新启动的进程 PID（从全局变量）
+                current_pid=$LAST_SERVICE_PID
+                log_success "${service_name} 重启成功 (新 PID: $current_pid)"
+                log_restart "${service_name} 重启成功，新 PID: $current_pid"
+                # 重置重启计数
+                SERVICE_RESTART_COUNT["$service_name"]=0
+            else
+                log_error "${service_name} 重启失败"
+                log_restart "${service_name} 重启失败"
+            fi
+        fi
+    done
 }
 
 print_summary() {
     echo -e "${GREEN}============================================================${NC}"
-    echo -e "${GREEN}   All services are up and running${NC}"
+    echo -e "${GREEN}   所有服务已启动并运行${NC}"
     echo -e "${GREEN}============================================================${NC}\n"
 
-    echo -e "${BLUE}Direct access endpoints:${NC}"
-    echo -e "  ${YELLOW}Frontend UI:${NC}   http://${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT}"
-    echo -e "  ${YELLOW}Backend API:${NC}   http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
-    echo -e "  ${YELLOW}API Docs:${NC}      http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}/docs"
-    echo -e "  ${YELLOW}WebSocket:${NC}     ws://${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}/ws"
+    echo -e "${BLUE}直接访问端点:${NC}"
+    echo -e "  ${YELLOW}前端 UI:${NC}      http://${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT}"
+    echo -e "  ${YELLOW}后端 API:${NC}     http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
+    echo -e "  ${YELLOW}API 文档:${NC}     http://${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}/docs"
+    echo -e "  ${YELLOW}WebSocket:${NC}    ws://${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}/ws"
     echo ""
 
-    echo -e "${BLUE}MCP services:${NC}"
-    echo -e "  ${YELLOW}Paper Search:${NC}  http://${PAPER_SEARCH_MCP_HOST}:${PAPER_SEARCH_MCP_PORT}/sse"
-    echo -e "  ${YELLOW}Simulation:${NC}    http://${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT}/sse"
-    echo -e "  ${YELLOW}Database:${NC}      http://${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT}/sse"
+    echo -e "${BLUE}MCP 服务:${NC}"
+    echo -e "  ${YELLOW}论文搜索:${NC}     http://${PAPER_SEARCH_MCP_HOST}:${PAPER_SEARCH_MCP_PORT}/sse"
+    echo -e "  ${YELLOW}仿真:${NC}         http://${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT}/sse"
+    echo -e "  ${YELLOW}数据库:${NC}       http://${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT}/sse"
     echo ""
 
     if command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
-        echo -e "${BLUE}Nginx reverse proxy (if configured):${NC}"
-        echo -e "  ${YELLOW}Unified access:${NC} http://<server-ip>:50001"
+        echo -e "${BLUE}Nginx 反向代理（如已配置）:${NC}"
+        echo -e "  ${YELLOW}统一访问:${NC}     http://<服务器IP>:50001"
         echo ""
     fi
 
-    echo -e "${BLUE}Logs:${NC}"
-    echo "  logs/backend.log"
-    echo "  logs/database.log"
-    echo "  logs/paper_search.log"
-    echo "  logs/simulation.log"
-    echo "  logs/frontend.log"
+    echo -e "${BLUE}日志文件:${NC}"
+    echo "  logs/backend.log      - 后端日志"
+    echo "  logs/database.log     - 数据库 MCP 日志"
+    echo "  logs/paper_search.log - 论文搜索 MCP 日志"
+    echo "  logs/simulation.log   - 仿真 MCP 日志"
+    echo "  logs/frontend.log     - 前端日志"
+    echo "  logs/startup.log      - 启动日志"
+    echo "  logs/restart.log      - 重启日志"
+    echo ""
+
+    echo -e "${CYAN}自动重启已启用:${NC}"
+    echo "  最大重启次数: ${MAX_RESTART_ATTEMPTS}"
+    echo "  基础重启延迟: ${RESTART_DELAY_BASE} 秒（指数退避）"
     echo ""
 }
 
@@ -339,7 +693,8 @@ prompt_log_view() {
 
     log_info "正在同时查看后端和前端日志..."
     echo -e "${CYAN}提示: ${GREEN}绿色${NC}=后端日志, ${BLUE}蓝色${NC}=前端日志${NC}"
-    echo -e "${YELLOW}按 Ctrl+C 停止所有服务并退出${NC}\n"
+    echo -e "${YELLOW}按 Ctrl+C 停止所有服务并退出${NC}"
+    echo -e "${CYAN}服务监控已启用，崩溃时将自动重启${NC}\n"
     sleep 2
 
     # 使用 tail -f 同时监控两个文件，并用 sed 添加颜色标记
@@ -351,7 +706,7 @@ prompt_log_view() {
 }
 
 # -----------------------------------------------------------------------------
-# Main flow
+# 主流程
 # -----------------------------------------------------------------------------
 print_banner
 check_dependencies
@@ -359,26 +714,51 @@ load_config
 prepare_workspace
 kill_stale_processes
 
-log_info "Loaded configuration:"
-log_config "Frontend:           ${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT}"
-log_config "Backend HTTP:       ${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
-log_config "Backend WebSocket:  ${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}"
-log_config "Paper Search MCP:   ${PAPER_SEARCH_MCP_HOST}:${PAPER_SEARCH_MCP_PORT}"
-log_config "Simulation MCP:     ${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT}"
-log_config "Database MCP:       ${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT}"
+log_info "已加载配置:"
+log_config "前端:              ${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT}"
+log_config "后端 HTTP:         ${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
+log_config "后端 WebSocket:    ${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}"
+log_config "论文搜索 MCP:      ${PAPER_SEARCH_MCP_HOST}:${PAPER_SEARCH_MCP_PORT}"
+log_config "仿真 MCP:          ${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT}"
+log_config "数据库 MCP:        ${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT}"
 echo ""
 
-log_info "Starting MCP services..."
+log_info "正在启动 MCP 服务..."
 start_mcp_service "Database MCP" "database_call/server.py" "database.log" "${DATABASE_MCP_HOST}" "${DATABASE_MCP_PORT}"
+database_pid=$LAST_SERVICE_PID
+
 start_mcp_service "Paper Search MCP" "paper_search/server.py" "paper_search.log" "${PAPER_SEARCH_MCP_HOST}" "${PAPER_SEARCH_MCP_PORT}"
+paper_search_pid=$LAST_SERVICE_PID
+
 start_mcp_service "Simulation MCP" "simulation/server.py" "simulation.log" "${SIMULATION_MCP_HOST}" "${SIMULATION_MCP_PORT}"
+simulation_pid=$LAST_SERVICE_PID
 
 start_backend
+backend_pid=$LAST_SERVICE_PID
+
 start_frontend
+frontend_pid=$LAST_SERVICE_PID
+
 print_summary
+
+log_success "所有服务启动完成！"
+log_info "启动日志已保存到: $STARTUP_LOG"
+log_info "重启日志将保存到: $RESTART_LOG"
+echo ""
+
+# 启动后台监控进程
+log_info "正在启动服务监控..."
+monitor_service "Database MCP" "$database_pid" "start_mcp_service 'Database MCP' 'database_call/server.py' 'database.log' '${DATABASE_MCP_HOST}' '${DATABASE_MCP_PORT}' 'true'" &
+monitor_service "Paper Search MCP" "$paper_search_pid" "start_mcp_service 'Paper Search MCP' 'paper_search/server.py' 'paper_search.log' '${PAPER_SEARCH_MCP_HOST}' '${PAPER_SEARCH_MCP_PORT}' 'true'" &
+monitor_service "Simulation MCP" "$simulation_pid" "start_mcp_service 'Simulation MCP' 'simulation/server.py' 'simulation.log' '${SIMULATION_MCP_HOST}' '${SIMULATION_MCP_PORT}' 'true'" &
+monitor_service "Backend" "$backend_pid" "start_backend" &
+monitor_service "Frontend" "$frontend_pid" "start_frontend" &
+log_success "服务监控已启动（自动重启已启用）"
+echo ""
+
 prompt_log_view
 
-# Wait for any process to exit (including tail processes)
-# This allows Ctrl+C to trigger the cleanup trap
+# 等待任何进程退出（包括 tail 进程）
+# 这允许 Ctrl+C 触发清理陷阱
 wait
 
