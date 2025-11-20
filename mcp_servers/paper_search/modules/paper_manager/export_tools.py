@@ -39,14 +39,56 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
 
     try:
         import pandas as pd
+        from pathlib import Path
 
-        # 检查文件是否存在
-        if not os.path.exists(csv_file_path):
-            logger.error(f"CSV file not found: {csv_file_path}")
-            return []
+        # 🔧 修复：规范化路径，支持多种路径格式
+        # 1. 如果是绝对路径，直接使用
+        # 2. 如果是相对路径，尝试多个基准目录
+        csv_path = Path(csv_file_path)
+
+        if csv_path.is_absolute() and csv_path.exists():
+            # 绝对路径且存在
+            final_path = csv_path
+        elif csv_path.exists():
+            # 相对路径且存在（相对于当前工作目录）
+            final_path = csv_path
+        else:
+            # 尝试相对于 session_data 目录
+            from ..shared.session_folder_manager import SESSION_DATA_DIR
+
+            # 移除可能的前缀
+            path_str = str(csv_file_path).replace('\\', '/')
+            if path_str.startswith('./'):
+                path_str = path_str[2:]
+
+            # 尝试多个可能的路径
+            possible_paths = [
+                SESSION_DATA_DIR / path_str,  # session_data/{path}
+                SESSION_DATA_DIR / 'papers' / path_str,  # session_data/papers/{path}
+            ]
+
+            # 如果路径包含 session_data，提取相对部分
+            if 'session_data' in path_str:
+                parts = path_str.split('session_data/')
+                if len(parts) > 1:
+                    relative_part = parts[-1]
+                    possible_paths.append(SESSION_DATA_DIR / relative_part)
+
+            final_path = None
+            for p in possible_paths:
+                if p.exists():
+                    final_path = p
+                    logger.info(f"Found CSV file at: {final_path}")
+                    break
+
+            if final_path is None:
+                logger.error(f"CSV file not found. Tried paths: {[str(p) for p in possible_paths]}")
+                logger.error(f"Original path: {csv_file_path}")
+                return []
 
         # 读取CSV文件
-        df = pd.read_csv(csv_file_path, encoding='utf-8-sig')
+        df = pd.read_csv(str(final_path), encoding='utf-8-sig')
+        logger.info(f"Successfully read CSV file: {final_path} ({len(df)} rows)")
 
         # 转换为字典列表
         papers = df.to_dict('records')
@@ -126,6 +168,13 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
                     if full_text and isinstance(full_text, str) and full_text.strip():
                         paper['full_text'] = full_text
                         paper['content'] = full_text  # 同时设置 content 字段以兼容旧代码
+                elif key == 'Topic':
+                    # 🆕 恢复主题标识
+                    topic_value = paper.pop('Topic')
+                    if topic_value and isinstance(topic_value, str) and topic_value.strip():
+                        paper['topic'] = topic_value
+                    else:
+                        paper['topic'] = ''  # 空主题
                 # 兼容旧列名（Published_Date）
                 elif key == 'Published_Date':
                     # 如果 published 字段为空，使用 Published_Date
@@ -134,6 +183,15 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
                         paper['published_date'] = paper['published']
                     else:
                         paper.pop('Published_Date')  # 删除重复字段
+
+            # 🆕 向后兼容：如果没有 topic 字段，设置为空字符串
+            if 'topic' not in paper:
+                paper['topic'] = ''
+
+        # 🆕 调试：检查第一篇文献的 topic 字段
+        if papers and len(papers) > 0:
+            logger.info(f"📚 第一篇文献的 topic 字段: {papers[0].get('topic', 'NOT_FOUND')}")
+            logger.info(f"📚 第一篇文献的所有字段: {list(papers[0].keys())}")
 
         logger.info(f"Successfully read {len(papers)} papers from CSV: {csv_file_path}")
         return papers
@@ -238,13 +296,20 @@ def save_summary_to_file(
                 # 中文摘要
                 markdown_lines.append(f"**中文摘要**: {result.get('abstract_zh', '暂无')}\n\n")
 
-                # 关键信息
-                key_info = result.get('key_info', {})
-                markdown_lines.append("#### 关键信息\n\n")
-                markdown_lines.append(f"**研究目标**: {key_info.get('objective', '未提取')}\n\n")
-                markdown_lines.append(f"**研究方法**: {key_info.get('method', '未提取')}\n\n")
-                markdown_lines.append(f"**主要结果**: {key_info.get('result', '未提取')}\n\n")
-                markdown_lines.append(f"**创新点**: {key_info.get('innovation', '未提取')}\n\n")
+                # 🔧 新增：详细的6部分结构分析（与 report 模板一致）
+                analysis_text = result.get('analysis_text', '')
+                if analysis_text:
+                    # 如果有完整的分析文本，直接使用
+                    markdown_lines.append("#### 关键信息\n\n")
+                    markdown_lines.append(f"{analysis_text}\n\n")
+                else:
+                    # 如果没有完整分析文本，使用简化的关键信息格式（向后兼容）
+                    key_info = result.get('key_info', {})
+                    markdown_lines.append("#### 关键信息\n\n")
+                    markdown_lines.append(f"**研究目标**: {key_info.get('objective', '未提取')}\n\n")
+                    markdown_lines.append(f"**研究方法**: {key_info.get('method', '未提取')}\n\n")
+                    markdown_lines.append(f"**主要结果**: {key_info.get('result', '未提取')}\n\n")
+                    markdown_lines.append(f"**创新点**: {key_info.get('innovation', '未提取')}\n\n")
 
                 markdown_lines.append("---\n\n")
 
@@ -264,7 +329,8 @@ def save_summary_to_file(
                 from ..shared.session_folder_manager import get_session_folder
 
                 # 确定保存目录
-                if session_id and topic:
+                if session_id:
+                    # 🔧 修复：即使 topic 为 None，也使用 session_id 获取会话文件夹
                     save_dir = get_session_folder(session_id, topic)
                 elif output_dir:
                     save_dir = output_dir
@@ -363,7 +429,8 @@ def save_report_to_file(
                 from ..shared.session_folder_manager import get_session_folder, PAPER_DIR
 
                 # 确定保存目录
-                if session_id and topic:
+                if session_id:
+                    # 🔧 修复：即使 topic 为 None，也使用 session_id 获取会话文件夹
                     save_dir = get_session_folder(session_id, topic)
                 elif output_dir:
                     save_dir = output_dir
@@ -533,9 +600,16 @@ def save_papers_to_csv(
             # 合并 Published 和 Published_Date（优先使用 published）
             published = paper.get('published', '') or paper.get('published_date', '')
 
-            # 构建行数据
+            # 🆕 简化 topic：截断过长的检索词
+            simplified_topic = topic or ''
+            if simplified_topic and len(simplified_topic) > 50:
+                # 截取前50个字符，并添加省略号
+                simplified_topic = simplified_topic[:50] + '...'
+
+            # 构建行数据（Topic 列放在 ID 后面）
             row = {
                 'ID': paper_id,
+                'Topic': simplified_topic,  # 🆕 主题标识（放在ID后面，用于区分不同检索主题的文献）
                 'Title': title,
                 'Authors': authors_str,
                 'Abstract': abstract,
@@ -584,7 +658,8 @@ def save_papers_to_csv(
                 from ..shared.session_folder_manager import get_session_folder, PAPER_DIR
 
                 # 确定保存目录
-                if session_id and topic:
+                if session_id:
+                    # 🔧 修复：即使 topic 为 None，也使用 session_id 获取会话文件夹
                     save_dir = get_session_folder(session_id, topic)
                 elif output_dir:
                     save_dir = output_dir
@@ -615,8 +690,32 @@ def save_papers_to_csv(
                         existing_df = pd.read_csv(saved_file_path, encoding='utf-8-sig')
                         logger.info(f"现有CSV包含 {len(existing_df)} 篇论文")
 
+                        # 🆕 向后兼容：如果现有CSV没有Topic列，添加空列（放在ID后面）
+                        if 'Topic' not in existing_df.columns:
+                            # 获取列顺序
+                            cols = existing_df.columns.tolist()
+                            if 'ID' in cols:
+                                # 在ID后面插入Topic列
+                                id_index = cols.index('ID')
+                                cols.insert(id_index + 1, 'Topic')
+                                existing_df['Topic'] = ''
+                                existing_df = existing_df[cols]
+                                logger.info("向后兼容：为现有CSV添加Topic列（放在ID后面）")
+                            else:
+                                existing_df['Topic'] = ''
+                                logger.info("向后兼容：为现有CSV添加Topic列")
+
                         # 合并新旧数据
                         combined_df = pd.concat([existing_df, df], ignore_index=True)
+
+                        # 🆕 确保列顺序一致（Topic 在 ID 后面）
+                        if 'ID' in combined_df.columns and 'Topic' in combined_df.columns:
+                            cols = combined_df.columns.tolist()
+                            if 'Topic' in cols and 'ID' in cols:
+                                cols.remove('Topic')
+                                id_index = cols.index('ID')
+                                cols.insert(id_index + 1, 'Topic')
+                                combined_df = combined_df[cols]
 
                         # 去重：基于 ID 列，保留最后出现的（最新的）
                         if 'ID' in combined_df.columns:
@@ -807,7 +906,8 @@ def save_analysis_results_to_csv(
                 from ..shared.session_folder_manager import get_session_folder, PAPER_DIR
 
                 # 确定保存目录
-                if session_id and topic:
+                if session_id:
+                    # 🔧 修复：即使 topic 为 None，也使用 session_id 获取会话文件夹
                     save_dir = get_session_folder(session_id, topic)
                 elif output_dir:
                     save_dir = output_dir

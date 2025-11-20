@@ -86,6 +86,11 @@ interface AppState {
   currentSessionStructures: CrystalStructure[]
   currentSessionFiles: SessionFile[]
 
+  // Papers (文献)
+  currentPapersCsvPath: string | null
+  currentPapersSessionId: string | null
+  currentPapersCount: number
+
   // Phonon assets
   phononImages: PhononImage[]
   currentSessionPhononImages: PhononImage[]
@@ -144,6 +149,9 @@ interface AppState {
   setPhononDisplayMode: (mode: 'fullscreen' | 'bottom' | 'panel') => void
 
   setShowFilesInChat: (show: boolean) => void
+
+  setPapersData: (csvPath: string | null, sessionId: string | null, count: number) => void
+  clearPapersData: () => void
 
   updateSettings: (settings: Partial<UserSettings>) => void
 
@@ -238,6 +246,10 @@ export const useAppStore = create<AppState>()(
       currentSessionStructures: [],
       currentSessionFiles: [],
 
+      currentPapersCsvPath: null,
+      currentPapersSessionId: null,
+      currentPapersCount: 0,
+
       phononImages: [],
       currentSessionPhononImages: [],
       showPhononVisualization: false,
@@ -265,7 +277,7 @@ export const useAppStore = create<AppState>()(
 
       setCurrentSession: (session) => {
         const state = get()
-        const { sessions, currentSession, currentSessionStructures, currentSessionPhononImages, currentSessionFiles } = state
+        const { sessions, currentSession, currentSessionStructures, currentSessionPhononImages, currentSessionFiles, currentPapersCsvPath, currentPapersCount } = state
 
         if (currentSession) {
           const idx = sessions.findIndex((s) => s.id === currentSession.id)
@@ -275,6 +287,9 @@ export const useAppStore = create<AppState>()(
               structures: currentSessionStructures,
               phononImages: currentSessionPhononImages,
               files: currentSessionFiles,
+              // 🆕 保存文献数据到会话
+              papersCsvPath: currentPapersCsvPath,
+              papersCount: currentPapersCount,
             }
             const nextSessions = [...sessions]
             nextSessions[idx] = updated
@@ -290,6 +305,9 @@ export const useAppStore = create<AppState>()(
             currentSessionStructures: [],
             currentSessionFiles: [],
             currentSessionPhononImages: [],
+            currentPapersCsvPath: null,
+            currentPapersSessionId: null,
+            currentPapersCount: 0,
           })
           return
         }
@@ -306,6 +324,16 @@ export const useAppStore = create<AppState>()(
           currentSessionStructures: restoredStructures,
           currentSessionFiles: restoredFiles,
           currentSessionPhononImages: restoredPhonon,
+          // 🆕 恢复文献数据
+          currentPapersCsvPath: latest.papersCsvPath || null,
+          currentPapersSessionId: latest.id,
+          currentPapersCount: latest.papersCount || 0,
+        })
+
+        console.log('🔄 切换会话，恢复文献数据:', {
+          sessionId: latest.id,
+          csvPath: latest.papersCsvPath,
+          count: latest.papersCount
         })
       },
 
@@ -496,6 +524,67 @@ export const useAppStore = create<AppState>()(
             showFilesInChat: show,
           },
         }))
+      },
+
+      setPapersData: (csvPath, sessionId, count) => {
+        set({
+          currentPapersCsvPath: csvPath,
+          currentPapersSessionId: sessionId,
+          currentPapersCount: count,
+        })
+
+        // 🆕 同时保存到当前会话中（持久化）
+        const { currentSession, sessions } = get()
+        if (currentSession && currentSession.id === sessionId) {
+          const updatedSession = {
+            ...currentSession,
+            papersCsvPath: csvPath,
+            papersCount: count,
+            updatedAt: new Date()
+          }
+
+          const updatedSessions = sessions.map(s =>
+            s.id === sessionId ? updatedSession : s
+          )
+
+          set({
+            currentSession: updatedSession,
+            sessions: updatedSessions
+          })
+
+          console.log('💾 文献数据已保存到会话:', { sessionId, csvPath, count })
+          setTimeout(() => forceSaveState(get()), 100)
+        }
+      },
+
+      clearPapersData: () => {
+        set({
+          currentPapersCsvPath: null,
+          currentPapersSessionId: null,
+          currentPapersCount: 0,
+        })
+
+        // 🆕 同时清除当前会话中的文献数据
+        const { currentSession, sessions } = get()
+        if (currentSession) {
+          const updatedSession = {
+            ...currentSession,
+            papersCsvPath: null,
+            papersCount: 0,
+            updatedAt: new Date()
+          }
+
+          const updatedSessions = sessions.map(s =>
+            s.id === currentSession.id ? updatedSession : s
+          )
+
+          set({
+            currentSession: updatedSession,
+            sessions: updatedSessions
+          })
+
+          setTimeout(() => forceSaveState(get()), 100)
+        }
       },
 
       updateSettings: (settings) => set({ settings: { ...get().settings, ...settings } }),
@@ -756,6 +845,7 @@ export const useAppStore = create<AppState>()(
                 console.log('📊 结构数:', restored.structures?.length || 0)
                 console.log('📊 文件数:', restored.files?.length || 0)
                 console.log('📊 图片数:', restored.phononImages?.length || 0)
+                console.log('📚 文献数:', restored.papersCount || 0)
 
                 state.currentSession = restored
                 state.messages = restored.messages || []
@@ -763,6 +853,11 @@ export const useAppStore = create<AppState>()(
                 state.currentSessionStructures = restored.structures || []
                 state.currentSessionFiles = restored.files || []
                 state.currentSessionPhononImages = restored.phononImages || []
+
+                // 🆕 恢复文献数据
+                state.currentPapersCsvPath = restored.papersCsvPath || null
+                state.currentPapersSessionId = restored.id
+                state.currentPapersCount = restored.papersCount || 0
               } else {
                 console.warn('⚠️ 当前会话不存在，清空当前会话数据')
                 state.currentSession = null
@@ -771,6 +866,9 @@ export const useAppStore = create<AppState>()(
                 state.currentSessionStructures = []
                 state.currentSessionFiles = []
                 state.currentSessionPhononImages = []
+                state.currentPapersCsvPath = null
+                state.currentPapersSessionId = null
+                state.currentPapersCount = 0
               }
             } else if (state.sessions.length > 0) {
               // 没有当前会话，但有会话列表，恢复最后一个会话
@@ -779,6 +877,7 @@ export const useAppStore = create<AppState>()(
               console.log('📊 结构数:', lastSession.structures?.length || 0)
               console.log('📊 文件数:', lastSession.files?.length || 0)
               console.log('📊 图片数:', lastSession.phononImages?.length || 0)
+              console.log('📚 文献数:', lastSession.papersCount || 0)
 
               state.currentSession = lastSession
               state.messages = lastSession.messages || []
@@ -786,6 +885,11 @@ export const useAppStore = create<AppState>()(
               state.currentSessionStructures = lastSession.structures || []
               state.currentSessionFiles = lastSession.files || []
               state.currentSessionPhononImages = lastSession.phononImages || []
+
+              // 🆕 恢复文献数据
+              state.currentPapersCsvPath = lastSession.papersCsvPath || null
+              state.currentPapersSessionId = lastSession.id
+              state.currentPapersCount = lastSession.papersCount || 0
             } else {
               // 没有任何会话
               console.log('ℹ️ 没有任何会话')
@@ -794,6 +898,9 @@ export const useAppStore = create<AppState>()(
               state.currentSessionStructures = []
               state.currentSessionFiles = []
               state.currentSessionPhononImages = []
+              state.currentPapersCsvPath = null
+              state.currentPapersSessionId = null
+              state.currentPapersCount = 0
             }
           } else {
             console.log('ℹ️ 没有存储的会话数据')
@@ -804,6 +911,9 @@ export const useAppStore = create<AppState>()(
             state.currentSessionStructures = []
             state.currentSessionFiles = []
             state.currentSessionPhononImages = []
+            state.currentPapersCsvPath = null
+            state.currentPapersSessionId = null
+            state.currentPapersCount = 0
           }
         } catch (error) {
           console.error('❌ 恢复存储数据时出错:', error)
@@ -815,6 +925,9 @@ export const useAppStore = create<AppState>()(
           state.currentSessionStructures = []
           state.currentSessionFiles = []
           state.currentSessionPhononImages = []
+          state.currentPapersCsvPath = null
+          state.currentPapersSessionId = null
+          state.currentPapersCount = 0
         }
 
         if (!Array.isArray(state.currentSessionStructures)) {

@@ -118,7 +118,7 @@ class StructureDataManager {
    */
   async fetchPhononResults(): Promise<PhononResponse> {
     const cacheKey = 'phonon_results'
-    
+
     // 检查缓存
     if (this.isCacheValid(cacheKey)) {
       console.log('📦 使用缓存的声子谱数据')
@@ -127,17 +127,18 @@ class StructureDataManager {
 
     try {
       console.log('🌐 获取声子谱结果...')
-      const response = await fetch(`${this.baseUrl}/api/phonon_results`)
-      
+      // 使用新的统一端点 /api/files?type=phonon_results
+      const response = await fetch(`${this.baseUrl}/api/files?type=phonon_results`)
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
       const data: PhononResponse = await response.json()
-      
+
       // 缓存结果
       this.setCache(cacheKey, data)
-      
+
       console.log(`✅ 获取到 ${data.count} 个声子谱结果`)
       return data
 

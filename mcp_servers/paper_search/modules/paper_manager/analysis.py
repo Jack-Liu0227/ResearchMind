@@ -31,6 +31,7 @@ async def analyze_paper_content(
     - 主要方法
     - 关键结果
     - 创新点
+    - 局限性
 
     Args:
         paper: 论文信息字典（包含title, authors, abstract等）
@@ -77,8 +78,7 @@ async def analyze_paper_content(
 
         # 重试机制：最多尝试 3 次
         max_retries = 3
-        retry_delay = 2  # 秒
-        last_error = None
+        retry_delay = 3  # 秒（增加重试延迟）
 
         for attempt in range(max_retries):
             try:
@@ -91,26 +91,32 @@ async def analyze_paper_content(
                             model=model,
                             messages=[{"role": "user", "content": prompt}],
                             temperature=0.3,
-                            timeout=30,  # 30秒超时
+                            timeout=60,  # 🔧 增加到 60 秒超时（适应 qwen-plus 响应速度）
                             api_key=api_key,  # 🔧 显式传递 API Key
                             api_base=api_base  # 🔧 显式传递 API Base URL
                         )
                     ),
-                    timeout=35  # 总超时 35 秒
+                    timeout=70  # 🔧 总超时 70 秒（留 10 秒缓冲）
                 )
                 break  # 成功则跳出重试循环
 
             except (asyncio.TimeoutError, Exception) as e:
-                last_error = e
                 error_type = type(e).__name__
-                logger.warning(f'Attempt {attempt + 1}/{max_retries} failed for paper {paper_id}: {error_type} - {str(e)}')
+                # 🔧 使用 ASCII 字符避免日志乱码
+                logger.warning(
+                    f'Attempt {attempt + 1}/{max_retries} failed for paper {paper_id}',
+                    error_type=error_type,
+                    error_message=str(e)[:100]  # 限制错误信息长度
+                )
 
                 if attempt < max_retries - 1:
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  # 指数退避
                 else:
                     # 最后一次尝试失败，抛出异常
-                    raise Exception(f'Failed after {max_retries} attempts: {str(last_error)}')
+                    error_msg = f'Failed after {max_retries} attempts: {error_type}'
+                    logger.error(f'Analysis failed for {paper_id}', error=error_msg)
+                    raise Exception(error_msg)
 
         analysis_text = response.choices[0].message.content.strip()
 
@@ -155,6 +161,10 @@ async def analyze_paper_content(
 def _parse_analysis_text(analysis_text: str) -> Dict[str, str]:
     """
     解析LLM返回的分析文本，提取关键信息
+
+    支持两种格式：
+    1. 新格式（6部分结构）：研究背景与动机、研究目标、方法论、主要发现与结果、创新点与贡献、局限性
+    2. 旧格式（4部分）：核心贡献、研究方法、主要结果、创新点
     """
     key_info = {
         'objective': '',
@@ -172,8 +182,18 @@ def _parse_analysis_text(analysis_text: str) -> Dict[str, str]:
         if not line:
             continue
 
-        # 检测标题
-        if '核心贡献' in line or '**核心贡献**' in line:
+        # 检测标题（支持新旧两种格式）
+        # 新格式
+        if '研究目标' in line or '### 2. 研究目标' in line:
+            current_key = 'objective'
+        elif '方法论' in line or '### 3. 方法论' in line:
+            current_key = 'method'
+        elif '主要发现与结果' in line or '### 4. 主要发现与结果' in line:
+            current_key = 'result'
+        elif '创新点与贡献' in line or '### 5. 创新点与贡献' in line:
+            current_key = 'innovation'
+        # 旧格式（向后兼容）
+        elif '核心贡献' in line or '**核心贡献**' in line:
             current_key = 'innovation'
         elif '研究方法' in line or '**研究方法**' in line:
             current_key = 'method'
@@ -181,8 +201,8 @@ def _parse_analysis_text(analysis_text: str) -> Dict[str, str]:
             current_key = 'result'
         elif '创新点' in line or '**创新点**' in line:
             current_key = 'innovation'
-        elif current_key and line and not line.startswith('**'):
-            # 累积内容
+        elif current_key and line and not line.startswith('**') and not line.startswith('###'):
+            # 累积内容（跳过标题行）
             if key_info[current_key]:
                 key_info[current_key] += ' ' + line
             else:
@@ -196,8 +216,7 @@ def _parse_analysis_text(analysis_text: str) -> Dict[str, str]:
 
 
 async def batch_paper_analysis(
-    papers: List[Dict] = None,
-    papers_content: List[str] = None
+    papers: List[Dict] = None
 ) -> Dict[str, Any]:
     """
     批量分析多篇论文（只使用摘要，不使用全文）- 异步并发版本
@@ -252,20 +271,35 @@ async def batch_paper_analysis(
 
             # 检查是否是异常
             if isinstance(analysis_result, Exception):
+                error_msg = str(analysis_result)
                 failed_papers.append({
                     'id': paper_id,
-                    'error': str(analysis_result)
+                    'title': paper.get('title', 'Unknown'),
+                    'error': error_msg
                 })
-                logger.error(f'分析论文 {paper_id} 失败: {str(analysis_result)}')
+                # 🔧 使用结构化日志避免乱码
+                logger.error(
+                    'Paper analysis failed',
+                    paper_id=paper_id,
+                    error_type=type(analysis_result).__name__,
+                    error_message=error_msg[:100]
+                )
             elif analysis_result.get('status') == 'error':
+                error_msg = analysis_result.get('error', 'Unknown error')
                 failed_papers.append({
                     'id': paper_id,
-                    'error': analysis_result.get('error', 'Unknown error')
+                    'title': paper.get('title', 'Unknown'),
+                    'error': error_msg
                 })
-                logger.error(f'分析论文 {paper_id} 失败: {analysis_result.get("error")}')
+                # 🔧 使用结构化日志避免乱码
+                logger.error(
+                    'Paper analysis returned error',
+                    paper_id=paper_id,
+                    error_message=error_msg[:100]
+                )
             else:
                 results.append(analysis_result)
-                logger.info(f'成功分析论文 {paper_id}')
+                logger.info('Paper analysis succeeded', paper_id=paper_id)
 
         # 返回结果
         batch_result = {
@@ -278,7 +312,13 @@ async def batch_paper_analysis(
             'timestamp': datetime.now().isoformat()
         }
 
-        logger.info(f'批量分析完成: {len(results)} 成功, {len(failed_papers)} 失败')
+        # 🔧 使用结构化日志
+        logger.info(
+            'Batch analysis completed',
+            total=len(papers),
+            successful=len(results),
+            failed=len(failed_papers)
+        )
         return batch_result
 
     except Exception as e:
@@ -375,84 +415,7 @@ async def _condense_abstract_to_chinese_async(abstract_en: str) -> str:
         return condensed[:300] + "..." if len(condensed) > 300 else condensed
 
 
-def _condense_abstract_to_chinese(abstract_en: str) -> str:
-    """
-    将英文摘要凝练翻译成中文（使用LLM）- 同步版本（保留用于向后兼容）
-
-    提取关键信息：
-    - 研究背景和动机
-    - 主要方法
-    - 核心结果
-    - 创新点和贡献
-    """
-    if not abstract_en:
-        return "暂无摘要"
-
-    try:
-        # 使用LLM进行翻译
-        import os
-        from litellm import completion
-        import sys
-        from pathlib import Path
-
-        # Import prompts
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-        from prompts import format_translate_abstract_prompt
-
-        model = os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')
-        api_key = os.getenv('OPENAI_API_KEY')
-        api_base = os.getenv('OPENAI_BASE_URL')
-        prompt = format_translate_abstract_prompt(abstract_en)
-
-        response = completion(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            api_key=api_key,  # 🔧 显式传递 API Key
-            api_base=api_base  # 🔧 显式传递 API Base URL
-        )
-
-        translation = response.choices[0].message.content.strip()
-        logger.info(f"Successfully translated abstract using LLM")
-        return translation
-
-    except Exception as e:
-        logger.warning(f"LLM translation failed, using rule-based fallback: {e}")
-
-        # Fallback: 规则提取
-        sentences = abstract_en.split('. ')
-        key_sentences = []
-
-        # 提取包含关键词的句子
-        keywords_map = {
-            'propose': '提出',
-            'present': '提出',
-            'introduce': '介绍',
-            'develop': '开发',
-            'demonstrate': '证明',
-            'show': '展示',
-            'achieve': '实现',
-            'improve': '改进',
-            'novel': '新颖',
-            'new': '新',
-            'first': '首次'
-        }
-
-        for sentence in sentences[:5]:  # 只看前5句
-            sentence_lower = sentence.lower()
-            for keyword in keywords_map:
-                if keyword in sentence_lower:
-                    key_sentences.append(sentence.strip())
-                    break
-
-        if not key_sentences:
-            # 如果没有找到关键句子，返回前200字的简化版
-            return f"本文{abstract_en[:200]}..."
-
-        # 简化翻译
-        condensed = "本文" + "；".join(key_sentences[:3])
-        return condensed[:300] + "..." if len(condensed) > 300 else condensed
-
-
+# 注：_condense_abstract_to_chinese 同步版本已删除（未被使用）
+# 已被异步版本 _condense_abstract_to_chinese_async 替代
 # _extract_key_information 已被 analyze_paper_content 中的 LLM 分析替代
 

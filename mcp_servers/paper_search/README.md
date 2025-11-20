@@ -2,9 +2,9 @@
 
 ## 📖 简介
 
-> **2025-10 更新提示**
+> **2025-11 更新提示**
 > - 默认 SSE 端口为 50004（`PAPER_SEARCH_MCP_PORT`）。
-> - `search_papers_all_sources` 默认并行查询 ArXiv 与 Tavily，`max_results_per_source` 控制每源条数。
+> - 推荐使用 `search_papers` 工具进行多源并行查询，`max_results` 控制每源条数。
 > - 文件元数据中的 CSV/MD 下载链接改为 `/api/download/...` 相对路径，前端会补全域名并通过 Nginx 代理。
 
 Paper Search MCP Server 是一个基于 FastMCP 构建的学术文献检索和分析服务器。它提供 18 个核心工具（并行检索 + 相对路径下载 + 上传文档转换），支持多源检索（ArXiv + Tavily）、智能分析、报告生成和向量化存储。
@@ -14,7 +14,8 @@ Paper Search MCP Server 是一个基于 FastMCP 构建的学术文献检索和�
 ### 🔍 多源检索
 - **ArXiv API**：学术预印本搜索
 - **Tavily API**：学术和网页搜索
-- **综合搜索**：默认使用 `search_papers_all_sources` 综合检索所有源
+- **Semantic Scholar API**：学术论文搜索
+- **综合搜索**：使用 `search_papers` 工具综合检索所有源（支持并行查询）
 
 ### 📊 智能分析
 - **批量分析**：自动提取摘要并翻译成中文
@@ -105,24 +106,25 @@ Paper Search MCP Server 是一个基于 FastMCP 构建的学术文献检索和�
 
 ---
 
-#### `search_papers_all_sources` ⭐ 推荐
-**功能**: 综合搜索所有源（ArXiv + Tavily Academic + Tavily Web）
+#### `search_papers` ⭐ 推荐
+**功能**: 统一的多源文献搜索接口（支持并行查询、自动去重、自动保存CSV）
 
 **参数**:
-- `topic` (str): 搜索主题
-- `max_results_per_source` (int): 每个源的最大结果数（默认 5）
+- `query` (str): 搜索查询（支持多个检索词，用逗号、分号或换行符分隔）
+- `sources` (List[str], 可选): 搜索源列表 ['arxiv', 'tavily_academic', 'tavily', 'semantic_scholar']，默认搜索所有源
+- `max_results` (int): 每个源的最大结果数（默认 3）
+- `session_id` (str, 可选): 会话ID（用于保存搜索结果到文件）
+- `expand_query` (bool): 是否使用LLM自动生成多个检索词（默认 False）
+- `num_expanded_queries` (int): 生成的检索词数量（默认 3）
 
 **返回**:
 ```json
 {
   "success": true,
-  "total_results": 15,
-  "sources": {
-    "arxiv": 5,
-    "tavily_academic": 5,
-    "tavily_web": 5
-  },
-  "papers": [...]
+  "total_results": 12,
+  "sources_used": ["arxiv", "tavily_academic", "semantic_scholar"],
+  "papers": [...],
+  "saved_to": "session_data/papers/session_xxx/papers_xxx.csv"
 }
 ```
 

@@ -37,7 +37,8 @@ const ChatPage: React.FC = () => {
     sessions,
     updateBillingData,
     setUserBillingStats,
-    setGlobalBillingStats
+    setGlobalBillingStats,
+    setPapersData
   } = useAppStore()
 
   const pendingFileMetadataRef = useRef<any[]>([])
@@ -661,6 +662,33 @@ const ChatPage: React.FC = () => {
           if (toolExecutionData.status === 'success' && toolExecutionData.output) {
             const generatedFiles = createSessionFilesFromMetadata(toolExecutionData.output, existingToolMessage.id)
             generatedFiles.forEach((file) => addToCurrentSessionFiles(file))
+
+            // 🆕 如果是 search_papers 工具，设置文献数据到 store
+            if (toolExecutionData.toolName === 'search_papers' &&
+                toolExecutionData.output.csv_file_path &&
+                toolExecutionData.output.total_papers_in_csv) {
+              const sessionId = toolExecutionData.sessionId || currentSession?.id || 'default'
+
+              // 🔧 修复：从 csv_file_path 提取相对路径（相对于 session_data/）
+              let csvPath = toolExecutionData.output.csv_file_path
+              if (csvPath.includes('session_data/')) {
+                csvPath = csvPath.split('session_data/')[1]
+              } else if (csvPath.includes('session_data\\')) {
+                csvPath = csvPath.split('session_data\\')[1].replace(/\\/g, '/')
+              }
+
+              setPapersData(
+                csvPath,
+                sessionId,
+                toolExecutionData.output.total_papers_in_csv
+              )
+              console.log('📚 设置文献数据到 store:', {
+                originalPath: toolExecutionData.output.csv_file_path,
+                csvPath: csvPath,
+                sessionId: sessionId,
+                count: toolExecutionData.output.total_papers_in_csv
+              })
+            }
           }
         } else {
           // 创建新的工具执行消息
@@ -701,6 +729,23 @@ const ChatPage: React.FC = () => {
           if (toolExecutionData.status === 'success' && toolExecutionData.output) {
             const generatedFiles = createSessionFilesFromMetadata(toolExecutionData.output, toolMessageId)
             generatedFiles.forEach((file) => addToCurrentSessionFiles(file))
+
+            // 🆕 如果是 search_papers 工具，设置文献数据到 store
+            if (toolExecutionData.toolName === 'search_papers' &&
+                toolExecutionData.output.csv_file_path &&
+                toolExecutionData.output.total_papers_in_csv) {
+              const sessionId = toolExecutionData.sessionId || currentSession?.id || 'default'
+              setPapersData(
+                toolExecutionData.output.csv_file_path,
+                sessionId,
+                toolExecutionData.output.total_papers_in_csv
+              )
+              console.log('📚 设置文献数据到 store:', {
+                csvPath: toolExecutionData.output.csv_file_path,
+                sessionId: sessionId,
+                count: toolExecutionData.output.total_papers_in_csv
+              })
+            }
           }
         }
       } else if ((message.type as any) === 'file_data' && message.data?.files) {

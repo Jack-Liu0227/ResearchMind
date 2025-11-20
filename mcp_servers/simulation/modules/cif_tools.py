@@ -5,6 +5,7 @@ Provides functions for extracting and validating CIF files, and calculating ther
 import base64
 import re
 import os
+import sys
 import tempfile
 import shutil
 from pathlib import Path
@@ -14,12 +15,20 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
+# Add simulation directory to path for kappa_lib
+simulation_path = Path(__file__).parent.parent
+if str(simulation_path) not in sys.path:
+    sys.path.insert(0, str(simulation_path))
+
 # Try to import kappa library
 try:
     from kappa_lib import ThermalConductivityCalculator, is_kappa_available
     KAPPA_AVAILABLE = is_kappa_available()
-except ImportError:
+except ImportError as e:
+    logger.warning(f"Kappa library not available: {e}")
     KAPPA_AVAILABLE = False
+    ThermalConductivityCalculator = None
+    is_kappa_available = lambda: False
 
 
 def normalize_cif_content(cif_content: str) -> str:
@@ -314,8 +323,12 @@ def calculate_kappa_from_cif_impl(
                         # 使用统一存储目录
                         import sys
                         from pathlib import Path as PathLib
-                        sys.path.insert(0, str(PathLib(__file__).parent.parent.parent))
-                        from shared.storage_manager import get_session_storage_path, get_file_url
+
+                        # 添加 shared 目录到 sys.path
+                        shared_path = PathLib(__file__).parent.parent.parent / "shared"
+                        if str(shared_path) not in sys.path:
+                            sys.path.insert(0, str(shared_path))
+                        from storage_manager import get_session_storage_path, get_file_url
 
                         # 使用传入的 session_id，如果没有则使用 "default"
                         effective_session_id = session_id or "default"
@@ -584,8 +597,12 @@ def _calculate_kappa_batch(
                     # 使用统一存储目录
                     import sys
                     from pathlib import Path as PathLib
-                    sys.path.insert(0, str(PathLib(__file__).parent.parent.parent))
-                    from shared.storage_manager import get_session_storage_path, get_file_url
+
+                    # 添加 shared 目录到 sys.path
+                    shared_path = PathLib(__file__).parent.parent.parent / "shared"
+                    if str(shared_path) not in sys.path:
+                        sys.path.insert(0, str(shared_path))
+                    from storage_manager import get_session_storage_path, get_file_url
 
                     # 使用传入的 session_id，如果没有则使用 "default"
                     effective_session_id = session_id or "default"

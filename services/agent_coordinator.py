@@ -228,8 +228,15 @@ class AgentCoordinator:
 
                     # 根据 agent 类型选择不同的上传目录 - 使用统一存储
                     import sys
-                    sys.path.insert(0, str(Path(__file__).parent.parent / "mcp_servers"))
-                    from shared.storage_manager import get_session_storage_path
+                    from pathlib import Path as PathLib
+
+                    # 添加 mcp_servers/shared 到 sys.path
+                    shared_path = PathLib(__file__).parent.parent / "mcp_servers" / "shared"
+                    if str(shared_path) not in sys.path:
+                        sys.path.insert(0, str(shared_path))
+
+                    # 导入 storage_manager
+                    from storage_manager import get_session_storage_path
 
                     if agent_id == 'deep_research_agent':
                         # 文献研究 agent 使用 papers 目录

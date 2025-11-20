@@ -95,7 +95,7 @@ def ingest_uploaded_documents(
     csv_result = save_papers_to_csv(
         papers=processed_papers,
         session_id=session_id,
-        topic=topic or "uploaded_documents",
+        topic=topic or "upload",  # 🆕 上传文件的 topic 标记为 "upload"
         file_prefix=file_prefix,
         append_mode=True,  # 启用追加模式，合并到 all_papers.csv
     )

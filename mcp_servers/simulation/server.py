@@ -67,6 +67,11 @@ import structlog
 # Add modules directory to path
 sys.path.insert(0, str(Path(__file__).parent / "modules"))
 
+# Add simulation directory to path for kappa_lib
+simulation_path = Path(__file__).parent
+if str(simulation_path) not in sys.path:
+    sys.path.insert(0, str(simulation_path))
+
 logger = structlog.get_logger(__name__)
 
 # Import MatterSim energy calculation functions (optional)
@@ -75,7 +80,16 @@ MATTERSIM_IMPORT_ERROR = None
 calculate_energy_from_cif_impl = None
 relax_structure_impl = None
 calculate_phonon_impl = None
-from kappa_lib import ThermalConductivityCalculator, is_kappa_available
+
+# Import kappa library
+try:
+    from kappa_lib import ThermalConductivityCalculator, is_kappa_available
+    KAPPA_AVAILABLE = is_kappa_available()
+except ImportError as e:
+    logger.warning(f"Kappa library not available: {e}")
+    KAPPA_AVAILABLE = False
+    ThermalConductivityCalculator = None
+    is_kappa_available = lambda: False
 
 try:
     from mattersim_energy import (
@@ -114,8 +128,10 @@ except ImportError as e:
     SESSION_MANAGER_AVAILABLE = False
 
 # Import storage manager
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from shared.storage_manager import get_session_storage_path
+shared_path = Path(__file__).parent.parent / "shared"
+if str(shared_path) not in sys.path:
+    sys.path.insert(0, str(shared_path))
+from storage_manager import get_session_storage_path
 
 
 def _get_cif_file_path(session_id: str, cif_filename: str) -> Optional[Path]:
@@ -650,9 +666,7 @@ async def calculate_phonon_from_directory(
 
                 # Determine output directory for phonon results - use unified storage
                 # 🔧 修复：移除重复的 Path 导入，避免覆盖全局 Path 变量
-                import sys
-                sys.path.insert(0, str(Path(__file__).parent.parent))
-                from shared.storage_manager import get_session_storage_path
+                # storage_manager 已在文件开头导入，直接使用
                 phonon_dir = get_session_storage_path(
                     session_id=session_id or "default",
                     data_type="phonon_results",
@@ -922,10 +936,7 @@ async def calculate_phonon(
         }
 
     # 确定图片保存目录（在调用 impl 之前）- 使用统一存储
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from shared.storage_manager import get_session_storage_path
+    # storage_manager 已在文件开头导入，直接使用
 
     # 使用统一的 session_data 目录
     phonon_dir = get_session_storage_path(

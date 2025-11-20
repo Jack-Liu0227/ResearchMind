@@ -9,6 +9,25 @@ export interface Agent {
   avatar?: string
 }
 
+// 文献类型定义
+export interface Paper {
+  paper_id: string
+  title: string
+  authors: string[]
+  published: string
+  source: string
+  score?: number
+  abstract?: string
+  url?: string
+  pdf_url?: string
+  categories?: string
+  doi?: string
+  citation_count?: number
+  full_text?: string
+  local_file?: string
+  topic?: string  // 🆕 主题标识（用于区分不同检索主题的文献）
+}
+
 // Tool Call 类型定义
 export interface ToolCall {
   name: string
@@ -83,6 +102,9 @@ export interface ChatSession {
   structures?: CrystalStructure[]  // 晶体结构列表
   phononImages?: any[]             // 声子谱图片列表
   files?: SessionFile[]            // 会话文件列表（CSV/MD 等）
+  // 文献数据（持久化）
+  papersCsvPath?: string | null    // 文献 CSV 文件路径
+  papersCount?: number              // 文献总数
 }
 
 // 晶胞类型数据

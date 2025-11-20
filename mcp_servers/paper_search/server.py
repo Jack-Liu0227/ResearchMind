@@ -178,6 +178,34 @@ logger = structlog.get_logger(__name__)
 
 
 # ============================================================================
+# 全局状态存储：文献选择管理
+# ============================================================================
+
+# 会话级别的文献选择状态
+_paper_selections: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_or_create_selection(session_id: str) -> Dict[str, Any]:
+    """
+    获取或创建会话的选择状态
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        选择状态字典
+    """
+    if session_id not in _paper_selections:
+        _paper_selections[session_id] = {
+            "csv_file_path": None,
+            "selected_paper_ids": [],
+            "all_papers": None,
+            "last_updated": datetime.now().isoformat()
+        }
+    return _paper_selections[session_id]
+
+
+# ============================================================================
 # 辅助函数：清理和验证返回内容
 # ============================================================================
 
@@ -356,6 +384,466 @@ deep learning metallurgy
 # Search Agent 工具 (8个)
 # ============================================================================
 # 职责：只负责检索论文信息，不做分析、下载、总结等操作
+
+# --- 文献选择工具 (4个) ---
+
+@mcp.tool()
+async def list_papers_from_csv(
+    csv_file_path: str,
+    session_id: str,
+    fields: List[str] = None
+) -> Dict[str, Any]:
+    """
+    从 CSV 文件读取文献列表（精简版，用于前端展示和选择）
+
+    功能：
+    - 读取 CSV 文件中的所有文献
+    - 返回精简的字段列表（减少 token 消耗）
+    - 自动缓存到会话状态中
+
+    Args:
+        csv_file_path: CSV 文件路径（相对或绝对路径）
+        session_id: 会话 ID（用于状态管理）
+        fields: 要返回的字段列表（默认：paper_id, title, authors, published, source, score, abstract, url）
+
+    Returns:
+        包含文献列表的字典：
+        - status: "success" or "error"
+        - session_id: 会话 ID
+        - csv_file_path: CSV 文件路径
+        - total_papers: 文献总数
+        - papers: 文献列表（精简版）
+        - message: 操作消息
+    """
+    from modules.paper_manager.export_tools import read_papers_from_csv
+
+    # 默认返回字段（包含 url 和 topic 字段）
+    if fields is None:
+        fields = ["paper_id", "title", "authors", "published", "source", "score", "abstract", "url", "topic"]
+
+    try:
+        logger.info(f"Loading papers from CSV: {csv_file_path} for session: {session_id}")
+
+        # 读取 CSV 文件
+        all_papers = read_papers_from_csv(csv_file_path)
+
+        if not all_papers:
+            return sanitize_tool_response({
+                'status': 'error',
+                'error': f'No papers found in CSV: {csv_file_path}',
+                'csv_file_path': csv_file_path
+            })
+
+        # 筛选字段（减少 token 消耗）
+        simplified_papers = []
+        for paper in all_papers:
+            simplified = {}
+            for field in fields:
+                value = paper.get(field)
+                # 特殊处理：截断过长的摘要
+                if field == 'abstract' and value and len(str(value)) > 300:
+                    simplified[field] = str(value)[:300] + '...'
+                else:
+                    simplified[field] = value
+            simplified_papers.append(simplified)
+
+        # 缓存到全局状态
+        selection = _get_or_create_selection(session_id)
+        selection['csv_file_path'] = csv_file_path
+        selection['all_papers'] = all_papers  # 缓存完整数据
+        selection['last_updated'] = datetime.now().isoformat()
+
+        logger.info(f"Successfully loaded {len(all_papers)} papers from CSV for session {session_id}")
+
+        return sanitize_tool_response({
+            'status': 'success',
+            'session_id': session_id,
+            'csv_file_path': csv_file_path,
+            'total_papers': len(all_papers),
+            'papers': simplified_papers,
+            'message': f'Successfully loaded {len(all_papers)} papers from CSV'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to list papers from CSV: {e}")
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': str(e),
+            'csv_file_path': csv_file_path
+        })
+
+
+@mcp.tool()
+async def get_paper_topics(
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    获取当前会话中所有文献的主题列表
+
+    功能：
+    - 从缓存的文献数据中提取所有唯一的 topic
+    - 统计每个 topic 的文献数量
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        包含主题列表的字典：
+        - status: "success" or "error"
+        - session_id: 会话 ID
+        - topics: 主题列表，每个主题包含 name 和 count
+        - total_topics: 主题总数
+        - message: 操作消息
+    """
+    try:
+        logger.info(f"Getting paper topics for session {session_id}")
+
+        selection = _get_or_create_selection(session_id)
+        all_papers = selection.get('all_papers')
+
+        if not all_papers:
+            return sanitize_tool_response({
+                'status': 'error',
+                'error': 'No papers data available. Please call list_papers_from_csv first.',
+                'session_id': session_id
+            })
+
+        # 统计每个 topic 的文献数量
+        topic_counts = {}
+        for paper in all_papers:
+            topic = paper.get('topic', '') or ''  # 空主题用空字符串表示
+            topic_counts[topic] = topic_counts.get(topic, 0) + 1
+
+        # 构建主题列表
+        topics = [
+            {
+                'name': topic if topic else '未分类',
+                'count': count,
+                'value': topic  # 原始值，用于筛选
+            }
+            for topic, count in sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+
+        logger.info(f"Found {len(topics)} topics for session {session_id}")
+
+        return sanitize_tool_response({
+            'status': 'success',
+            'session_id': session_id,
+            'topics': topics,
+            'total_topics': len(topics),
+            'message': f'Successfully retrieved {len(topics)} topics'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get paper topics: {e}")
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': str(e),
+            'session_id': session_id
+        })
+
+
+@mcp.tool()
+async def filter_papers_by_topic(
+    session_id: str,
+    topics: List[str] = None,
+    fields: List[str] = None
+) -> Dict[str, Any]:
+    """
+    按主题筛选文献列表
+
+    功能：
+    - 从缓存的文献数据中筛选指定主题的文献
+    - 支持多个主题（OR 逻辑）
+    - 如果 topics 为空或 None，返回所有文献
+
+    Args:
+        session_id: 会话 ID
+        topics: 要筛选的主题列表（空列表或 None 表示所有主题）
+        fields: 要返回的字段列表（默认：paper_id, title, authors, published, source, score, abstract, url, topic）
+
+    Returns:
+        包含筛选后文献列表的字典：
+        - status: "success" or "error"
+        - session_id: 会话 ID
+        - topics: 筛选的主题列表
+        - total_papers: 文献总数
+        - papers: 文献列表（精简版）
+        - message: 操作消息
+    """
+    from modules.paper_manager.export_tools import read_papers_from_csv
+
+    # 默认返回字段
+    if fields is None:
+        fields = ["paper_id", "title", "authors", "published", "source", "score", "abstract", "url", "topic"]
+
+    try:
+        logger.info(f"Filtering papers by topics for session {session_id}: {topics}")
+
+        selection = _get_or_create_selection(session_id)
+        all_papers = selection.get('all_papers')
+
+        if not all_papers:
+            return sanitize_tool_response({
+                'status': 'error',
+                'error': 'No papers data available. Please call list_papers_from_csv first.',
+                'session_id': session_id
+            })
+
+        # 筛选文献
+        if topics is None or len(topics) == 0:
+            # 返回所有文献
+            filtered_papers = all_papers
+        else:
+            # 按主题筛选（支持多个主题）
+            topics_set = set(topics)
+            filtered_papers = [
+                paper for paper in all_papers
+                if paper.get('topic', '') in topics_set
+            ]
+
+        # 筛选字段（减少 token 消耗）
+        simplified_papers = []
+        for paper in filtered_papers:
+            simplified = {}
+            for field in fields:
+                value = paper.get(field)
+                # 特殊处理：截断过长的摘要
+                if field == 'abstract' and value and len(str(value)) > 300:
+                    simplified[field] = str(value)[:300] + '...'
+                else:
+                    simplified[field] = value
+            simplified_papers.append(simplified)
+
+        logger.info(f"Filtered {len(filtered_papers)} papers from {len(all_papers)} total papers")
+
+        return sanitize_tool_response({
+            'status': 'success',
+            'session_id': session_id,
+            'topics': topics or [],
+            'total_papers': len(filtered_papers),
+            'papers': simplified_papers,
+            'message': f'Successfully filtered {len(filtered_papers)} papers'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to filter papers by topic: {e}")
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': str(e),
+            'session_id': session_id
+        })
+
+
+@mcp.tool()
+async def select_papers(
+    session_id: str,
+    paper_ids: List[str],
+    mode: str = "replace"
+) -> Dict[str, Any]:
+    """
+    选择特定的文献（用于后续分析）
+
+    功能：
+    - 记录用户选择的文献 ID
+    - 支持三种模式：替换、追加、移除
+    - 验证 paper_ids 的有效性
+    - 🆕 支持跨 topic 选择：可以选择来自不同主题的文献进行融合分析
+
+    Args:
+        session_id: 会话 ID
+        paper_ids: 要选择的论文 ID 列表（可以来自不同的 topic）
+        mode: 选择模式（"replace": 替换, "add": 追加, "remove": 移除）
+
+    Returns:
+        选择结果字典：
+        - status: "success" or "error"
+        - session_id: 会话 ID
+        - selected_count: 选中的文献数量
+        - selected_paper_ids: 选中的文献 ID 列表
+        - message: 操作消息
+    """
+    try:
+        logger.info(f"Selecting papers for session {session_id}, mode: {mode}, count: {len(paper_ids)}")
+
+        selection = _get_or_create_selection(session_id)
+
+        # 验证 paper_ids 是否存在
+        if selection['all_papers']:
+            valid_ids = {p['paper_id'] for p in selection['all_papers']}
+            invalid_ids = [pid for pid in paper_ids if pid not in valid_ids]
+            if invalid_ids:
+                logger.warning(f"Invalid paper IDs: {invalid_ids}")
+                return sanitize_tool_response({
+                    'status': 'error',
+                    'error': f'Invalid paper IDs: {invalid_ids[:5]}...' if len(invalid_ids) > 5 else f'Invalid paper IDs: {invalid_ids}'
+                })
+
+        # 根据模式更新选择
+        if mode == "replace":
+            selection['selected_paper_ids'] = paper_ids
+        elif mode == "add":
+            existing = set(selection['selected_paper_ids'])
+            existing.update(paper_ids)
+            selection['selected_paper_ids'] = list(existing)
+        elif mode == "remove":
+            existing = set(selection['selected_paper_ids'])
+            existing.difference_update(paper_ids)
+            selection['selected_paper_ids'] = list(existing)
+        else:
+            return sanitize_tool_response({
+                'status': 'error',
+                'error': f'Invalid mode: {mode}. Must be "replace", "add", or "remove"'
+            })
+
+        selection['last_updated'] = datetime.now().isoformat()
+
+        logger.info(f"Successfully selected {len(selection['selected_paper_ids'])} papers in session {session_id}")
+
+        return sanitize_tool_response({
+            'status': 'success',
+            'session_id': session_id,
+            'selected_count': len(selection['selected_paper_ids']),
+            'selected_paper_ids': selection['selected_paper_ids'],
+            'message': f'Successfully selected {len(selection["selected_paper_ids"])} papers'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to select papers: {e}")
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': str(e)
+        })
+
+
+@mcp.tool()
+async def get_selected_papers(
+    session_id: str,
+    include_abstract: bool = False,
+    include_full_text: bool = False
+) -> Dict[str, Any]:
+    """
+    获取当前选中的文献完整信息
+
+    功能：
+    - 返回当前会话中选中的文献
+    - 可选择是否包含摘要和全文（控制 token 消耗）
+    - 🆕 支持跨 topic 选择：返回的文献可能来自不同的主题
+
+    Args:
+        session_id: 会话 ID
+        include_abstract: 是否包含摘要字段（默认 False）
+        include_full_text: 是否包含全文字段（默认 False）
+
+    Returns:
+        选中的文献列表：
+        - status: "success" or "error"
+        - session_id: 会话 ID
+        - selected_count: 选中的文献数量
+        - papers: 选中的文献列表（完整信息，包含 topic 字段）
+    """
+    from modules.paper_manager.export_tools import read_papers_from_csv
+
+    try:
+        logger.info(f"Getting selected papers for session {session_id}")
+
+        selection = _get_or_create_selection(session_id)
+
+        if not selection['selected_paper_ids']:
+            return sanitize_tool_response({
+                'status': 'success',
+                'session_id': session_id,
+                'selected_count': 0,
+                'papers': [],
+                'message': 'No papers selected'
+            })
+
+        # 从缓存或重新读取 CSV
+        all_papers = selection.get('all_papers')
+        if not all_papers and selection.get('csv_file_path'):
+            logger.info(f"Cache miss, reloading papers from CSV: {selection['csv_file_path']}")
+            all_papers = read_papers_from_csv(selection['csv_file_path'])
+            selection['all_papers'] = all_papers
+
+        if not all_papers:
+            return sanitize_tool_response({
+                'status': 'error',
+                'error': 'No papers data available. Please call list_papers_from_csv first.'
+            })
+
+        # 筛选选中的文献
+        selected_paper_ids_set = set(selection['selected_paper_ids'])
+        selected_papers = [p for p in all_papers if p.get('paper_id') in selected_paper_ids_set]
+
+        # 根据参数控制返回字段
+        if not include_abstract:
+            for paper in selected_papers:
+                paper.pop('abstract', None)
+                paper.pop('summary', None)
+
+        if not include_full_text:
+            for paper in selected_papers:
+                paper.pop('full_text', None)
+                paper.pop('content', None)
+
+        logger.info(f"Successfully retrieved {len(selected_papers)} selected papers for session {session_id}")
+
+        return sanitize_tool_response({
+            'status': 'success',
+            'session_id': session_id,
+            'selected_count': len(selected_papers),
+            'papers': selected_papers,
+            'message': f'Successfully retrieved {len(selected_papers)} selected papers'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get selected papers: {e}")
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': str(e)
+        })
+
+
+@mcp.tool()
+async def clear_paper_selection(session_id: str) -> Dict[str, Any]:
+    """
+    清空当前会话的文献选择
+
+    功能：
+    - 清空选中的文献 ID 列表
+    - 保留缓存的文献数据
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        操作结果：
+        - status: "success" or "error"
+        - session_id: 会话 ID
+        - message: 操作消息
+    """
+    try:
+        logger.info(f"Clearing paper selection for session {session_id}")
+
+        selection = _get_or_create_selection(session_id)
+        selection['selected_paper_ids'] = []
+        selection['last_updated'] = datetime.now().isoformat()
+
+        logger.info(f"Successfully cleared paper selection for session {session_id}")
+
+        return sanitize_tool_response({
+            'status': 'success',
+            'session_id': session_id,
+            'message': 'Selection cleared successfully'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to clear paper selection: {e}")
+        return sanitize_tool_response({
+            'status': 'error',
+            'error': str(e)
+        })
+
 
 # --- 规划工具 (1个) ---
 
@@ -672,50 +1160,28 @@ async def ingest_uploaded_papers(
 
     return sanitize_tool_response(final_result)
 
-@mcp.tool()
-async def search_papers_all_sources(
-    topic: str,
-    max_results_per_source: int = 3
-) -> Dict[str, Any]:
-    """
-    使用所有可用搜索源检索论文 (ArXiv + Tavily Academic)
-
-    ⚠️ 已废弃：建议使用 search_papers 工具（统一接口）
-
-    Args:
-        topic: 搜索主题 (建议使用英文关键词)
-        max_results_per_source: 每个搜索源的最大结果数 (默认: 3，以节省资源)
-
-    Returns:
-        Dict containing:
-        - papers: 合并后的论文列表
-        - sources_used: 使用的搜索源
-        - total_results: 总结果数
-    """
-    logger.info("Searching papers from all sources (deprecated)", topic=topic)
-
-    # 使用统一接口
-    result = await search_papers_unified(
-        query=topic,
-        sources=None,  # 搜索所有源
-        max_results=max_results_per_source
-    )
-
-    return result
+# 注：search_papers_all_sources 已删除（已废弃）
+# 请使用 search_papers 工具替代（统一接口，支持自动保存CSV）
 
 
 # --- ArXiv 搜索 (3个) ---
 
 @mcp.tool()
-async def search_arxiv_papers(topic: str, max_results: int = 3) -> List[Dict[str, Any]]:
+async def search_arxiv_papers(
+    topic: str,
+    max_results: int = 3,
+    session_id: str = None
+) -> List[Dict[str, Any]]:
     """
     Search for papers on arXiv based on a topic and return detailed information.
 
+    ⚠️ 已废弃：建议使用 search_papers 工具（统一接口，支持多源搜索）
     ⚠️ 重要提示: 在调用此工具前，必须先调用 generate_research_plan 进行规划！
 
     Args:
         topic: The topic to search for (建议使用英文关键词)
         max_results: Maximum number of results to retrieve (default: 3，以节省资源)
+        session_id: 会话ID（用于保存搜索结果到文件，可选）
 
     Returns:
         List of dictionaries containing paper information:
@@ -728,7 +1194,17 @@ async def search_arxiv_papers(topic: str, max_results: int = 3) -> List[Dict[str
         - categories: ArXiv categories
         - source: 'arxiv'
     """
-    return search_arxiv_papers_impl(topic=topic, max_results=max_results, session_id=None)
+    # 🆕 如果没有提供 session_id，生成一个唯一的 session_id
+    if not session_id:
+        import time
+        import random
+        import string
+        timestamp = int(time.time() * 1000)
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+        session_id = f"session_{timestamp}_{random_id}"
+        logger.info(f"Generated unique session_id: {session_id} for ArXiv search: {topic}")
+
+    return search_arxiv_papers_impl(topic=topic, max_results=max_results, session_id=session_id)
 
 @mcp.tool()
 async def search_papers_by_author(author_name: str, max_results: int = 5) -> List[Dict[str, Any]]:
@@ -1139,9 +1615,11 @@ async def search_in_saved_content(
 @mcp.tool()
 async def batch_paper_analysis(
     csv_file_path: str = None,
+    paper_ids: List[str] = None,
     papers: List[Dict[str, Any]] = None,
     session_id: str = None,
-    topic: str = None
+    topic: str = None,
+    use_selected_papers: bool = False
 ) -> Dict[str, Any]:
     """
     对多篇论文进行批量分析，并生成中文凝练摘要。
@@ -1153,8 +1631,11 @@ async def batch_paper_analysis(
     - 保存总结到 Markdown 文件和 CSV 文件
 
     Args:
-        csv_file_path: CSV文件路径（优先使用，从CSV读取论文信息）
-        papers: 论文列表（如果未提供csv_file_path，则使用此参数），每篇论文包含：
+        csv_file_path: CSV文件路径（必需，从CSV读取论文信息）
+        paper_ids: 🆕 要分析的文献ID列表（可选）
+                  - 如果提供，只分析指定的文献
+                  - 如果为空或None，分析CSV中的所有文献
+        papers: 论文列表（已废弃，建议使用 csv_file_path + paper_ids），每篇论文包含：
             - id/paper_id/arxiv_id: 论文ID（可选）
             - title: 论文标题
             - authors: 作者列表（可选）
@@ -1164,6 +1645,7 @@ async def batch_paper_analysis(
             - source: 来源（arxiv/tavily，可选）
         session_id: 会话ID（用于确定保存位置，可选）
         topic: 主题（用于确定保存位置，可选）
+        use_selected_papers: 是否使用选中的文献（已废弃，建议使用 paper_ids 参数）
 
     Returns:
         包含批量分析结果的字典，每篇论文包含：
@@ -1182,8 +1664,75 @@ async def batch_paper_analysis(
     """
     from modules.paper_manager.export_tools import save_summary_to_file, save_analysis_results_to_csv, read_papers_from_csv
 
-    # 优先使用CSV文件
-    if csv_file_path:
+    # 🆕 新的简化流程：csv_file_path + paper_ids
+    if csv_file_path and paper_ids is not None:
+        logger.info(f"Reading papers from CSV: {csv_file_path}, filtering by {len(paper_ids)} paper IDs")
+        all_papers = read_papers_from_csv(csv_file_path)
+        if not all_papers:
+            return {
+                'status': 'error',
+                'error': f'Failed to read papers from CSV: {csv_file_path}'
+            }
+
+        # 如果 paper_ids 为空列表，使用所有文献
+        if len(paper_ids) == 0:
+            papers = all_papers
+            logger.info(f"No paper IDs specified, using all {len(papers)} papers from CSV")
+        else:
+            # 筛选指定的文献
+            paper_ids_set = set(paper_ids)
+            papers = [p for p in all_papers if p.get('paper_id') in paper_ids_set]
+            logger.info(f"Filtered to {len(papers)} papers from {len(all_papers)} total papers")
+
+        # 从CSV文件路径中提取session_id和topic
+        if not session_id or not topic:
+            from pathlib import Path
+            csv_path = Path(csv_file_path)
+            if len(csv_path.parts) >= 2:
+                extracted_session_id = csv_path.parts[-2]
+                if not session_id:
+                    session_id = extracted_session_id
+                    logger.info(f"Extracted session_id from CSV path: {session_id}")
+                if not topic:
+                    topic = extracted_session_id.rsplit('_', 1)[0] if '_' in extracted_session_id else extracted_session_id
+                    logger.info(f"Extracted topic from session_id: {topic}")
+
+    # 优先使用选中的文献（向后兼容）
+    elif use_selected_papers and session_id:
+        logger.info(f"Using selected papers for session {session_id}")
+        selection = _get_or_create_selection(session_id)
+
+        if not selection.get('selected_paper_ids'):
+            return sanitize_tool_response({
+                'status': 'error',
+                'error': 'No papers selected in this session. Please select papers first using select_papers tool.'
+            })
+
+        # 从缓存或重新读取 CSV
+        all_papers = selection.get('all_papers')
+        if not all_papers and selection.get('csv_file_path'):
+            logger.info(f"Cache miss, reloading papers from CSV: {selection['csv_file_path']}")
+            all_papers = read_papers_from_csv(selection['csv_file_path'])
+            selection['all_papers'] = all_papers
+
+        if not all_papers:
+            return sanitize_tool_response({
+                'status': 'error',
+                'error': 'No papers data available. Please call list_papers_from_csv first.'
+            })
+
+        # 筛选选中的文献
+        selected_paper_ids_set = set(selection['selected_paper_ids'])
+        papers = [p for p in all_papers if p.get('paper_id') in selected_paper_ids_set]
+
+        logger.info(f"Using {len(papers)} selected papers for analysis")
+
+        # 使用选择状态中的 csv_file_path
+        if not csv_file_path:
+            csv_file_path = selection.get('csv_file_path')
+
+    # 如果没有使用选中的文献，则使用原有逻辑
+    elif csv_file_path:
         logger.info(f"Reading papers from CSV: {csv_file_path}")
         papers = read_papers_from_csv(csv_file_path)
         if not papers:
@@ -1391,9 +1940,11 @@ async def save_papers_to_csv(
 async def generate_research_report(
     topic: str,
     csv_file_path: str = None,
+    paper_ids: List[str] = None,
     papers_info: List[Dict[str, Any]] = None,
     papers_analysis: List[Dict[str, Any]] = None,
-    session_id: str = None
+    session_id: str = None,
+    use_selected_papers: bool = False
 ) -> Dict[str, Any]:
     """
     Generate a comprehensive research report based on multiple papers.
@@ -1413,10 +1964,14 @@ async def generate_research_report(
 
     Args:
         topic: The research topic/theme for the report
-        csv_file_path: CSV文件路径（优先使用，从CSV读取论文信息）
-        papers_info: 论文信息列表（如果未提供csv_file_path，则使用此参数）
+        csv_file_path: CSV文件路径（必需，从CSV读取论文信息）
+        paper_ids: 🆕 要生成报告的文献ID列表（可选）
+                  - 如果提供，只使用指定的文献
+                  - 如果为空或None，使用CSV中的所有文献
+        papers_info: 论文信息列表（已废弃，建议使用 csv_file_path + paper_ids）
         papers_analysis: 论文分析列表（可选）
         session_id: 会话ID（用于确定保存位置，可选）
+        use_selected_papers: 是否使用选中的文献（已废弃，建议使用 paper_ids 参数）
 
     Returns:
         Dict containing the report content and metadata:
@@ -1431,8 +1986,70 @@ async def generate_research_report(
     """
     from modules.paper_manager.export_tools import save_report_to_file, save_analysis_results_to_csv, read_papers_from_csv
 
-    # 优先使用CSV文件
-    if csv_file_path:
+    # 🆕 新的简化流程：csv_file_path + paper_ids
+    if csv_file_path and paper_ids is not None:
+        logger.info(f"Reading papers from CSV: {csv_file_path}, filtering by {len(paper_ids)} paper IDs")
+        all_papers = read_papers_from_csv(csv_file_path)
+        if not all_papers:
+            return {
+                'status': 'error',
+                'error': f'Failed to read papers from CSV: {csv_file_path}'
+            }
+
+        # 如果 paper_ids 为空列表，使用所有文献
+        if len(paper_ids) == 0:
+            papers_info = all_papers
+            logger.info(f"No paper IDs specified, using all {len(papers_info)} papers from CSV")
+        else:
+            # 筛选指定的文献
+            paper_ids_set = set(paper_ids)
+            papers_info = [p for p in all_papers if p.get('paper_id') in paper_ids_set]
+            logger.info(f"Filtered to {len(papers_info)} papers from {len(all_papers)} total papers")
+
+        # 从CSV文件路径中提取session_id
+        if not session_id:
+            from pathlib import Path
+            csv_path = Path(csv_file_path)
+            if len(csv_path.parts) >= 2:
+                session_id = csv_path.parts[-2]
+                logger.info(f"Extracted session_id from CSV path: {session_id}")
+
+    # 优先使用选中的文献（向后兼容）
+    elif use_selected_papers and session_id:
+        logger.info(f"Using selected papers for report generation in session {session_id}")
+        selection = _get_or_create_selection(session_id)
+
+        if not selection.get('selected_paper_ids'):
+            return sanitize_tool_response({
+                'status': 'error',
+                'error': 'No papers selected in this session. Please select papers first using select_papers tool.'
+            })
+
+        # 从缓存或重新读取 CSV
+        all_papers = selection.get('all_papers')
+        if not all_papers and selection.get('csv_file_path'):
+            logger.info(f"Cache miss, reloading papers from CSV: {selection['csv_file_path']}")
+            all_papers = read_papers_from_csv(selection['csv_file_path'])
+            selection['all_papers'] = all_papers
+
+        if not all_papers:
+            return sanitize_tool_response({
+                'status': 'error',
+                'error': 'No papers data available. Please call list_papers_from_csv first.'
+            })
+
+        # 筛选选中的文献
+        selected_paper_ids_set = set(selection['selected_paper_ids'])
+        papers_info = [p for p in all_papers if p.get('paper_id') in selected_paper_ids_set]
+
+        logger.info(f"Using {len(papers_info)} selected papers for report generation")
+
+        # 使用选择状态中的 csv_file_path
+        if not csv_file_path:
+            csv_file_path = selection.get('csv_file_path')
+
+    # 如果没有使用选中的文献，则使用原有逻辑
+    elif csv_file_path:
         logger.info(f"Reading papers from CSV: {csv_file_path}")
         papers_info = read_papers_from_csv(csv_file_path)
         if not papers_info:

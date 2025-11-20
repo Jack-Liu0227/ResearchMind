@@ -8,26 +8,18 @@ databases, simulations, and data analysis.
 
 __version__ = "1.0.0"
 
-# Available MCP servers
+# Available MCP servers (实际已实现的服务器)
 AVAILABLE_SERVERS = [
-    "paper_search",
-    "materials", 
-    "simulation",
-    "data_analysis",
-    "experiment",
-    "rdkit",
-    "structure_generate"
+    "paper_search",      # 文献搜索与分析
+    "database_call",     # 材料数据库查询
+    "simulation",        # 仿真计算
 ]
 
 # Default server ports
 SERVER_PORTS = {
-    "paper_search": 5001,
-    "materials": 5002,
-    "simulation": 5003,
-    "data_analysis": 5004,
-    "experiment": 5005,
-    "rdkit": 5006,
-    "structure_generate": 5007,
+    "paper_search": 50002,
+    "database_call": 50010,
+    "simulation": 50003,
 }
 
 __all__ = ["AVAILABLE_SERVERS", "SERVER_PORTS"]

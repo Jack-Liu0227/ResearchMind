@@ -8,11 +8,12 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import List
 import os
+import httpx
 
 from .config import server_config
 from .static_file_service import StaticFileService
@@ -287,41 +288,9 @@ class HTTPServer:
                 "timestamp": datetime.now().isoformat()
             }
 
-        # ============================================
-        # Legacy endpoints for backward compatibility
-        # ============================================
-        # These endpoints are deprecated but kept for frontend compatibility
-        # Frontend should migrate to /api/files?type=<type>
+        # 注：废弃的 /api/phonon_results 和 /api/generated_structures 端点已删除
+        # 请使用统一端点：/api/files?type=phonon_results 或 /api/files?type=generated_structures
 
-        @self.app.get("/api/phonon_results")
-        async def list_phonon_results():
-            """
-            List phonon result files (deprecated)
-
-            Use /api/files?type=phonon_results instead
-            """
-            files = StaticFileService.list_phonon_results()
-            return {
-                "success": True,
-                "phonon_results": files,
-                "count": len(files),
-                "timestamp": datetime.now().isoformat()
-            }
-
-        @self.app.get("/api/generated_structures")
-        async def list_generated_structures():
-            """
-            List generated structure files (deprecated)
-
-            Use /api/files?type=generated_structures instead
-            """
-            files = StaticFileService.list_generated_structures()
-            return {
-                "files": files,
-                "count": len(files),
-                "timestamp": datetime.now().isoformat()
-            }
-        
         # Note: /api/images/{image_type}/{filename} is handled by StaticFiles middleware
         # Do NOT add an API route here as it will override the static file serving
 
@@ -436,6 +405,148 @@ class HTTPServer:
         async def cif_operation_alias(request: CIFConversionRequest):
             """Legacy endpoint without /api prefix for backward compatibility"""
             return await cif_operation(request)
+
+        # 🆕 MCP Tool Call Endpoint
+        @self.app.post("/api/mcp/call_tool")
+        async def call_mcp_tool(request: Request):
+            """
+            Call MCP tool directly from frontend
+
+            This endpoint allows the frontend to call MCP tools directly
+            for operations like paper selection that don't need agent coordination.
+
+            Request body:
+            {
+                "tool_name": "list_papers_from_csv",
+                "arguments": {
+                    "csv_file_path": "papers/session_xxx/all_papers.csv",
+                    "session_id": "session_xxx"
+                }
+            }
+            """
+            try:
+                body = await request.json()
+                tool_name = body.get('tool_name')
+                arguments = body.get('arguments', {})
+
+                if not tool_name:
+                    raise HTTPException(status_code=400, detail="tool_name is required")
+
+                # Import paper search tools directly
+                import sys
+                paper_search_path = os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    'mcp_servers', 'paper_search'
+                )
+                if paper_search_path not in sys.path:
+                    sys.path.insert(0, paper_search_path)
+
+                # Map tool names to implementation functions
+                if tool_name == 'list_papers_from_csv':
+                    from modules.paper_manager.export_tools import read_papers_from_csv
+
+                    csv_file_path = arguments.get('csv_file_path')
+                    session_id = arguments.get('session_id')
+                    fields = arguments.get('fields')
+
+                    if not csv_file_path or not session_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="csv_file_path and session_id are required"
+                        )
+
+                    # Default fields (包含 url 和 topic 字段)
+                    if fields is None:
+                        fields = ["paper_id", "title", "authors", "published", "source", "score", "abstract", "url", "topic"]
+
+                    try:
+                        # Read papers from CSV
+                        all_papers = read_papers_from_csv(csv_file_path)
+
+                        if not all_papers:
+                            return {
+                                'status': 'error',
+                                'error': f'No papers found in CSV file: {csv_file_path}',
+                                'csv_file_path': csv_file_path
+                            }
+
+                        # Simplify papers (only return requested fields)
+                        simplified_papers = []
+                        for paper in all_papers:
+                            simplified = {field: paper.get(field) for field in fields if field in paper}
+
+                            # Truncate abstract to save tokens
+                            if 'abstract' in simplified and simplified['abstract']:
+                                simplified['abstract'] = simplified['abstract'][:300] + '...' if len(simplified['abstract']) > 300 else simplified['abstract']
+
+                            simplified_papers.append(simplified)
+
+                        return {
+                            'status': 'success',
+                            'session_id': session_id,
+                            'csv_file_path': csv_file_path,
+                            'total_papers': len(all_papers),
+                            'papers': simplified_papers,
+                            'message': f'Successfully loaded {len(all_papers)} papers from CSV'
+                        }
+                    except Exception as e:
+                        logger.error(f"Failed to read papers from CSV: {e}", exc_info=True)
+                        return {
+                            'status': 'error',
+                            'error': str(e),
+                            'csv_file_path': csv_file_path
+                        }
+
+                elif tool_name == 'select_papers':
+                    # This is a simple state management operation
+                    # We'll store it in a global dict for now
+                    if not hasattr(call_mcp_tool, '_paper_selections'):
+                        call_mcp_tool._paper_selections = {}
+
+                    session_id = arguments.get('session_id')
+                    paper_ids = arguments.get('paper_ids', [])
+                    mode = arguments.get('mode', 'replace')
+
+                    if not session_id:
+                        raise HTTPException(status_code=400, detail="session_id is required")
+
+                    # Get or create selection
+                    if session_id not in call_mcp_tool._paper_selections:
+                        call_mcp_tool._paper_selections[session_id] = {
+                            'selected_ids': [],
+                            'csv_file_path': None,
+                            'all_papers': []
+                        }
+
+                    selection = call_mcp_tool._paper_selections[session_id]
+
+                    # Update selection based on mode
+                    if mode == 'replace':
+                        selection['selected_ids'] = paper_ids
+                    elif mode == 'add':
+                        selection['selected_ids'] = list(set(selection['selected_ids'] + paper_ids))
+                    elif mode == 'remove':
+                        selection['selected_ids'] = [pid for pid in selection['selected_ids'] if pid not in paper_ids]
+
+                    return {
+                        'status': 'success',
+                        'session_id': session_id,
+                        'selected_count': len(selection['selected_ids']),
+                        'selected_ids': selection['selected_ids'],
+                        'message': f'Successfully updated selection ({len(selection["selected_ids"])} papers selected)'
+                    }
+
+                else:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Tool '{tool_name}' not supported. Supported tools: list_papers_from_csv, select_papers"
+                    )
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"MCP tool call failed: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=str(e))
 
         # 🔧 修复：移除 /api/download 路由，让静态文件挂载处理
         # 原因：FastAPI 的路由（@app.get）优先于挂载（app.mount），

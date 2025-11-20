@@ -130,66 +130,9 @@ def _create_session_metadata(
         logger.error(f"Failed to create session metadata: {e}")
 
 
-def get_legacy_path(data_type: str) -> Optional[Path]:
-    """
-    获取旧的存储路径（用于数据迁移）
-    
-    Args:
-        data_type: 数据类型
-    
-    Returns:
-        旧路径（如果存在）
-    """
-    legacy_paths = {
-        "papers": _MODULE_DIR / "mcp_servers" / "paper_search" / "papers",
-        "phonon_results": _MODULE_DIR / "mcp_servers" / "simulation" / "phonon_results",
-        "thermal_conductivity": _MODULE_DIR / "mcp_servers" / "simulation" / "thermal_conductivity_results",
-        "cif": _MODULE_DIR / "mcp_servers" / "simulation" / "cif",
-        "generated_structures": _MODULE_DIR / "mcp_servers" / "simulation" / "crystallm" / "generated_structures",
-    }
-    
-    path = legacy_paths.get(data_type)
-    if path and path.exists():
-        return path
-    return None
-
-
-def migrate_legacy_data(data_type: str, session_id: str = "legacy") -> bool:
-    """
-    迁移旧数据到新的存储结构
-    
-    Args:
-        data_type: 数据类型
-        session_id: 目标会话ID（默认: legacy）
-    
-    Returns:
-        是否成功迁移
-    """
-    legacy_path = get_legacy_path(data_type)
-    if not legacy_path:
-        logger.info(f"No legacy data found for {data_type}")
-        return False
-    
-    new_path = get_session_storage_path(session_id, data_type, create=True)
-    
-    try:
-        import shutil
-        
-        # 复制文件（保留原文件）
-        if legacy_path.is_dir():
-            for item in legacy_path.iterdir():
-                if item.is_file():
-                    target = new_path / item.name
-                    if not target.exists():
-                        shutil.copy2(item, target)
-                        logger.info(f"Migrated: {item.name}")
-        
-        logger.info(f"Successfully migrated {data_type} from {legacy_path} to {new_path}")
-        return True
-    
-    except Exception as e:
-        logger.error(f"Failed to migrate {data_type}: {e}")
-        return False
+# 注：get_legacy_path() 和 migrate_legacy_data() 函数已删除
+# 所有数据已迁移到新的 session_data 目录结构
+# 如需手动迁移旧数据，请参考 docs/migration-guide.md（如有）
 
 
 def get_file_url(file_path: Path, data_type: str, session_id: Optional[str] = None) -> str:
