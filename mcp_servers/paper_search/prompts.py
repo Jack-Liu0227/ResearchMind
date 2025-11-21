@@ -1,6 +1,12 @@
 """
-Prompts for Paper Search MCP Server
-All prompts are centralized here for easy management and modification.
+Prompts for Paper Search and Analysis MCP Server
+
+模块划分：
+1. 分类与规划Prompts - 用于请求分类和搜索优化
+2. 质量评估Prompts - 用于结果检查
+3. 论文分析Prompts - 用于单篇和批量分析（仅基于摘要）
+4. 翻译Prompts - 用于摘要翻译
+5. 报告生成Prompts - 在reporting.py中定义
 """
 
 from datetime import datetime
@@ -123,13 +129,19 @@ Respond in JSON format:
 }}"""
 
 
-# ============================================================================
-# 旧版本报告生成Prompts已废弃
-# 现在使用 COMPREHENSIVE_REPORT_PROMPT 和 reporting.py 中的自定义prompt
-# ============================================================================
 
 
-# Helper Functions
+# ============================================================================
+# 旧版本报告生成Prompts - 报告生成现在在 reporting.py 中定义
+# ============================================================================
+
+# COMPREHENSIVE_REPORT_PROMPT - 报告生成现在在 reporting.py 中定义
+
+
+# ============================================================================
+# Helper Functions - 分类与规划
+# ============================================================================
+
 def format_classify_prompt(query: str) -> str:
     """Format classification prompt with query"""
     return CLASSIFY_USER_REQUEST_PROMPT.format(query=query)
@@ -162,190 +174,41 @@ def format_reflect_prompt(question: str, search_results: str) -> str:
     )
 
 
-# 旧版本helper函数已删除（对应的prompts已废弃）
-# format_extract_paper_prompt, format_aggregate_prompt, format_final_report_prompt
-
-
-# ============================================================================
-# 优化的调研报告生成提示词
-# ============================================================================
-
-COMPREHENSIVE_REPORT_PROMPT = """你是一位资深的学术研究员。请基于以下文献信息，生成一份专业的研究调研报告。
-
-研究主题: {topic}
-
-文献信息:
-{papers_info}
-
-请按照以下结构生成报告（使用中文）：
-
-## 1. 研究概述 (200-300字)
-- 研究领域的重要性和背景
-- 当前研究的主要挑战
-- 本次调研的文献范围
-
-## 2. 核心发现
-针对每篇重要文献，总结：
-- 研究目标
-- 主要方法
-- 关键结果
-- 创新点
-
-## 3. 技术路线分析
-- 主流技术方法对比
-- 各方法的优缺点
-- 技术演进趋势
-
-## 4. 研究热点与趋势
-- 当前研究热点
-- 未来发展方向
-- 潜在突破点
-
-## 5. 研究空白与机会
-- 现有研究的局限性
-- 尚未解决的问题
-- 可能的研究方向
-
-## 6. 总结与建议
-- 主要结论
-- 对研究者的建议
-- 未来展望
-
-要求：
-- 使用专业学术语言
-- 逻辑清晰，层次分明
-- 突出重点，避免冗余
-- 客观中立，有理有据
-"""
-
-
-PAPER_SUMMARY_PROMPT = """请对以下论文进行深度分析：
+PAPER_SUMMARY_PROMPT_BRIEF = """请快速分析以下论文摘要：
 
 标题: {title}
 作者: {authors}
 摘要: {abstract}
-全文摘录: {content_excerpt}
 
-请按照以下结构分析（使用中文）：
+请简洁地总结（使用中文）：
 
-### 1. 研究背景与动机
-- 研究解决什么问题？
-- 为什么这个问题重要？
+### 研究目标
+[1-2句]
 
-### 2. 研究目标
-- 具体的研究目标是什么？
+### 方法论
+[1-2句]
 
-### 3. 方法论
-- 使用了什么方法？
-- 方法有何创新之处？
+### 主要结果
+[1-2句]
 
-### 4. 主要发现与结果
-- 关键结果是什么？
-- 有哪些重要发现？
+### 创新点
+[1-2句]
 
-### 5. 创新点与贡献
-- 这项工作的创新之处？
-- 对领域的贡献？
-
-### 6. 局限性
-- 存在哪些局限性？
-- 有哪些未解决的问题？
-
-要求：详细、专业、客观、简洁"""
+要求：简洁、清晰、避免冗余"""
 
 
-MULTI_PAPER_COMPARISON_PROMPT = """请对以下多篇论文进行对比分析：
-
-{papers_summary}
-
-请分析：
-1. **共同点**: 这些研究有哪些共同的方法或结论？
-2. **差异点**: 各研究的独特之处是什么？
-3. **互补性**: 这些研究如何相互补充？
-4. **演进趋势**: 从时间顺序看，研究有何演进？
-
-要求：
-- 客观对比，不偏不倚
-- 突出关键差异
-- 总结发展脉络
-"""
-
-
-RESEARCH_GAP_ANALYSIS_PROMPT = """基于以下文献综述，分析研究空白和机会：
-
-文献总结:
-{literature_summary}
-
-请分析：
-1. **已解决的问题**: 现有研究已经很好解决的问题
-2. **部分解决的问题**: 有研究但仍有改进空间的问题
-3. **未解决的问题**: 明显的研究空白
-4. **新兴机会**: 可能的创新方向
-
-要求：
-- 基于文献事实
-- 指出具体问题
-- 提供可行建议
-"""
-
-
-def format_comprehensive_report_prompt(topic: str, papers_info: list) -> str:
-    """Format comprehensive report prompt"""
-    papers_text = []
-    for i, paper in enumerate(papers_info, 1):
-        # 优先使用全文，否则使用摘要
-        full_text = paper.get('full_text', '')
-        abstract = paper.get('abstract', 'N/A')
-
-        # 如果有全文，使用全文的前3000字符
-        if full_text and len(full_text) > 100:
-            content_preview = full_text[:3000] + "..." if len(full_text) > 3000 else full_text
-            content_type = "全文"
-        else:
-            content_preview = abstract[:500] + "..." if len(abstract) > 500 else abstract
-            content_type = "摘要"
-
-        paper_text = f"""
-### 文献 {i}
-- 标题: {paper.get('title', 'Unknown')}
-- 作者: {', '.join(paper.get('authors', []))}
-- 发表时间: {paper.get('published', 'Unknown')}
-- URL: {paper.get('url', 'N/A')}
-- 内容类型: {content_type}
-- 内容: {content_preview}
-"""
-        papers_text.append(paper_text)
-
-    return COMPREHENSIVE_REPORT_PROMPT.format(
-        topic=topic,
-        papers_info='\n'.join(papers_text)
-    )
-
-
-def format_paper_summary_prompt(title: str, authors: list, abstract: str, content_excerpt: str = "") -> str:
-    """Format paper summary prompt"""
+def format_paper_summary_prompt_brief(title: str, authors: list, abstract: str) -> str:
+    """Format brief paper summary prompt for quick analysis based on abstract only"""
     authors_str = ', '.join(authors) if isinstance(authors, list) else str(authors)
-    return PAPER_SUMMARY_PROMPT.format(
+    return PAPER_SUMMARY_PROMPT_BRIEF.format(
         title=title,
         authors=authors_str,
-        abstract=abstract,
-        content_excerpt=content_excerpt[:2000] if content_excerpt else "Not available"
+        abstract=abstract
     )
-
-
-def format_multi_paper_comparison_prompt(papers_summary: list) -> str:
-    """Format multi-paper comparison prompt"""
-    summary_text = '\n\n'.join(f"**论文 {i+1}**:\n{s}" for i, s in enumerate(papers_summary))
-    return MULTI_PAPER_COMPARISON_PROMPT.format(papers_summary=summary_text)
-
-
-def format_research_gap_analysis_prompt(literature_summary: str) -> str:
-    """Format research gap analysis prompt"""
-    return RESEARCH_GAP_ANALYSIS_PROMPT.format(literature_summary=literature_summary)
 
 
 # ============================================================================
-# 文献深度分析提示词 (Deep Analysis Prompts)
+# 翻译Prompts
 # ============================================================================
 
 TRANSLATE_ABSTRACT_PROMPT = """You are a professional academic translator. Translate the following English abstract to concise Chinese.
@@ -362,133 +225,8 @@ English Abstract:
 Return ONLY the Chinese translation (no JSON, no extra text):"""
 
 
-# ============================================================================
-# 未使用的Prompts已删除
-# DEEP_ANALYSIS_PROMPT - 未使用（reporting.py使用自定义prompt）
-# EXTRACT_KEY_INFO_PROMPT - 未使用（analysis.py使用PAPER_SUMMARY_PROMPT）
-# ============================================================================
-
-
-# ============================================================================
-# 报告模板搜索提示词 (Report Template Search Prompts)
-# ============================================================================
-
-SEARCH_REPORT_TEMPLATE_PROMPT = """Search for high-quality research report templates for the topic: "{topic}"
-
-Search queries to use:
-1. "academic research report template {topic}"
-2. "scientific literature review template {topic}"
-3. "IEEE research report format {topic}"
-4. "research survey paper structure {topic}"
-
-Focus on finding:
-- Standard academic report structures
-- Section organization best practices
-- Citation and reference formats
-- Visual presentation guidelines
-
-Return the search query that would be most effective."""
-
-
-ANALYZE_REPORT_TEMPLATE_PROMPT = """Analyze the following report template/structure and extract key sections.
-
-Template Content:
-{template_content}
-
-Extract:
-1. Main sections and their order
-2. Recommended content for each section
-3. Formatting guidelines
-4. Citation style
-
-Return in JSON format:
-{{
-    "sections": [
-        {{"name": "...", "description": "...", "order": 1}},
-        ...
-    ],
-    "formatting_guidelines": "...",
-    "citation_style": "..."
-}}"""
-
-
-GENERATE_REPORT_WITH_TEMPLATE_PROMPT = """Generate a comprehensive research report based on the following template and papers.
-
-Topic: {topic}
-Template Structure: {template_structure}
-
-Papers Summary:
-{papers_summary}
-
-Generate a complete report following the template structure. Include:
-- All sections from the template
-- Proper citations in IEEE format
-- Professional academic language
-- Clear organization and flow
-
-Return the complete report in Markdown format."""
-
-
-# ============================================================================
-# 多源文献汇总提示词 (Multi-Source Literature Aggregation)
-# ============================================================================
-
-AGGREGATE_MULTI_SOURCE_PAPERS_PROMPT = """Aggregate and analyze papers from multiple sources.
-
-Papers from different sources:
-{papers_data}
-
-Analyze:
-1. **Coverage**: How well do these papers cover the topic?
-2. **Quality**: Assess the quality and relevance of each source
-3. **Overlap**: Identify duplicate or highly similar papers
-4. **Gaps**: What aspects are missing or under-represented?
-5. **Recommendations**: Which papers are most valuable?
-
-Return in JSON format:
-{{
-    "coverage_score": <0-1>,
-    "quality_assessment": {{"arxiv": "...", "tavily": "...", ...}},
-    "duplicates": ["paper_id1", "paper_id2", ...],
-    "gaps": ["gap1", "gap2", ...],
-    "top_papers": ["paper_id1", "paper_id2", ...]
-}}"""
-
-
-# ============================================================================
-# Helper Functions for New Prompts
-# ============================================================================
-
 def format_translate_abstract_prompt(abstract_en: str) -> str:
     """Format translation prompt"""
     return TRANSLATE_ABSTRACT_PROMPT.format(abstract_en=abstract_en)
 
-
-# 未使用的helper函数已删除
-# format_deep_analysis_prompt - 未使用
-# format_extract_key_info_prompt - 未使用
-
-
-def format_search_report_template_prompt(topic: str) -> str:
-    """Format report template search prompt"""
-    return SEARCH_REPORT_TEMPLATE_PROMPT.format(topic=topic)
-
-
-def format_analyze_report_template_prompt(template_content: str) -> str:
-    """Format report template analysis prompt"""
-    return ANALYZE_REPORT_TEMPLATE_PROMPT.format(template_content=template_content)
-
-
-def format_generate_report_with_template_prompt(topic: str, template_structure: str, papers_summary: str) -> str:
-    """Format report generation with template prompt"""
-    return GENERATE_REPORT_WITH_TEMPLATE_PROMPT.format(
-        topic=topic,
-        template_structure=template_structure,
-        papers_summary=papers_summary
-    )
-
-
-def format_aggregate_multi_source_prompt(papers_data: str) -> str:
-    """Format multi-source aggregation prompt"""
-    return AGGREGATE_MULTI_SOURCE_PAPERS_PROMPT.format(papers_data=papers_data)
 
