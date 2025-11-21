@@ -56,7 +56,8 @@ async def search_semantic_scholar_papers(
         url = f"{SEMANTIC_SCHOLAR_API_BASE}/paper/search/bulk"
         
         # 请求的字段（与统一格式对应）
-        fields = "paperId,title,authors,abstract,url,publicationDate,citationCount,publicationTypes,externalIds,openAccessPdf,fieldsOfStudy"
+        # 🆕 添加 venue 字段（期刊/会议名称）和 journal 字段
+        fields = "paperId,title,authors,abstract,url,publicationDate,citationCount,publicationTypes,externalIds,openAccessPdf,fieldsOfStudy,venue,journal"
         
         params = {
             "query": query,
@@ -157,6 +158,20 @@ def _normalize_semantic_scholar_paper(paper: Dict[str, Any]) -> Dict[str, Any]:
     if not url and paper_id:
         url = f"https://www.semanticscholar.org/paper/{paper_id}"
 
+    # 🆕 提取期刊/会议名称
+    # Semantic Scholar 可能返回 venue（字符串）或 journal（对象）
+    journal_name = ''
+    venue = paper.get('venue', '')
+    journal = paper.get('journal')
+
+    if venue and isinstance(venue, str):
+        journal_name = venue
+    elif journal and isinstance(journal, dict):
+        # journal 对象可能包含 name 字段
+        journal_name = journal.get('name', '')
+
+    logger.debug(f"Extracted journal name: {journal_name} (venue={venue}, journal={journal})")
+
     # 统一字段格式
     normalized = {
         'paper_id': f"s2_{paper_id}",  # 统一主键，添加前缀避免与其他源冲突
@@ -172,6 +187,8 @@ def _normalize_semantic_scholar_paper(paper: Dict[str, Any]) -> Dict[str, Any]:
         'categories': categories,
         'source': 'semantic_scholar',
         'doi': doi,
+        # 🆕 期刊名称
+        'journal_name': journal_name,
         # 额外字段
         'citation_count': paper.get('citationCount', 0),
         'publication_types': paper.get('publicationTypes', []),

@@ -132,6 +132,9 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
                         paper['categories'] = []
                 elif key == 'DOI':
                     paper['doi'] = paper.pop('DOI')
+                elif key == 'JournalName':
+                    # 🆕 期刊名称字段
+                    paper['journal_name'] = paper.pop('JournalName')
                 elif key == 'CitationCount':
                     citation_count = paper.pop('CitationCount')
                     # 转换为整数
@@ -300,16 +303,16 @@ def save_summary_to_file(
                 analysis_text = result.get('analysis_text', '')
                 if analysis_text:
                     # 如果有完整的分析文本，直接使用
-                    markdown_lines.append("#### 关键信息\n\n")
+                    # markdown_lines.append("#### 关键信息\n\n")
                     markdown_lines.append(f"{analysis_text}\n\n")
                 else:
                     # 如果没有完整分析文本，使用简化的关键信息格式（向后兼容）
                     key_info = result.get('key_info', {})
-                    markdown_lines.append("#### 关键信息\n\n")
-                    markdown_lines.append(f"**研究目标**: {key_info.get('objective', '未提取')}\n\n")
-                    markdown_lines.append(f"**研究方法**: {key_info.get('method', '未提取')}\n\n")
-                    markdown_lines.append(f"**主要结果**: {key_info.get('result', '未提取')}\n\n")
-                    markdown_lines.append(f"**创新点**: {key_info.get('innovation', '未提取')}\n\n")
+                    # markdown_lines.append("#### 关键信息\n\n")
+                    markdown_lines.append(f"#### 研究目标:\n\n {key_info.get('objective', '未提取')}\n\n")
+                    markdown_lines.append(f"#### 研究方法:\n\n {key_info.get('method', '未提取')}\n\n")
+                    markdown_lines.append(f"#### 主要结果:\n\n {key_info.get('result', '未提取')}\n\n")
+                    markdown_lines.append(f"#### 创新点:\n\n {key_info.get('innovation', '未提取')}\n\n")
 
                 markdown_lines.append("---\n\n")
 
@@ -606,6 +609,9 @@ def save_papers_to_csv(
                 # 截取前50个字符，并添加省略号
                 simplified_topic = simplified_topic[:50] + '...'
 
+            # 🆕 提取期刊名称（用于 EasyScholar API）
+            journal_name = paper.get('journal_name', '')
+
             # 构建行数据（Topic 列放在 ID 后面）
             row = {
                 'ID': paper_id,
@@ -617,6 +623,7 @@ def save_papers_to_csv(
                 'PDF_URL': pdf_url,  # 新增：PDF 下载链接
                 'Published': published,  # 合并后的发表日期
                 'Source': paper.get('source', 'unknown'),
+                'JournalName': journal_name,  # 🆕 期刊名称（用于 EasyScholar API）
                 'Categories': categories_str,
                 'DOI': doi,  # 新增：DOI 标识符
                 'CitationCount': citation_count,  # 新增：引用次数

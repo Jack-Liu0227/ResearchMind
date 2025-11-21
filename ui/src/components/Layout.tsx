@@ -17,9 +17,15 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   // 🆕 使用设置中的默认值初始化右侧边栏状态
   const [rightPanelOpen, setRightPanelOpen] = useState(settings.rightSidebarOpen ?? true)
 
-  // 拖拽调整大小
-  const [sidebarWidth, setSidebarWidth] = useState(320) // 左侧边栏宽度
-  const [rightPanelWidth, setRightPanelWidth] = useState(480) // 右侧面板宽度（增加到 480px 以完整显示所有按钮）
+  // 拖拽调整大小 - 从 localStorage 读取保存的宽度
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem('sidebarWidth')
+    return saved ? parseInt(saved, 10) : 320
+  })
+  const [rightPanelWidth, setRightPanelWidth] = useState(() => {
+    const saved = localStorage.getItem('rightPanelWidth')
+    return saved ? parseInt(saved, 10) : 480
+  })
   const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const [isResizingRightPanel, setIsResizingRightPanel] = useState(false)
 
@@ -37,14 +43,29 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isResizingSidebar) {
         const newWidth = e.clientX
-        setSidebarWidth(Math.max(200, Math.min(600, newWidth)))
+        // 设置合理的最小宽度（150px）和最大宽度（窗口宽度的 50%）
+        const minWidth = 150
+        const maxWidth = window.innerWidth * 0.5
+        const constrainedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth))
+        setSidebarWidth(constrainedWidth)
       } else if (isResizingRightPanel) {
         const newWidth = window.innerWidth - e.clientX
-        setRightPanelWidth(Math.max(200, Math.min(600, newWidth)))
+        // 设置合理的最小宽度（150px）和最大宽度（窗口宽度的 50%）
+        const minWidth = 150
+        const maxWidth = window.innerWidth * 0.5
+        const constrainedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth))
+        setRightPanelWidth(constrainedWidth)
       }
     }
 
     const handleMouseUp = () => {
+      // 保存宽度到 localStorage
+      if (isResizingSidebar) {
+        localStorage.setItem('sidebarWidth', sidebarWidth.toString())
+      } else if (isResizingRightPanel) {
+        localStorage.setItem('rightPanelWidth', rightPanelWidth.toString())
+      }
+
       setIsResizingSidebar(false)
       setIsResizingRightPanel(false)
     }
@@ -62,7 +83,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
-  }, [isResizingSidebar, isResizingRightPanel])
+  }, [isResizingSidebar, isResizingRightPanel, sidebarWidth, rightPanelWidth])
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
@@ -80,13 +101,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <Sidebar />
             {/* 拖拽条 */}
             <div
-              className="absolute right-0 top-0 w-1 h-full cursor-col-resize bg-transparent hover:bg-blue-500 transition-colors z-20"
+              className="absolute right-0 top-0 w-1 h-full cursor-col-resize bg-transparent hover:bg-blue-500 transition-colors z-20 group"
               onMouseDown={(e) => {
                 e.preventDefault()
                 setIsResizingSidebar(true)
               }}
               title="拖拽调整宽度"
-            />
+            >
+              {/* 拖拽提示线 */}
+              <div className="absolute right-0 top-0 w-0.5 h-full bg-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
           </div>
         )}
 
@@ -117,13 +141,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           >
             {/* 拖拽条 */}
             <div
-              className="absolute left-0 top-0 w-1 h-full cursor-col-resize bg-transparent hover:bg-blue-500 transition-colors z-20"
+              className="absolute left-0 top-0 w-1 h-full cursor-col-resize bg-transparent hover:bg-blue-500 transition-colors z-20 group"
               onMouseDown={(e) => {
                 e.preventDefault()
                 setIsResizingRightPanel(true)
               }}
               title="拖拽调整宽度"
-            />
+            >
+              {/* 拖拽提示线 */}
+              <div className="absolute left-0 top-0 w-0.5 h-full bg-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
             <RightPanel
               isVisible={true}
               onToggle={() => setRightPanelOpen(false)}

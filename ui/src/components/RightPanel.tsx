@@ -3,7 +3,7 @@
  */
 
 import React, { useMemo, useState, useEffect } from 'react'
-import { Download, ExternalLink, Image as ImageIcon, FileText, Table as TableIcon, ChevronDown, ChevronRight, CheckSquare, Square, BarChart3, Calendar, User, BookOpen } from 'lucide-react'
+import { Download, ExternalLink, Image as ImageIcon, FileText, Table as TableIcon, ChevronDown, ChevronRight, CheckSquare, Square, BarChart3, Calendar, User, BookOpen, Award, RefreshCw, AlertCircle } from 'lucide-react'
 import StructureViewerThreeJS from './StructureViewerThreeJS'
 import StructureList from './StructureList'
 import FullscreenViewer from './FullscreenViewer'
@@ -13,6 +13,7 @@ import { CrystalStructure, SessionFile } from '../types'
 import toast from 'react-hot-toast'
 import { resolveFileUrl } from '../utils/apiClient'
 import { downloadFile, copyToClipboard } from '../utils'
+import { getJournalInfo, JournalInfo } from '../services/easyScholarService'
 import { API_CONFIG } from '../constants'
 import { wsService } from '../services/websocket'
 
@@ -771,31 +772,8 @@ const PapersTab: React.FC = () => {
   const sessionId = currentPapersSessionId
 
   // 🔧 持久化选择状态到 localStorage
-  const STORAGE_KEY = `paper_selections_${sessionId}`
-
-  // 🔧 从 localStorage 恢复选择状态
-  useEffect(() => {
-    if (sessionId) {
-      const savedSelections = localStorage.getItem(STORAGE_KEY)
-      if (savedSelections) {
-        try {
-          const parsed = JSON.parse(savedSelections)
-          setSelectedIds(parsed)
-          console.log('📥 恢复文献选择状态:', parsed.length, '篇')
-        } catch (e) {
-          console.error('恢复选择状态失败:', e)
-        }
-      }
-    }
-  }, [sessionId])
-
-  // 🔧 保存选择状态到 localStorage
-  useEffect(() => {
-    if (sessionId && selectedIds.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedIds))
-      console.log('💾 保存文献选择状态:', selectedIds.length, '篇')
-    }
-  }, [selectedIds, sessionId])
+  // 🔧 移除自动恢复选择状态的功能
+  // 用户需要手动选择文献，系统不应该自动选中任何文献
 
   // 加载文献列表
   useEffect(() => {
@@ -839,16 +817,10 @@ const PapersTab: React.FC = () => {
         const newPapers = result.papers || []
         setPapers(newPapers)
 
-        // 🆕 保留选择状态：过滤掉不存在的 paper_id
-        const newPaperIds = new Set(newPapers.map((p: any) => p.paper_id))
-        const validSelectedIds = selectedIds.filter(id => newPaperIds.has(id))
-        if (validSelectedIds.length !== selectedIds.length) {
-          setSelectedIds(validSelectedIds)
-          console.log('📋 更新选择状态:', {
-            before: selectedIds.length,
-            after: validSelectedIds.length,
-            removed: selectedIds.length - validSelectedIds.length
-          })
+        // 🔧 清空选择状态（加载新文献时不保留选择）
+        if (selectedIds.length > 0) {
+          setSelectedIds([])
+          console.log('📋 清空选择状态（加载新文献）')
         }
 
         // 调试：检查第一篇文献是否有 url 和 topic 字段
@@ -1241,70 +1213,35 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
   const [expanded, setExpanded] = useState(false)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [detailedInfo, setDetailedInfo] = useState<any>(null)
+  const [loadingJournal, setLoadingJournal] = useState(false)
+  const [journalInfo, setJournalInfo] = useState<JournalInfo | null>(null)
+  const [journalInfoFetched, setJournalInfoFetched] = useState(false)  // 标记是否已尝试获取
 
-  // 获取详细信息（通过 MCP API）
+  // 获取详细信息（直接使用 paper 对象中的数据）
   const fetchDetails = async () => {
     if (detailedInfo) return
 
-    // 如果没有 paper_id 或 source，直接使用现有信息
-    if (!paper.paper_id && !paper.id) {
+    console.log('📖 加载文献详细信息:', {
+      paper_id: paper.paper_id || paper.id,
+      source: paper.source,
+      has_abstract: !!paper.abstract
+    })
+
+    // 直接使用 paper 对象中的数据，不调用 API
+    setLoadingDetails(true)
+    try {
       setDetailedInfo({
         fullAbstract: paper.abstract || '暂无摘要',
         authors: paper.authors || [],
-        published: paper.published || paper.publication_date || '未知'
+        published: paper.published || paper.publication_date || '未知',
+        categories: paper.categories || [],
+        doi: paper.doi,
+        citations: paper.citations
       })
-      return
-    }
-
-    setLoadingDetails(true)
-    try {
-      const paperId = paper.paper_id || paper.id
-      const source = paper.source || 'arxiv'
-
-      console.log('📖 获取文献详细信息:', { paperId, source })
-
-      // 调用 MCP API 获取详细信息
-      const response = await fetch(`${API_BASE_URL}/api/mcp/call_tool`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          server_name: 'paper_search',
-          tool_name: 'get_paper_info',
-          arguments: {
-            paper_id: paperId,
-            source: source
-          }
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-
-      const result = await response.json()
-      console.log('✅ 获取详细信息成功:', result)
-
-      if (result.status === 'success' || result.title) {
-        setDetailedInfo({
-          fullAbstract: result.abstract || paper.abstract || '暂无摘要',
-          authors: result.authors || paper.authors || [],
-          published: result.published || result.publication_date || paper.published || '未知',
-          categories: result.categories || paper.categories || [],
-          doi: result.doi || paper.doi,
-          citations: result.citations
-        })
-      } else {
-        // 如果 API 返回错误，使用现有信息
-        console.warn('⚠️ API 返回错误，使用现有信息:', result.error)
-        setDetailedInfo({
-          fullAbstract: paper.abstract || '暂无摘要',
-          authors: paper.authors || [],
-          published: paper.published || paper.publication_date || '未知'
-        })
-      }
+      console.log('✅ 文献详细信息加载成功')
     } catch (error: any) {
-      console.error('❌ 获取详细信息失败:', error)
-      // 失败时使用现有信息，不显示错误提示
+      console.error('❌ 加载文献详细信息失败:', error)
+      // 失败时也设置基本信息
       setDetailedInfo({
         fullAbstract: paper.abstract || '暂无摘要',
         authors: paper.authors || [],
@@ -1313,6 +1250,181 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
     } finally {
       setLoadingDetails(false)
     }
+  }
+
+  // 🆕 获取期刊信息（通过 EasyScholar API）
+  const fetchJournalInfo = async (silent = false) => {
+    if (journalInfo || loadingJournal || journalInfoFetched) return
+
+    // 🔍 调试：打印文献的所有字段
+    console.log('🔍 [调试] 文献数据完整字段:', {
+      paper_id: paper.paper_id,
+      title: paper.title,
+      journal_name: paper.journal_name,
+      source: paper.source,
+      url: paper.url,
+      doi: paper.doi,
+      all_fields: Object.keys(paper)
+    })
+
+    // 🆕 特殊来源处理：arXiv 预印本
+    if (paper.source === 'arxiv' || paper.url?.includes('arxiv.org')) {
+      console.log('📄 [期刊信息] 检测到 arXiv 预印本，跳过期刊信息获取')
+      setJournalInfoFetched(true)
+      return
+    }
+
+    // 🆕 特殊来源处理：Tavily 网页搜索（智能识别）
+    // 注意：Tavily 来源的期刊信息提取已经在 extractJournalNameFromURL() 中实现
+    // 这里不需要特殊处理，直接跳过到通用逻辑
+    if (paper.source === 'tavily' || paper.source === 'tavily_academic') {
+      console.log('🔍 [Tavily] 检测到 Tavily 来源，将使用通用期刊信息提取逻辑')
+    }
+
+    // 尝试从文献信息中提取期刊名称
+    let journalName = paper.journal_name
+    let extractionMethod = 'journal_name 字段'
+
+    console.log('🔍 [期刊信息] 初始期刊名称:', journalName, '来源:', paper.source)
+
+    // 如果没有期刊名称，尝试从其他字段提取
+    if (!journalName && paper.source) {
+      // 过滤掉数据源名称（不是期刊名称）
+      const dataSources = ['semantic_scholar', 'tavily_academic', 'tavily', 'arxiv', 'pubmed', 'google_scholar', 'cnki', 'upload']
+      const sourceLower = paper.source.toLowerCase()
+
+      // 只有当 source 不是数据源名称时，才使用它作为期刊名称
+      if (!dataSources.includes(sourceLower)) {
+        journalName = paper.source
+        extractionMethod = 'source 字段'
+        console.log('📚 [期刊信息] 从 source 字段提取期刊名称:', journalName)
+      } else {
+        console.log('⚠️ [期刊信息] source 字段是数据源名称，跳过:', paper.source)
+      }
+    }
+
+    // 如果还是没有，尝试从 URL 提取（改进版：支持 DOI 提取和 Semantic Scholar API）
+    if (!journalName && paper.url) {
+      console.log('🔍 [提取] 尝试从 URL 提取期刊名称:', paper.url)
+      console.log('🔍 [提取] 传递参数:', {
+        url: paper.url,
+        paper_id: paper.paper_id,
+        source: paper.source,
+        doi: paper.doi
+      })
+      setLoadingJournal(true)
+
+      try {
+        // 动态导入 extractJournalNameFromURL 函数
+        const { extractJournalNameFromURL } = await import('../services/easyScholarService')
+
+        // 传递额外参数：paper_id、source 和 doi
+        const extractedName = await extractJournalNameFromURL(
+          paper.url,
+          paper.paper_id,  // Semantic Scholar Paper ID
+          paper.source,    // 数据源
+          paper.doi        // DOI（如果有）
+        )
+
+        if (extractedName) {
+          journalName = extractedName
+          extractionMethod = 'URL 提取（通过 DOI/CrossRef/Semantic Scholar API）'
+          console.log('✅ [提取] 从 URL 提取期刊名称成功:', journalName)
+        } else {
+          console.warn('⚠️ [提取] extractJournalNameFromURL 返回空值')
+        }
+      } catch (error) {
+        console.error('❌ [提取] 从 URL 提取期刊名称失败:', error)
+      } finally {
+        setLoadingJournal(false)
+      }
+    }
+
+    if (!journalName) {
+      console.warn('⚠️ [期刊信息] 无法获取期刊名称，已尝试的字段:', {
+        journal_name: paper.journal_name,
+        source: paper.source,
+        url: paper.url
+      })
+
+      if (!silent) {
+        toast.error('无法获取期刊名称（缺少 journal_name、source 或可解析的 URL）')
+      }
+      setJournalInfoFetched(true)
+      return
+    }
+
+    console.log('📚 [期刊信息] 期刊名称:', journalName, '（来源:', extractionMethod, '）')
+
+    setLoadingJournal(true)
+    try {
+      console.log('📡 [API] 调用 EasyScholar API...')
+      console.log('📡 [API] 期刊名称:', journalName)
+      const info = await getJournalInfo(journalName)
+
+      console.log('📡 [API] getJournalInfo 返回值:', info)
+      console.log('📡 [API] 返回值类型:', typeof info)
+      console.log('📡 [API] 返回值详情:', JSON.stringify(info, null, 2))
+
+      if (info) {
+        console.log('✅ [API] 期刊信息获取成功:', info)
+        console.log('✅ [API] 设置 journalInfo 状态...')
+        setJournalInfo(info)
+        console.log('✅ [API] journalInfo 状态已设置')
+        if (!silent) {
+          toast.success(`期刊信息获取成功（${extractionMethod}）`)
+        }
+      } else {
+        console.warn('⚠️ [API] 未找到期刊信息，期刊名称:', journalName)
+        if (!silent) {
+          toast.error(`未找到期刊信息：${journalName}`)
+        }
+      }
+    } catch (error) {
+      console.error('❌ [API] 获取期刊信息失败:', error)
+      if (!silent) {
+        toast.error(`获取期刊信息失败: ${error instanceof Error ? error.message : '未知错误'}`)
+      }
+    } finally {
+      setLoadingJournal(false)
+      setJournalInfoFetched(true)
+      console.log('🏁 [API] 期刊信息获取流程结束')
+    }
+  }
+
+  // 🆕 组件加载时自动获取期刊信息（不需要等待展开）
+  useEffect(() => {
+    if (!journalInfoFetched && !journalInfo) {
+      fetchJournalInfo(true)  // 静默获取，不显示 toast
+    }
+  }, [])
+
+  // 🔍 监听 journalInfo 状态变化
+  useEffect(() => {
+    console.log('🔄 [状态] journalInfo 状态变化:', journalInfo)
+    console.log('🔄 [状态] journalInfo 详情:', JSON.stringify(journalInfo, null, 2))
+  }, [journalInfo])
+
+  // 🆕 检查 journalInfo 是否有任何有用的数据
+  const hasUsefulJournalInfo = (info: any): boolean => {
+    if (!info) return false
+
+    // 检查是否有任何核心指标
+    return !!(
+      info.impact_factor !== undefined ||
+      info.five_year_impact_factor !== undefined ||
+      info.jcr_quartile ||
+      info.cas_quartile ||
+      info.sci ||
+      info.ssci ||
+      info.ei ||
+      info.cscd ||
+      info.pku_core ||
+      info.nju_core ||
+      info.sci_tech_core ||
+      info.publisher ||
+      info.country
+    )
   }
 
   return (
@@ -1458,19 +1570,142 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
                     📊 被引 {detailedInfo.citations}
                   </span>
                 )}
+
+                {/* 🆕 期刊信息标签 - 紧凑视图显示核心信息（温和配色）*/}
+                {hasUsefulJournalInfo(journalInfo) && (
+                  <>
+                    {/* 影响因子 - 温和的蓝色 */}
+                    {journalInfo.impact_factor !== undefined && (
+                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded border border-blue-200">
+                        IF {journalInfo.impact_factor.toFixed(1)}
+                      </span>
+                    )}
+
+                    {/* SCI/SSCI 分区 - 温和的紫色 */}
+                    {journalInfo.jcr_quartile && (
+                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-semibold rounded border border-purple-200">
+                        {journalInfo.sci ? 'SCI' : journalInfo.ssci ? 'SSCI' : 'JCR'} {journalInfo.jcr_quartile}
+                      </span>
+                    )}
+
+                    {/* 中科院分区 - 温和的红色 */}
+                    {journalInfo.cas_quartile && (
+                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-rose-50 text-rose-700 text-[10px] font-semibold rounded border border-rose-200">
+                        中科院 {journalInfo.cas_quartile}
+                        {journalInfo.cas_small_category && ` ${journalInfo.cas_small_category}`}
+                      </span>
+                    )}
+
+                    {/* Top 期刊标识 - 温和的金色 */}
+                    {journalInfo.cas_top && (
+                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-semibold rounded border border-amber-200">
+                        <Award className="w-2.5 h-2.5" />
+                        TOP
+                      </span>
+                    )}
+                  </>
+                )}
+
+                {/* 🆕 特殊来源标识 */}
+                {(() => {
+                  // arXiv 预印本标识
+                  if (paper.source === 'arxiv' || paper.url?.includes('arxiv.org')) {
+                    return (
+                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-medium rounded">
+                        📄 预印本 (arXiv)
+                      </span>
+                    )
+                  }
+
+                  // Tavily 来源标识
+                  if (paper.source === 'tavily' || paper.source === 'tavily_academic') {
+                    // 如果有期刊信息，不显示来源标识（已经有期刊信息了）
+                    if (journalInfo) return null
+
+                    // 检查是否为学术出版商
+                    const getPublisherNameSync = (url: string): string | null => {
+                      const publishers: Record<string, string[]> = {
+                        'ScienceDirect': ['sciencedirect.com'],
+                        'Springer': ['springer.com'],
+                        'Wiley': ['wiley.com'],
+                        'IEEE': ['ieeexplore.ieee.org'],
+                        'Nature': ['nature.com/articles'],
+                        'ACM': ['dl.acm.org'],
+                      }
+
+                      const urlLower = url.toLowerCase()
+                      for (const [name, patterns] of Object.entries(publishers)) {
+                        if (patterns.some(p => urlLower.includes(p))) return name
+                      }
+                      return null
+                    }
+
+                    const publisher = paper.url ? getPublisherNameSync(paper.url) : null
+
+                    if (publisher) {
+                      return (
+                        <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-teal-100 text-teal-700 text-[10px] font-medium rounded">
+                          📚 学术来源 ({publisher})
+                        </span>
+                      )
+                    } else {
+                      return (
+                        <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] font-medium rounded">
+                          🌐 网页来源 (Tavily)
+                        </span>
+                      )
+                    }
+                  }
+
+                  return null
+                })()}
+
+                {/* 🆕 加载中提示 */}
+                {loadingJournal && !journalInfo && (
+                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-medium rounded">
+                    <div className="animate-spin rounded-full h-2 w-2 border border-gray-400 border-t-transparent"></div>
+                    获取期刊信息中...
+                  </span>
+                )}
+
+                {/* 🆕 期刊信息获取失败提示 + 重试按钮 */}
+                {!loadingJournal && !journalInfo && journalInfoFetched && (paper.journal_name || paper.source || paper.url) &&
+                 paper.source !== 'arxiv' && !paper.url?.includes('arxiv.org') && (
+                  <button
+                    onClick={() => {
+                      setJournalInfoFetched(false)
+                      fetchJournalInfo(false)
+                    }}
+                    className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-medium rounded hover:bg-orange-200 transition-colors"
+                    title="点击重试获取期刊信息"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" />
+                    重试获取期刊信息
+                  </button>
+                )}
+
+                {/* 🆕 无法获取期刊名称的提示 */}
+                {!loadingJournal && !journalInfo && journalInfoFetched && !paper.journal_name && !paper.source && !paper.url && (
+                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-medium rounded" title="文献数据中缺少期刊名称、来源或 URL 字段">
+                    <AlertCircle className="w-2.5 h-2.5" />
+                    无期刊信息
+                  </span>
+                )}
               </div>
 
-              {/* PDF 下载按钮 */}
-              {paper.pdf_url && (
-                <a
-                  href={paper.pdf_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[10px] text-blue-600 hover:text-blue-700 font-medium"
-                >
-                  下载PDF
-                </a>
-              )}
+              <div className="flex items-center gap-2">
+                {/* PDF 下载按钮 */}
+                {paper.pdf_url && (
+                  <a
+                    href={paper.pdf_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-blue-600 hover:text-blue-700 font-medium"
+                  >
+                    下载PDF
+                  </a>
+                )}
+              </div>
             </div>
 
             {/* 展开后的详细信息 */}
@@ -1511,6 +1746,147 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
                     >
                       {detailedInfo.doi}
                     </a>
+                  </div>
+                )}
+
+                {/* 🆕 期刊详细信息 - 默认展开显示完整信息 */}
+                {(hasUsefulJournalInfo(journalInfo) || loadingJournal) && (
+                  <div className="bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <Award className="w-4 h-4 text-indigo-600" />
+                      <span className="text-[12px] font-semibold text-indigo-900">期刊信息</span>
+                    </div>
+
+                    {loadingJournal ? (
+                      <div className="text-[11px] text-gray-500 text-center py-2">
+                        正在获取期刊信息...
+                      </div>
+                    ) : hasUsefulJournalInfo(journalInfo) ? (
+                      <>
+                        {/* 期刊名称 */}
+                        {journalInfo.journal_name && (
+                          <div className="text-[11px] pb-1 border-b border-indigo-100">
+                            <span className="font-medium text-gray-700">期刊名称: </span>
+                            <span className="text-gray-900 font-medium">{journalInfo.journal_name}</span>
+                          </div>
+                        )}
+
+                        {/* 🆕 核心指标卡片 - 温和配色 */}
+                        <div className="grid grid-cols-2 gap-2">
+                          {/* 影响因子 */}
+                          {journalInfo.impact_factor !== undefined && (
+                            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3 shadow-sm border border-blue-200">
+                              <div className="text-blue-600 text-[10px] mb-1 font-medium">影响因子 (IF)</div>
+                              <div className="text-blue-700 font-bold text-[18px]">{journalInfo.impact_factor.toFixed(2)}</div>
+                            </div>
+                          )}
+
+                          {/* 5年影响因子 */}
+                          {journalInfo.five_year_impact_factor !== undefined && (
+                            <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg p-3 shadow-sm border border-indigo-200">
+                              <div className="text-indigo-600 text-[10px] mb-1 font-medium">5年IF</div>
+                              <div className="text-indigo-700 font-bold text-[18px]">{journalInfo.five_year_impact_factor.toFixed(2)}</div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 🆕 分区信息 - 温和配色 */}
+                        <div className="grid grid-cols-2 gap-2">
+                          {/* JCR/SCI 分区 */}
+                          {journalInfo.jcr_quartile && (
+                            <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-3 shadow-sm border border-purple-200">
+                              <div className="text-purple-600 text-[10px] mb-1 font-medium">
+                                {journalInfo.sci ? 'SCI 分区' : journalInfo.ssci ? 'SSCI 分区' : 'JCR 分区'}
+                              </div>
+                              <div className="text-purple-700 font-bold text-[18px]">{journalInfo.jcr_quartile}</div>
+                              {journalInfo.jcr_category && (
+                                <div className="text-purple-600 text-[9px] mt-1 truncate" title={journalInfo.jcr_category}>
+                                  {journalInfo.jcr_category}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* 中科院分区 */}
+                          {journalInfo.cas_quartile && (
+                            <div className="bg-gradient-to-br from-rose-50 to-rose-100 rounded-lg p-3 shadow-sm border border-rose-200">
+                              <div className="text-rose-600 text-[10px] mb-1 font-medium flex items-center gap-1">
+                                <span>中科院分区</span>
+                                {journalInfo.cas_top && (
+                                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-bold rounded border border-amber-300">TOP</span>
+                                )}
+                              </div>
+                              <div className="text-rose-700 font-bold text-[18px]">{journalInfo.cas_quartile}</div>
+                              {journalInfo.cas_small_category && (
+                                <div className="text-rose-600 text-[9px] mt-1 truncate" title={journalInfo.cas_small_category}>
+                                  {journalInfo.cas_small_category}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 🆕 收录索引 - 温和标签 */}
+                        {(journalInfo.sci || journalInfo.ei || journalInfo.ssci || journalInfo.cscd ||
+                          journalInfo.pku_core || journalInfo.nju_core || journalInfo.sci_tech_core) && (
+                          <div className="pt-2 border-t border-indigo-100">
+                            <div className="text-[10px] text-gray-600 mb-1.5 font-medium">📚 收录索引</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {journalInfo.sci && (
+                                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded border border-blue-200">SCI</span>
+                              )}
+                              {journalInfo.ei && (
+                                <span className="px-2 py-0.5 bg-green-50 text-green-700 text-[10px] font-semibold rounded border border-green-200">EI</span>
+                              )}
+                              {journalInfo.ssci && (
+                                <span className="px-2 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-semibold rounded border border-purple-200">SSCI</span>
+                              )}
+                              {journalInfo.cscd && (
+                                <span className="px-2 py-0.5 bg-orange-50 text-orange-700 text-[10px] font-semibold rounded border border-orange-200">CSCD</span>
+                              )}
+                              {journalInfo.pku_core && (
+                                <span className="px-2 py-0.5 bg-pink-50 text-pink-700 text-[10px] font-semibold rounded border border-pink-200">北大核心</span>
+                              )}
+                              {journalInfo.nju_core && (
+                                <span className="px-2 py-0.5 bg-rose-50 text-rose-700 text-[10px] font-semibold rounded border border-rose-200">南大核心</span>
+                              )}
+                              {journalInfo.sci_tech_core && (
+                                <span className="px-2 py-0.5 bg-cyan-50 text-cyan-700 text-[10px] font-semibold rounded border border-cyan-200">科技核心</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 其他信息 */}
+                        {(journalInfo.issn || journalInfo.publisher || journalInfo.country) && (
+                          <div className="pt-1 border-t border-indigo-100 text-[10px] text-gray-600 space-y-0.5">
+                            {journalInfo.issn && (
+                              <div>
+                                <span className="font-medium">ISSN: </span>
+                                <span>{journalInfo.issn}</span>
+                                {journalInfo.eissn && <span className="ml-2">E-ISSN: {journalInfo.eissn}</span>}
+                              </div>
+                            )}
+                            {journalInfo.publisher && (
+                              <div>
+                                <span className="font-medium">出版商: </span>
+                                <span>{journalInfo.publisher}</span>
+                              </div>
+                            )}
+                            {journalInfo.country && (
+                              <div>
+                                <span className="font-medium">国家: </span>
+                                <span>{journalInfo.country}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : journalInfoFetched ? (
+                      <div className="text-[11px] text-gray-400 text-center py-2">
+                        暂无期刊信息
+                      </div>
+                    ) : null}
                   </div>
                 )}
 

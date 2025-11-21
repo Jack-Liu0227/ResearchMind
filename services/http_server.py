@@ -97,6 +97,9 @@ class HTTPServer:
         # Setup billing and auth routes
         self._setup_billing_routes()
 
+        # Setup journal API routes
+        self._setup_journal_routes()
+
         # Setup static files
         StaticFileService.setup_static_files(self.app)
     
@@ -621,6 +624,15 @@ class HTTPServer:
             logger.info("✅ User authentication API registered")
         except Exception as e:
             logger.warning(f"⚠️ Failed to register auth API: {e}")
+
+    def _setup_journal_routes(self):
+        """Setup journal API routes"""
+        try:
+            from services.journal_api import router as journal_router
+            self.app.include_router(journal_router)
+            logger.info("✅ Journal API routes registered")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to register journal API routes: {e}")
 
     def _setup_upload_endpoints(self):
         """Setup file upload endpoints"""

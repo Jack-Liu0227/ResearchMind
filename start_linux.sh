@@ -421,7 +421,7 @@ start_mcp_service() {
 
     # 在 Git Bash/Windows 环境下，使用 --no-project 避免虚拟环境路径问题
     # 或者清除 VIRTUAL_ENV 变量让 uv 自动检测
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
         log_info "检测到 Windows/Git Bash 环境，使用兼容模式启动..."
         unset VIRTUAL_ENV
         nohup uv run --no-project python "$script_path" > "../logs/${log_name}" 2>&1 &
@@ -449,8 +449,8 @@ start_mcp_service() {
         exit 1
     fi
 
-    # 健康检查（在 Windows 环境下跳过 HTTP 检查，只检查进程和端口）
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+    # MCP 服务：使用端口监听状态作为健康检查，避免 SSE /sse 接口导致 curl 失败
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
         log_warning "Windows 环境下跳过 HTTP 健康检查，仅验证进程和端口..."
         sleep 5
         if is_port_in_use "$port"; then
@@ -459,14 +459,21 @@ start_mcp_service() {
             log_warning "${service_name} 端口 $port 未监听，但进程仍在运行"
         fi
     else
-        if ! wait_for_service_health "$service_name" "$host" "$port" "/sse"; then
-            log_error "${service_name} 健康检查失败"
-            log_error "查看日志: logs/${log_name}"
-            tail -n 20 "logs/${log_name}" | while read line; do
-                log_error "  $line"
-            done
-            exit 1
-        fi
+        log_info "检查 ${service_name} 端口 ${port} 是否监听..."
+        local elapsed=0
+        while ! is_port_in_use "$port"; do
+            if [ $elapsed -ge $HEALTH_CHECK_TIMEOUT ]; then
+                log_error "${service_name} 端口 $port 在 ${HEALTH_CHECK_TIMEOUT} 秒内未开始监听"
+                log_error "查看日志: logs/${log_name}"
+                tail -n 20 "logs/${log_name}" | while read line; do
+                    log_error "  $line"
+                done
+                exit 1
+            fi
+            sleep $HEALTH_CHECK_INTERVAL
+            elapsed=$((elapsed + HEALTH_CHECK_INTERVAL))
+        done
+        log_success "${service_name} 端口 $port 已监听"
     fi
 
     log_success "${service_name} 已启动 (PID ${pid})"
@@ -494,7 +501,7 @@ start_backend() {
     fi
 
     # 在 Git Bash/Windows 环境下使用兼容模式
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
         log_info "检测到 Windows/Git Bash 环境，使用兼容模式启动..."
         unset VIRTUAL_ENV
         nohup uv run --no-project python main.py > logs/backend.log 2>&1 &
@@ -522,7 +529,7 @@ start_backend() {
     fi
 
     # 健康检查（Windows 环境下跳过）
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
         log_warning "Windows 环境下跳过 HTTP 健康检查"
         sleep 3
     else
@@ -584,7 +591,7 @@ start_frontend() {
     fi
 
     # 健康检查（Windows 环境下跳过）
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "$MSYSTEM" ]]; then
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
         log_warning "Windows 环境下跳过 HTTP 健康检查"
         sleep 3
     else
@@ -699,9 +706,9 @@ prompt_log_view() {
 
     # 使用 tail -f 同时监控两个文件，并用 sed 添加颜色标记
     # 保存 tail 进程的 PID 以便在 cleanup 时终止
-    tail -f logs/backend.log | sed "s/^/$(echo -e '\033[0;32m')[后端] /" &
+    tail -f logs/backend.log | sed "s/^/$(echo -e '\033[0;32m')[后端] /" &  
     TAIL_PIDS+=($!)
-    tail -f logs/frontend.log | sed "s/^/$(echo -e '\033[0;34m')[前端] /" &
+    tail -f logs/frontend.log | sed "s/^/$(echo -e '\033[0;34m')[前端] /" &  
     TAIL_PIDS+=($!)
 }
 
@@ -761,4 +768,3 @@ prompt_log_view
 # 等待任何进程退出（包括 tail 进程）
 # 这允许 Ctrl+C 触发清理陷阱
 wait
-

@@ -26,6 +26,19 @@ export interface Paper {
   full_text?: string
   local_file?: string
   topic?: string  // 🆕 主题标识（用于区分不同检索主题的文献）
+
+  // 🆕 期刊信息（来自 EasyScholar API）
+  journal_name?: string
+  journal_info?: {
+    impact_factor?: number
+    five_year_impact_factor?: number
+    jcr_quartile?: string  // Q1, Q2, Q3, Q4
+    cas_quartile?: string  // 1区, 2区, 3区, 4区
+    cas_top?: boolean
+    ei?: boolean
+    sci?: boolean
+    ssci?: boolean
+  }
 }
 
 // Tool Call 类型定义
