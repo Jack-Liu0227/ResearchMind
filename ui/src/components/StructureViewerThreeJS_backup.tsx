@@ -95,7 +95,7 @@ const atomColor: Record<string, string> = {
   dy: '#1FFFC7',  // 66 镝 - 浅绿色
   ho: '#00FF9C',  // 67 钬 - 绿色
   er: '#00E675',  // 68 铒 - 绿色
-  tm: '#00D452',  // 69 铊 - 绿色
+  tm: '#00D452',  // 69 铥 - 绿色
   yb: '#00BF38',  // 70 镱 - 绿色
   lu: '#00AB24',  // 71 镥 - 绿色
   hf: '#4DC2FF',  // 72 铪 - 浅蓝色
@@ -132,24 +132,14 @@ const atomColor: Record<string, string> = {
   md: '#B30DA6',  // 101 钔 - 紫色
   no: '#BD0D87',  // 102 锘 - 紫红色
   lr: '#C70066',  // 103 铹 - 红紫色
-  rf: '#CC0059',  // 104 铹 - 红色
-  db: '#D1004F',  // 105 铌 - 红色
-  sg: '#D90045',  // 106 铹 - 红色
-  bh: '#E00038',  // 107 铼 - 红色
-  hs: '#E6002E',  // 108 铼 - 红色
-  mt: '#EB0026',  // 109 铼 - 红色
-  ds: '#FF0000',  // 110 铼 - 红色
-  rg: '#FF1A1A',  // 111 铼 - 红色
-  cn: '#FF3333',  // 112 铼 - 红色
-  nh: '#FF4D4D',  // 113 铼 - 红色
-  fl: '#FF6666',  // 114 铼 - 红色
-  mc: '#FF8080',  // 115 铼 - 红色
-  lv: '#FF9999',  // 116 铼 - 红色
-  ts: '#FFB3B3',  // 117 铼 - 红色
-  og: '#FFCCCC',  // 118 铼 - 红色
-
-  // 默认颜色
-  default: '#FF1493'  // 深粉色 - 用于未定义的元素
+  rf: '#CC0059',  // 104  - 红色
+  db: '#D1004F',  // 105  - 红色
+  sg: '#D90045',  // 106  - 红色
+  bh: '#E00038',  // 107  - 红色
+  hs: '#E6002E',  // 108 is - 红色
+  mt: '#EB0026',  // 109 鿏 - 红色
+  ds: '#FF0000',  // 110  - 红色
+  rg: '#FF1A1A',  // 111 
 };
 
 // 元素符号到原子序数的映射
@@ -265,56 +255,6 @@ const elementAtomicNumbers: Record<string, number> = {
   mt: 109,
   ds: 110,
   rg: 111,
-  cn: 112,
-  nh: 113,
-  fl: 114,
-  mc: 115,
-  lv: 116,
-  ts: 117,
-  og: 118
-};
-
-// 计算结构边界
-const calculateBounds = (atoms: any[]) => {
-  if (atoms.length === 0) return { min: [0, 0, 0], max: [0, 0, 0], size: 0 };
-  
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  
-  atoms.forEach(atom => {
-    const [x, y, z] = atom.position;
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    minZ = Math.min(minZ, z);
-    maxX = Math.max(maxX, x);
-    maxY = Math.max(maxY, y);
-    maxZ = Math.max(maxZ, z);
-  });
-  
-  const size = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
-  return { min: [minX, minY, minZ], max: [maxX, maxY, maxZ], size };
-};
-
-// 创建圆柱体
-const createCylinder = (point1: THREE.Vector3, point2: THREE.Vector3, color: string) => {
-  const direction = new THREE.Vector3().subVectors(point2, point1);
-  const length = direction.length();
-  const orientation = new THREE.Matrix4();
-  orientation.lookAt(point1, point2, new THREE.Object3D().up);
-  orientation.multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-  
-  const geometry = new THREE.CylinderGeometry(0.1, 0.1, length, 8, 1);
-  const material = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(color),
-    roughness: 0.3,
-    metalness: 0.1
-  });
-  
-  const cylinder = new THREE.Mesh(geometry, material);
-  cylinder.applyMatrix4(orientation);
-  cylinder.position.copy(point1.clone().add(direction.multiplyScalar(0.5)));
-  
-  return cylinder;
 };
 
 const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
@@ -326,7 +266,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     if (!Array.isArray(atoms)) return [];
     
     return atoms.filter(atom => {
-      const elementSymbol = atom.element.toLowerCase();
+      const elementSymbol = atom.element;
       const atomicNumber = elementAtomicNumbers[elementSymbol] || 0;
       return atomicNumber <= 50; // 只显示原子序数小于等于50的元素
     });
@@ -335,6 +275,8 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
   // 过滤后的结构
   const filteredAtoms = filterAtomsByAtomicNumber(structure.atoms);
   const isTooLarge = filteredAtoms.length === 0 && structure.atoms.length > 0;
+
+  // StructureViewerThreeJS 组件初始化
 
   // 晶胞类型切换
   useEffect(() => {
@@ -425,22 +367,20 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     }
   }, [structure, cellType]);
 
+  // 分数坐标转笛卡尔坐标 (使用 cifParser 中的函数) - 备用函数
+
   // 初始化场景
   useEffect(() => {
-    // 创建场景、相机和渲染器
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer();
     renderer.setSize(window.innerWidth, window.innerHeight);
-    // 注意：这里应该将renderer.domElement添加到组件的DOM元素中，而不是document.body
-    
+    document.body.appendChild(renderer.domElement);
+
     // 添加光源
-    const ambientLight = new THREE.AmbientLight(0x404040, 1);
-    scene.add(ambientLight);
-    
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(1, 1, 1).normalize();
-    scene.add(directionalLight);
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(1, 1, 1).normalize();
+    scene.add(light);
 
     // 添加轨道控制器
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -449,12 +389,14 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     controls.enableZoom = true;
 
     // 设置相机位置
-    camera.position.z = 10;
+    camera.position.z = 5;
 
     // 渲染循环
     const animate = function () {
       requestAnimationFrame(animate);
+
       controls.update();
+
       renderer.render(scene, camera);
     };
 
@@ -462,16 +404,15 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
     // 清理函数
     return () => {
-      // 正确的清理方式应该是移除renderer.domElement从其父元素
-      // 这里需要根据实际的DOM结构进行调整
+      document.body.removeChild(renderer.domElement);
     };
   }, []);
 
-  // 绘制原子
+  // 绘制原子 (原子位置已经是笛卡尔坐标)
   const drawAtom = (atoms: typeof structure.atoms) => {
     // 过滤原子序数大于50的原子
     const filteredAtoms = filterAtomsByAtomicNumber(atoms);
-    const list = Array.isArray(filteredAtoms) ? filteredAtoms : [];
+    const list = Array.isArray(filteredAtoms) ? filteredAtoms : []
     const atomGroup = new THREE.Group();
     atomGroup.name = 'atoms';
     
@@ -516,16 +457,16 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     return atomGroup;
   };
 
-  // 绘制化学键
+  // 绘制化学键 (原子位置已经是笛卡尔坐标)
   const drawBand = (atoms: typeof structure.atoms) => {
     // 过滤原子序数大于50的原子
     const filteredAtoms = filterAtomsByAtomicNumber(atoms);
-    const list = Array.isArray(filteredAtoms) ? filteredAtoms : [];
+    const list = Array.isArray(filteredAtoms) ? filteredAtoms : []
     const bandGroup = new THREE.Group();
     bandGroup.name = 'bands';
 
     // 简单的键检测: 距离小于某个阈值的原子之间绘制键
-    const bondThreshold = 2.0; // Å
+    const bondThreshold = 3.0; // Å
 
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {

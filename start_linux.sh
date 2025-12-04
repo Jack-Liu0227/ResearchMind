@@ -26,9 +26,9 @@ NC='\033[0m'
 # 重启配置
 MAX_RESTART_ATTEMPTS=3          # 最大重启尝试次数
 RESTART_DELAY_BASE=5            # 基础重启延迟（秒）
-HEALTH_CHECK_TIMEOUT=30         # 健康检查超时（秒）
+HEALTH_CHECK_TIMEOUT=60         # 健康检查超时（秒）- 增加到 60 秒以支持较慢的服务启动
 HEALTH_CHECK_INTERVAL=2         # 健康检查间隔（秒）
-PORT_WAIT_TIMEOUT=30            # 端口释放等待超时（秒）
+PORT_WAIT_TIMEOUT=60            # 端口释放等待超时（秒）- 同步增加到 60 秒
 PORT_CHECK_INTERVAL=1           # 端口检查间隔（秒）
 
 # 日志文件

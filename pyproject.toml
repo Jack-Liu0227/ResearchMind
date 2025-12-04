@@ -32,7 +32,7 @@ dependencies = [
     "google-auth-oauthlib>=1.1.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
-    "fastmcp>=0.1.0",
+    "fastmcp>=2.13.3",
     # HTTP requests and APIs
     "httpx[socks]>=0.25.0",
     "requests>=2.32.3",
@@ -56,8 +56,8 @@ dependencies = [
     "alembic>=1.12.0",
     "redis>=5.0.0",
     # Authentication and security
-    "python-jose[cryptography]>=3.3.0",  # JWT Token
-    "passlib[bcrypt]>=1.7.4",  # Password hashing
+    "python-jose[cryptography]>=3.3.0", # JWT Token
+    "passlib[bcrypt]>=1.7.4", # Password hashing
     # Utilities
     "python-dotenv>=1.0.0",
     "pydantic>=2.4.0",
@@ -88,6 +88,9 @@ dependencies = [
     "beautifulsoup4>=4.14.2",
     "tavily-python>=0.7.12",
     "mattersim>=1.2.0",
+    "authlib>=1.6.4",
+    "joserfc>=1.5.0",
+    "tornado>=6.5.2",
 ]
 
 requires-python = ">=3.10"
