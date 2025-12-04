@@ -10,11 +10,22 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, D
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 import os
+import sys
 from pathlib import Path
 
-# 数据库文件路径
-DB_DIR = Path(__file__).parent.parent.parent / "data"
-DB_DIR.mkdir(exist_ok=True)
+# 🔧 使用统一的路径管理模块
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+utils_path = _PROJECT_ROOT / "utils"
+if str(utils_path) not in sys.path:
+    sys.path.insert(0, str(utils_path))
+
+from utils.paths import session_data_root
+
+# 数据库文件路径 - 使用 SESSION_DATA_ROOT 的父目录
+# 例如：SESSION_DATA_ROOT = D:\XJTU\Research\PHD\Agent\ST\data\session_data
+#      DB_DIR = D:\XJTU\Research\PHD\Agent\ST\data
+DB_DIR = session_data_root().parent
+DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DB_DIR / "researchmind.db"
 
 # 创建数据库引擎

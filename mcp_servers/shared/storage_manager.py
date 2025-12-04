@@ -10,6 +10,7 @@
 
 import os
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -17,12 +18,19 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# 项目根目录
-_MODULE_DIR = Path(__file__).parent.parent.parent  # ResearchMind根目录
-SESSION_DATA_DIR = _MODULE_DIR / "session_data"
+# 🔧 使用统一的路径管理模块
+_PROJECT_ROOT = Path(__file__).parent.parent.parent  # ResearchMind根目录
+utils_path = _PROJECT_ROOT / "utils"
+if str(utils_path) not in sys.path:
+    sys.path.insert(0, str(utils_path))
+
+from utils.paths import session_data_root, ensure_dirs
+
+# 项目根目录（session_data位于 ../data/session_data）
+SESSION_DATA_DIR = session_data_root()
 
 # 确保根目录存在
-SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
+ensure_dirs(SESSION_DATA_DIR)
 
 
 def get_session_storage_path(

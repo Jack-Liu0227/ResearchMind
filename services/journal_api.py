@@ -37,12 +37,19 @@ async def wait_for_rate_limit():
 # 创建路由
 router = APIRouter(prefix="/api/journal", tags=["journal"])
 
+# 导入API密钥轮询器
+import sys
+from pathlib import Path
+shared_path = Path(__file__).parent.parent / "mcp_servers" / "shared"
+if str(shared_path) not in sys.path:
+    sys.path.insert(0, str(shared_path))
+from api_key_rotator import get_semantic_scholar_key
+
 # API 配置
 EASYSCHOLAR_API_BASE = "https://easyscholar.cc/open/getPublicationRank"
 EASYSCHOLAR_API_KEY = os.getenv("EASYSCHOLAR_API_KEY", "20bdbb8588cd469d9af25d1cd6ae7640")
 
 SEMANTIC_SCHOLAR_API_BASE = "https://api.semanticscholar.org/graph/v1"
-SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
 
 
 class JournalInfoResponse(BaseModel):
@@ -146,8 +153,10 @@ async def get_doi_from_semantic_scholar(paper_id: str = Query(..., description="
         url = f"{SEMANTIC_SCHOLAR_API_BASE}/paper/{clean_paper_id}?fields=externalIds"
 
         headers = {}
-        if SEMANTIC_SCHOLAR_API_KEY:
-            headers["x-api-key"] = SEMANTIC_SCHOLAR_API_KEY
+        # 使用轮询器获取API密钥
+        api_key = get_semantic_scholar_key()
+        if api_key:
+            headers["x-api-key"] = api_key
             logger.info("🔑 [Journal API] 使用 API Key 认证")
 
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -202,8 +211,10 @@ async def get_paper_info_from_semantic_scholar(paper_id: str = Query(..., descri
         url = f"{SEMANTIC_SCHOLAR_API_BASE}/paper/{clean_paper_id}?fields=externalIds,venue,journal"
 
         headers = {}
-        if SEMANTIC_SCHOLAR_API_KEY:
-            headers["x-api-key"] = SEMANTIC_SCHOLAR_API_KEY
+        # 使用轮询器获取API密钥
+        api_key = get_semantic_scholar_key()
+        if api_key:
+            headers["x-api-key"] = api_key
             logger.info("🔑 [Journal API] 使用 API Key 认证")
 
         async with httpx.AsyncClient(timeout=10.0) as client:

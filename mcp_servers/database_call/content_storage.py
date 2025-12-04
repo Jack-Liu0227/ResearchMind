@@ -9,6 +9,7 @@
 
 import os
 import json
+import sys
 from pathlib import Path
 from typing import Dict, Any, List
 from datetime import datetime
@@ -16,15 +17,21 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# 数据存储目录 - 使用统一的 session_data 目录
+# 🔧 使用统一的路径管理模块
 _MODULE_DIR = Path(__file__).parent.parent.parent  # ResearchMind根目录
-SESSION_DATA_DIR = _MODULE_DIR / "session_data"
+utils_path = _MODULE_DIR / "utils"
+if str(utils_path) not in sys.path:
+    sys.path.insert(0, str(utils_path))
+
+from utils.paths import session_data_root, ensure_dirs
+
+# 数据存储目录 - 使用统一的 session_data 目录（位于 ../data/session_data）
+SESSION_DATA_DIR = session_data_root()
 STRUCTURES_DIR = SESSION_DATA_DIR / "structures"
 METADATA_DIR = SESSION_DATA_DIR / "metadata"
 
 # 确保目录存在
-STRUCTURES_DIR.mkdir(parents=True, exist_ok=True)
-METADATA_DIR.mkdir(parents=True, exist_ok=True)
+ensure_dirs(STRUCTURES_DIR, METADATA_DIR)
 
 
 def save_structure_to_file(

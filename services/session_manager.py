@@ -26,8 +26,17 @@ logger = logging.getLogger(__name__)
 class SessionManager:
     """Manage chat sessions and data isolation"""
 
-    # Base directories
-    BASE_DATA_DIR = Path("session_data")
+    # 🔧 使用统一的路径管理模块
+    import sys
+    from pathlib import Path as PathLib
+    _utils_path = PathLib(__file__).parent.parent / "utils"
+    if str(_utils_path) not in sys.path:
+        sys.path.insert(0, str(_utils_path))
+
+    from utils.paths import session_data_root
+
+    # Base directories（位于 ../data/session_data）
+    BASE_DATA_DIR = session_data_root()
     STRUCTURES_DIR = BASE_DATA_DIR / "structures"
     IMAGES_DIR = BASE_DATA_DIR / "images"
     METADATA_DIR = BASE_DATA_DIR / "metadata"

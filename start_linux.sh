@@ -9,6 +9,18 @@
 # 使用方法:
 #   bash start_linux.sh
 #
+# Docker 挂载方式（可选）:
+#   如果在 Docker 容器中运行，可以通过环境变量和卷挂载来持久化数据：
+#
+#   docker run -d \
+#     -e SESSION_DATA_ROOT=/mnt/data/session_data \
+#     -v /host/path/to/data:/mnt/data/session_data \
+#     -p 8000:8000 \
+#     researchmind:latest
+#
+#   这样可以将宿主机的 /host/path/to/data 目录挂载到容器内的 /mnt/data/session_data
+#   所有会话数据、论文、仿真结果都会保存在宿主机目录中
+#
 # 注意: Nginx 需要使用 setup_nginx.sh 单独配置
 # =============================================================================
 
@@ -150,7 +162,17 @@ load_config() {
     )
     set +a
 
+    # 🔧 路径管理环境变量说明（支持 Docker 挂载）
+    # 注意：不在这里设置默认值，避免覆盖 .env 文件中的配置
+    # 默认值由 Python 代码（utils/paths.py）处理
+    #
+    # Docker 部署时可以通过环境变量覆盖：
+    # 例如：docker run -e SESSION_DATA_ROOT=/mnt/data/session_data ...
+    #
+    # 如果 .env 文件中未配置，Python 会使用默认值：data/session_data
+
     log_success "已从 $ENV_FILE 加载配置"
+    log_config "SESSION_DATA_ROOT: ${SESSION_DATA_ROOT:-(未设置，将使用 Python 默认值)}"
 }
 
 # ------------------------------ 启动前检查 ---------------------------
@@ -190,7 +212,14 @@ prepare_workspace() {
     : > .service_pids
     : > "$STARTUP_LOG"
     : > "$RESTART_LOG"
+
+    # 🔧 数据目录由 Python 代码创建（utils/paths.py 会正确处理相对路径）
+    # 不在 shell 脚本中创建，避免 Windows 环境下相对路径解析错误
+    # 各个服务启动时会自动调用 ensure_dirs() 创建必要的目录
+
     log_info "工作空间已准备就绪"
+    log_info "数据目录配置: ${SESSION_DATA_ROOT:-data/session_data}"
+    log_info "（数据目录将由 Python 服务自动创建）"
 }
 
 # ----------------------------- 端口管理工具 -----------------------------

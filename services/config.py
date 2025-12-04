@@ -67,12 +67,22 @@ class ServerConfig:
 
     # Static Files
     STATIC_FILES_ROOT = os.path.abspath(os.path.dirname(__file__) + "/..")
-    # 🔧 使用统一的 session_data 目录
-    SESSION_DATA_DIR = os.path.join(STATIC_FILES_ROOT, "session_data")
+
+    # 🔧 使用统一的路径管理模块（utils/paths.py）
+    # 所有路径现在通过环境变量配置，支持 Docker 挂载
+    import sys
+    from pathlib import Path as PathLib
+    utils_path = PathLib(__file__).parent.parent / "utils"
+    if str(utils_path) not in sys.path:
+        sys.path.insert(0, str(utils_path))
+
+    from utils.paths import session_data_root, phonon_root
+
+    SESSION_DATA_DIR = str(session_data_root())
+    PHONON_RESULTS_DIR = str(phonon_root())
+    GENERATED_STRUCTURES_DIR = str(phonon_root())
+
     # 保留旧路径用于向后兼容（已废弃，将在未来版本移除）
-    PHONON_RESULTS_DIR = os.path.join(STATIC_FILES_ROOT, "mcp_servers", "simulation", "phonon_results")
-    # 🔧 更新：generated structures 现在使用 session_data/simulation/*/generated
-    GENERATED_STRUCTURES_DIR = os.path.join(SESSION_DATA_DIR, "simulation")
     # Note: 所有新数据应使用 session_data/ 目录结构
 
     # Logging

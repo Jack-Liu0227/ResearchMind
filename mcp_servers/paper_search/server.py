@@ -21,6 +21,7 @@ if env_path.exists():
     print(f"   OPENAI_API_KEY: {'[OK] Set' if os.getenv('OPENAI_API_KEY') else '[WARN] Not set'}")
     print(f"   OPENAI_BASE_URL: {os.getenv('OPENAI_BASE_URL', 'Not set')}")
     print(f"   MODEL_USE: {os.getenv('MODEL_USE', 'Not set')}")
+    print(f"   SESSION_DATA_ROOT: {os.getenv('SESSION_DATA_ROOT', 'Not set')}")
 else:
     print(f"[WARN] Environment file not found: {env_path}")
 

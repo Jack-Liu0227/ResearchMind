@@ -69,16 +69,23 @@ class StaticFileService:
         # FastAPI matches routes in the order they are mounted
         # More specific paths must be mounted first to avoid being shadowed
 
+        # 🔧 使用统一的路径管理模块
+        import sys
+        from pathlib import Path as PathLib
+        utils_path = PathLib(__file__).parent.parent / "utils"
+        if str(utils_path) not in sys.path:
+            sys.path.insert(0, str(utils_path))
+
+        from utils.paths import session_data_root, phonon_root, ensure_dirs
+
         # Papers download directory - mount first (most specific)
-        # 🔧 使用统一的 session_data 目录
         # 这是论文搜索结果的 CSV 和 MD 文件存储位置
         # 注意：挂载点是 /api/download，目录是 session_data
         # 这样 /api/download/papers/{session_id}/file.csv 会映射到 session_data/papers/{session_id}/file.csv
-        paper_search_dir = os.path.abspath(server_config.SESSION_DATA_DIR)
+        paper_search_dir = str(session_data_root())
         # 🔧 确保目录存在，如果不存在则创建
-        if not os.path.exists(paper_search_dir):
-            os.makedirs(paper_search_dir, exist_ok=True)
-            logger.info(f"📁 Created session data directory: {paper_search_dir}")
+        ensure_dirs(paper_search_dir)
+        logger.info(f"📁 Session data directory: {paper_search_dir}")
 
         app.mount(
             "/api/download",
@@ -98,11 +105,10 @@ class StaticFileService:
         # Phonon results directory - mount second (specific)
         # 声子谱图片和 CSV 文件 - 使用 session_data/simulation/*/phonon_results
         # 注意：/api/images/phonon/{session_id}/file.csv 会映射到 session_data/simulation/{session_id}/phonon_results/file.csv
-        phonon_dir = os.path.abspath(os.path.join(server_config.SESSION_DATA_DIR, "simulation"))
+        phonon_dir = str(phonon_root())
         # 🔧 确保目录存在，如果不存在则创建
-        if not os.path.exists(phonon_dir):
-            os.makedirs(phonon_dir, exist_ok=True)
-            logger.info(f"📁 Created simulation directory: {phonon_dir}")
+        ensure_dirs(phonon_dir)
+        logger.info(f"📁 Simulation directory: {phonon_dir}")
 
         app.mount(
             "/api/images/phonon",
@@ -114,11 +120,9 @@ class StaticFileService:
         # 🆕 Thermal conductivity results directory - mount for CSV files
         # 使用 session_data/simulation/*/thermal_conductivity
         # 注意：/api/files/thermal_conductivity/{session_id}/file.csv 会映射到 session_data/simulation/{session_id}/thermal_conductivity/file.csv
-        thermal_conductivity_dir = os.path.abspath(os.path.join(server_config.SESSION_DATA_DIR, "simulation"))
-        # 🔧 确保目录存在，如果不存在则创建
-        if not os.path.exists(thermal_conductivity_dir):
-            os.makedirs(thermal_conductivity_dir, exist_ok=True)
-            logger.info(f"📁 Created simulation directory: {thermal_conductivity_dir}")
+        thermal_conductivity_dir = str(phonon_root())  # 与 phonon_dir 相同
+        # 🔧 确保目录存在（已在上面创建）
+        logger.info(f"📁 Simulation directory: {thermal_conductivity_dir}")
 
         app.mount(
             "/api/files/thermal_conductivity",

@@ -7,6 +7,7 @@ Session Folder Manager (会话文件夹管理器)
 import os
 import json
 import uuid
+import sys
 from datetime import datetime
 from typing import Dict, Optional
 from pathlib import Path
@@ -14,19 +15,22 @@ import structlog
 
 logger = structlog.get_logger()
 
-# 会话文件夹映射文件
-# 🔧 使用统一的 session_data 目录
-# Note: Use absolute paths based on this module's location to ensure consistency
-# regardless of where the server is started from
+# 🔧 使用统一的路径管理模块
 _MODULE_DIR = Path(__file__).parent.parent.parent  # mcp_servers/paper_search/
 _ROOT_DIR = _MODULE_DIR.parent.parent  # ResearchMind根目录
-SESSION_DATA_DIR = _ROOT_DIR / "session_data"
+utils_path = _ROOT_DIR / "utils"
+if str(utils_path) not in sys.path:
+    sys.path.insert(0, str(utils_path))
+
+from utils.paths import session_data_root, papers_root, ensure_dirs
+
+# 会话文件夹映射文件
+SESSION_DATA_DIR = session_data_root()
 SESSION_MAPPING_FILE = str(SESSION_DATA_DIR / "paper_sessions.json")
-PAPER_DIR = str(SESSION_DATA_DIR / "papers")
+PAPER_DIR = str(papers_root())
 
 # 确保目录存在
-SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
-Path(PAPER_DIR).mkdir(parents=True, exist_ok=True)
+ensure_dirs(SESSION_DATA_DIR, PAPER_DIR)
 
 
 class SessionFolderManager:

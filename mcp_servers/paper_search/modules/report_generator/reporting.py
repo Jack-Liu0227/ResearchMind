@@ -2,12 +2,13 @@
 Reporting Module (报告模块)
 
 功能：
-1. 报告生成 - 生成 IEEE 标准格式的研究报告
+1. 报告生成 - 生成学术规范的研究报告
 2. 格式化输出 - Markdown 格式输出
-3. 引用管理 - IEEE 格式引用
+3. 引用管理 - GB/T 7714-2015 格式引用
+4. 引用追踪 - 正文中插入引用标注
 
 核心流程：
-论文 IDs → 提取全文 → 分析论文 → 生成报告结构 → LLM 填充内容 → 保存报告
+论文 IDs → 提取全文 → 分析论文 → 构建引用映射 → LLM 生成带引用的综述 → 格式化引用 → 保存报告
 """
 import os
 import re
@@ -16,8 +17,14 @@ from datetime import datetime
 import structlog
 from litellm import completion
 import asyncio
+from .citation_manager import CitationManager
 
 logger = structlog.get_logger(__name__)
+
+# 🔧 配置参数（支持环境变量覆盖）
+REPORT_CONTENT_MAX_LENGTH = int(os.getenv('REPORT_CONTENT_MAX_LENGTH', '12000'))  # 内容截断上限
+LLM_ANALYSIS_MAX_TOKENS = int(os.getenv('LLM_ANALYSIS_MAX_TOKENS', '2500'))  # 分析阶段 max_tokens
+LLM_SYNTHESIS_MAX_TOKENS = int(os.getenv('LLM_SYNTHESIS_MAX_TOKENS', '8000'))  # 综合阶段 max_tokens
 
 
 def extract_structured_analysis(analysis_text: str) -> Dict[str, str]:
@@ -232,10 +239,10 @@ class ResearchReportGenerator:
                     content_type = "仅标题"
                     logger.warning(f"Paper {i+1} has no content, using title only")
 
-                # 内存优化：截断内容长度
-                content = content[:3000]  # 减少从5000到3000
+                # 🔧 内存优化：截断内容长度（使用环境变量配置）
+                content = content[:REPORT_CONTENT_MAX_LENGTH]
 
-                logger.info(f"Analyzing paper {i+1} using {content_type} ({len(content)} chars)")
+                logger.info(f"Analyzing paper {i+1} using {content_type} ({len(content)} chars, max={REPORT_CONTENT_MAX_LENGTH})")
 
                 # 将content_type存储到paper字典中，以便后续使用
                 paper['content_type'] = content_type
@@ -290,7 +297,7 @@ URL: {paper.get('url', 'N/A')}
                                 model=self.model,
                                 messages=[{"role": "user", "content": analysis_prompt}],
                                 temperature=0.3,
-                                max_tokens=1500  # 减少token数量以节省内存
+                                max_tokens=LLM_ANALYSIS_MAX_TOKENS  # 🔧 使用环境变量配置
                             )
                         ),
                         timeout=ANALYSIS_TIMEOUT
@@ -538,48 +545,127 @@ URL: {paper.get('url', 'N/A')}
                     'content_type': content_type
                 })
 
-            # 第三步：生成综合总结（使用所有论文的分析）
-            logger.info("Generating synthesis from detailed analyses...")
+            # 第三步：初始化引用管理器
+            logger.info("Initializing citation manager...")
+            citation_manager = CitationManager(papers_info)
+
+            # 生成文献列表供LLM参考
+            reference_list_for_llm = citation_manager.generate_reference_list_for_prompt()
+
+            # 第四步：生成综合总结（使用所有论文的分析 + 引用管理）
+            logger.info("Generating synthesis with citation tracking...")
 
             # 使用所有论文的详细分析来生成综合总结
             # 为了生成更全面的报告，我们使用所有文献
             selected_analyses = analyses_summary
 
-            synthesis_prompt = f"""基于以下 {len(detailed_analyses)} 篇论文的分析，生成一份综合研究报告。
+            synthesis_prompt = f"""你是一位资深学术研究员，正在撰写一份关于"{topic}"的综合研究报告。
 
-研究主题: {topic}
+**重要要求 - 引用规范**：
+1. 在陈述观点、数据、方法时，必须标注文献来源
+2. 引用格式：在句末用 ^[序号]^ 标注，例如："深度学习可以预测材料性能^[1]^"
+3. 多篇文献：^[1,2,5]^ 或 ^[1-3]^
+4. 每个关键论断都要有文献支撑
+5. 引用要均衡分布，避免某些文献被忽略
 
-详细分析:
-{''.join(selected_analyses)}
+**文献资料**（共{len(papers_info)}篇）：
 
-请生成以下部分（使用中文，简洁明了）：
+{reference_list_for_llm}
 
-## 研究概述
-- 研究领域的重要性和背景
-- 当前研究的主要挑战
-- 本次调研的文献范围
+**详细分析**：
+{''.join(selected_analyses[:])}
 
-## 技术路线分析
-- 主流技术方法对比
-- 各方法的优缺点
-- 技术演进趋势
+（注：为节省token，仅显示前5篇详细分析，但请基于所有{len(papers_info)}篇文献生成综述）
 
-## 研究热点与趋势
-- 当前研究热点
-- 未来发展方向
-- 潜在突破点
+请生成以下部分（使用中文，符合学术写作规范）：
 
-## 研究空白与机会
-- 现有研究的局限性
-- 尚未解决的问题
-- 可能的研究方向
+## 摘要 (Abstract)
+- 研究背景（1-2句）
+- 调研范围与方法（1句）
+- 主要发现（2-3句）
+- 研究意义（1句）
+（总计150-200字）
 
-## 总结与建议
-- 主要结论
+## 1. 引言 (Introduction)
+### 1.1 研究背景
+- 领域重要性和发展历程
+- 当前面临的主要挑战
+
+### 1.2 调研目的与范围
+- 本次调研的目标
+- 文献来源与筛选标准
+- 调研时间范围
+
+## 2. 研究现状综述 (Literature Review)
+### 2.1 主流技术路线
+- 技术方法分类与对比
+- 各方法的理论基础
+- 代表性工作总结
+
+### 2.2 关键技术分析
+- 核心技术要点
+- 技术优势与局限
+- 性能对比分析
+
+### 2.3 应用场景与案例
+- 典型应用领域
+- 成功案例分析
+- 实际应用中的挑战
+
+## 3. 研究趋势与热点 (Trends and Hotspots)
+### 3.1 当前研究热点
+- 高频研究主题
+- 新兴研究方向
+- 跨学科融合趋势
+
+### 3.2 技术演进路径
+- 历史发展脉络
+- 当前技术前沿
+- 未来发展预测
+
+### 3.3 关键发现与创新点
+- 重要突破性成果
+- 创新性方法与思路
+- 对领域的贡献
+
+## 4. 研究空白与机遇 (Research Gaps and Opportunities)
+### 4.1 现有研究的局限性
+- 方法论局限
+- 数据与实验局限
+- 理论框架不足
+
+### 4.2 未解决的关键问题
+- 技术瓶颈
+- 理论难题
+- 应用障碍
+
+### 4.3 潜在研究方向
+- 值得深入的研究课题
+- 跨学科合作机会
+- 创新性研究思路
+
+## 5. 结论与展望 (Conclusion and Future Work)
+### 5.1 主要结论
+- 核心发现总结
+- 技术现状评估
+- 领域发展态势
+
+### 5.2 研究建议
 - 对研究者的建议
-- 未来展望
+- 对实践者的建议
+- 对政策制定者的建议
 
-要求：专业、客观、有深度、简洁
+### 5.3 未来展望
+- 短期发展预期（1-2年）
+- 中长期发展方向（3-5年）
+- 潜在突破性进展
+
+要求：
+1. 语言专业、客观、严谨
+2. 逻辑清晰、层次分明
+3. 有深度、有见解
+4. 引用具体文献支撑观点
+5. 避免空泛表述，注重实质内容
 """
 
             try:
@@ -587,7 +673,7 @@ URL: {paper.get('url', 'N/A')}
                     model=self.model,
                     messages=[{"role": "user", "content": synthesis_prompt}],
                     temperature=0.7,
-                    max_tokens=2000  # 减少从3000到2000
+                    max_tokens=LLM_SYNTHESIS_MAX_TOKENS  # 🔧 使用环境变量配置
                 )
 
                 # 安全地处理响应对象
@@ -608,55 +694,79 @@ URL: {paper.get('url', 'N/A')}
 
                 if not report_content:
                     logger.warning("LLM returned empty content for synthesis, using fallback")
-                    report_content = "## 研究概述\n\n（综合分析生成失败，请查看下方详细文献分析）\n"
+                    report_content = "## 摘要\n\n（综合分析生成失败，请查看附录中的详细文献分析）\n"
+                else:
+                    # 处理引用标注：^[1]^ → <sup>[1]</sup>
+                    logger.info("Processing citation markers...")
+                    report_content = citation_manager.process_citations(report_content)
+
+                    # 验证引用有效性
+                    is_valid, errors = citation_manager.validate_citations(report_content)
+                    if not is_valid:
+                        logger.warning(f"Citation validation found {len(errors)} issues:")
+                        for error in errors[:5]:  # 只记录前5个错误
+                            logger.warning(f"  - {error}")
+                    else:
+                        logger.info("All citations validated successfully")
+
+                    # 记录引用统计
+                    uncited = citation_manager.get_uncited_papers()
+                    if uncited:
+                        logger.warning(f"{len(uncited)} papers were not cited in the synthesis")
+                        logger.debug(f"Uncited papers: {uncited[:10]}")  # 只记录前10个
 
             except Exception as llm_error:
                 logger.error(f"LLM synthesis failed: {llm_error}")
                 logger.warning("Using fallback synthesis content")
-                report_content = "## 研究概述\n\n（综合分析生成失败，请查看下方详细文献分析）\n"
+                report_content = "## 摘要\n\n（综合分析生成失败，请查看附录中的详细文献分析）\n"
 
             # 及时释放内存
             gc.collect()
 
-            # 添加元数据
-            header = f"""# {topic} - 研究调研报告
+            # 添加元数据（学术报告格式）
+            header = f"""# {topic}
+## 学术调研报告
 
-**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-**文献数量**: {len(papers_info)}
-**生成方式**: AI深度分析（内存优化版本）
+---
+
+**报告信息**
+
+| 项目 | 内容 |
+|------|------|
+| 生成时间 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} |
+| 文献数量 | {len(papers_info)} 篇 |
+| 分析方法 | AI深度分析（基于LLM） |
+| 报告类型 | 综合性学术调研报告 |
 
 ---
 
 """
 
-            # 组合最终报告 = 头部 + 综合总结 + 详细分析
-            # 包含所有论文的详细分析
-            detailed_section = ''.join(analyses_summary)
+            # 组合最终报告 = 头部 + 综合总结（主报告）+ 附录（详细分析）
+            # 将详细的单篇分析移至附录
+            appendix_section = f"""
 
-            full_report = header + report_content + "\n\n---\n\n# 详细文献分析\n\n" + detailed_section
+---
 
-            # 添加参考文献
-            references = "\n\n---\n\n## 参考文献\n\n"
-            for i, paper in enumerate(papers_info, 1):
-                # 安全处理authors字段
-                authors_raw = paper.get('authors', ['Unknown'])
-                if isinstance(authors_raw, list):
-                    authors = ', '.join(str(a) for a in authors_raw)
-                else:
-                    authors = str(authors_raw)
+# 附录：详细文献分析
 
-                title = paper.get('title', 'Unknown Title')
-                year = paper.get('published', 'Unknown')[:4] if paper.get('published') else 'Unknown'
-                source = paper.get('source', 'unknown')
-                paper_id = paper.get('paper_id', 'unknown')
-                url = paper.get('url', '')
+本附录包含对每篇文献的详细分析，供深入研究参考。
 
-                if source == 'arxiv':
-                    references += f"[{i}] {authors}. \"{title}\". arXiv:{paper_id}, {year}. {url}\n"
-                else:
-                    references += f"[{i}] {authors}. \"{title}\". {year}. {url}\n"
+{''.join(analyses_summary)}
+"""
+
+            full_report = header + report_content + appendix_section
+
+            # 添加参考文献（使用CitationManager生成GB/T 7714-2015格式）
+            logger.info("Generating references in GB/T 7714-2015 format...")
+            references = "\n\n---\n\n" + citation_manager.generate_all_references_gb7714()
 
             full_report += references
+
+            # 记录引用统计
+            citation_stats = citation_manager.get_citation_statistics()
+            cited_count = sum(1 for c in citation_stats.values() if c > 0)
+            logger.info(f"Citation statistics: {cited_count}/{len(papers_info)} papers cited")
 
             # 最后释放内存
             gc.collect()

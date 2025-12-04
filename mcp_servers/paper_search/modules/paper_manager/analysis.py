@@ -5,6 +5,7 @@ Paper Analysis Module (论文分析模块)
 1. 单篇论文分析 - 基于摘要提取关键信息
 2. 中文摘要翻译 - 将英文摘要凝练翻译成中文
 3. 批量分析 - 并发处理多篇论文（仅使用摘要）
+4. 引用标注 - 在分析结果中标注信息来源
 
 注意：本模块专注于摘要分析，不处理报告生成
 """
@@ -13,6 +14,37 @@ from datetime import datetime
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+
+def format_paper_citation_info(paper: Dict[str, Any], index: int = None) -> str:
+    """
+    为单篇论文生成引用信息标注
+
+    Args:
+        paper: 论文信息字典
+        index: 文献编号（可选）
+
+    Returns:
+        引用信息字符串
+    """
+    authors = paper.get('authors', [])
+    if isinstance(authors, list):
+        if len(authors) > 3:
+            author_str = ', '.join(authors[:3]) + ', et al.'
+        elif len(authors) > 0:
+            author_str = ', '.join(authors)
+        else:
+            author_str = 'Unknown'
+    else:
+        author_str = str(authors) if authors else 'Unknown'
+
+    year = paper.get('published', '')[:4] if paper.get('published') else 'Unknown'
+    title = paper.get('title', 'Unknown')
+
+    if index:
+        return f"[{index}] {author_str} ({year}). {title}"
+    else:
+        return f"{author_str} ({year}). {title}"
 
 
 async def analyze_paper_content(
@@ -120,6 +152,9 @@ async def analyze_paper_content(
         # 翻译摘要
         abstract_zh = await _condense_abstract_to_chinese_async(abstract) if abstract else ""
 
+        # 生成引用信息
+        citation_info = format_paper_citation_info(paper)
+
         result = {
             'paper_id': paper_id,
             'title': title,
@@ -128,6 +163,8 @@ async def analyze_paper_content(
             'source': source,
             'abstract_zh': abstract_zh,
             'key_info': key_info,
+            'citation_info': citation_info,  # 添加引用信息
+            'data_source': '基于论文摘要分析',  # 标注数据来源
             'timestamp': datetime.now().isoformat()
         }
 

@@ -5,15 +5,24 @@ Semantic Scholar Search Module (Semantic Scholar 检索模块)
 1. Semantic Scholar 论文搜索
 2. 支持统一的论文格式
 3. 异步搜索支持
+4. API密钥轮询机制
 """
 import os
+import sys
 import aiohttp
 import asyncio
 from typing import List, Dict, Any, Optional
+from pathlib import Path
 import structlog
 import hashlib
 
 logger = structlog.get_logger(__name__)
+
+# 导入API密钥轮询器
+shared_path = Path(__file__).parent.parent.parent.parent / "shared"
+if str(shared_path) not in sys.path:
+    sys.path.insert(0, str(shared_path))
+from api_key_rotator import get_semantic_scholar_key, mark_semantic_scholar_key_failed
 
 # Semantic Scholar API 配置
 SEMANTIC_SCHOLAR_API_BASE = "https://api.semanticscholar.org/graph/v1"
@@ -46,11 +55,11 @@ async def search_semantic_scholar_papers(
             query=query,
             max_results=max_results
         )
-        
-        # 获取 API Key
-        api_key = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
+
+        # 使用轮询器获取 API Key
+        api_key = get_semantic_scholar_key()
         if not api_key:
-            logger.warning("SEMANTIC_SCHOLAR_API_KEY not set, using unauthenticated access")
+            logger.warning("No Semantic Scholar API key available, using unauthenticated access")
         
         # 构建请求 URL 和参数
         url = f"{SEMANTIC_SCHOLAR_API_BASE}/paper/search/bulk"

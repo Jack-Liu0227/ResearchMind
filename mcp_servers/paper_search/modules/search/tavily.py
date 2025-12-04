@@ -5,12 +5,21 @@ Tavily Web Search Module (Tavily 网页搜索模块)
 1. 通用网页搜索
 2. 学术网页搜索
 3. 新闻搜索
+4. API密钥轮询机制
 """
 import os
+import sys
 from typing import List, Dict, Any
+from pathlib import Path
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+# 导入API密钥轮询器
+shared_path = Path(__file__).parent.parent.parent.parent / "shared"
+if str(shared_path) not in sys.path:
+    sys.path.insert(0, str(shared_path))
+from api_key_rotator import get_tavily_key, mark_tavily_key_failed
 
 # 尝试导入 Tavily
 try:
@@ -51,11 +60,12 @@ async def search_web(query: str, max_results: int = 5, search_depth: str = "basi
         max_results = max(1, int(max_results))
         logger.info(f"Starting web search with max_results={max_results}", query=query, search_depth=search_depth)
 
-        api_key = os.getenv('TAVILY_API_KEY')
+        # 使用轮询器获取API密钥
+        api_key = get_tavily_key()
         if not api_key:
             return [{
-                "error": "TAVILY_API_KEY not set",
-                "message": "Please set TAVILY_API_KEY environment variable"
+                "error": "No Tavily API key available",
+                "message": "Please configure TAVILY_API_KEY environment variable with one or more keys"
             }]
 
         client = TavilyClient(api_key=api_key)
@@ -146,11 +156,12 @@ async def search_academic_web(query: str, max_results: int = 5, session_id: str 
         max_results = max(1, int(max_results))
         logger.info(f"Starting academic web search with max_results={max_results}", query=query)
 
-        api_key = os.getenv('TAVILY_API_KEY')
+        # 使用轮询器获取API密钥
+        api_key = get_tavily_key()
         if not api_key:
             return [{
-                "error": "TAVILY_API_KEY not set",
-                "message": "Please set TAVILY_API_KEY environment variable"
+                "error": "No Tavily API key available",
+                "message": "Please configure TAVILY_API_KEY environment variable with one or more keys"
             }]
 
         client = TavilyClient(api_key=api_key)
@@ -296,11 +307,12 @@ async def search_news(query: str, max_results: int = 5, days: int = 7) -> List[D
         max_results = max(1, int(max_results))
         logger.info(f"Starting news search with max_results={max_results}", query=query, days=days)
 
-        api_key = os.getenv('TAVILY_API_KEY')
+        # 使用轮询器获取API密钥
+        api_key = get_tavily_key()
         if not api_key:
             return [{
-                "error": "TAVILY_API_KEY not set",
-                "message": "Please set TAVILY_API_KEY environment variable"
+                "error": "No Tavily API key available",
+                "message": "Please configure TAVILY_API_KEY environment variable with one or more keys"
             }]
 
         client = TavilyClient(api_key=api_key)
