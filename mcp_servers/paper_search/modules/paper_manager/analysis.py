@@ -9,7 +9,7 @@ Paper Analysis Module (论文分析模块)
 
 注意：本模块专注于摘要分析，不处理报告生成
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
 import structlog
 
@@ -49,20 +49,22 @@ def format_paper_citation_info(paper: Dict[str, Any], index: int = None) -> str:
 
 async def analyze_paper_content(
     paper: Dict[str, Any],
-    content: str = None
+    content: str = None,
+    use_cache: bool = True  # 🆕 新增参数
 ) -> Dict[str, Any]:
     """
-    基于摘要分析单篇论文 - 异步版本
+    基于摘要分析单篇论文 - 异步版本（支持缓存）
 
     提取关键信息：
     - 研究目标
-    - 主要方法  
+    - 主要方法
     - 关键结果
     - 创新点
 
     Args:
         paper: 论文信息字典（包含title, authors, abstract等）
         content: 全文内容（可选，不使用）
+        use_cache: 是否使用缓存（默认 True）
 
     Returns:
         Dict containing:
@@ -74,6 +76,28 @@ async def analyze_paper_content(
         - innovation: 创新点
         - abstract_zh: 中文摘要
     """
+    # 🆕 检查缓存
+    if use_cache:
+        try:
+            # 添加 paper_search 目录到 sys.path
+            import sys
+            from pathlib import Path as PathLib
+            _CURRENT_FILE = PathLib(__file__)
+            _PAPER_SEARCH_DIR = _CURRENT_FILE.parent.parent.parent
+            if str(_PAPER_SEARCH_DIR) not in sys.path:
+                sys.path.insert(0, str(_PAPER_SEARCH_DIR))
+
+            from config import ENABLE_ANALYSIS_CACHE
+            if ENABLE_ANALYSIS_CACHE:
+                from ..shared.cache_manager import get_cache_manager
+                cache_manager = get_cache_manager()
+                cached_result = cache_manager.get(paper)
+                if cached_result:
+                    logger.info(f'✅ 使用缓存结果: {paper.get("paper_id", "unknown")}')
+                    return cached_result
+        except Exception as e:
+            logger.warning(f'缓存读取失败: {e}')
+
     try:
         from litellm import completion
         import os
@@ -155,6 +179,35 @@ async def analyze_paper_content(
         # 生成引用信息
         citation_info = format_paper_citation_info(paper)
 
+        # 🆕 质量评估（如果启用）
+        quality_assessment = None
+        try:
+            # 添加 paper_search 目录到 sys.path
+            import sys
+            from pathlib import Path as PathLib
+            _CURRENT_FILE = PathLib(__file__)
+            _PAPER_SEARCH_DIR = _CURRENT_FILE.parent.parent.parent
+            if str(_PAPER_SEARCH_DIR) not in sys.path:
+                sys.path.insert(0, str(_PAPER_SEARCH_DIR))
+
+            from config import ENABLE_QUALITY_ASSESSMENT
+            if ENABLE_QUALITY_ASSESSMENT:
+                from ..shared.quality_assessor import get_quality_assessor
+                assessor = get_quality_assessor()
+
+                # 评估分析质量
+                quality_assessment = assessor.assess(analysis_text, paper)
+
+                # 如果质量过低，记录警告
+                if not quality_assessment['is_high_quality']:
+                    logger.warning(
+                        f"Low quality analysis detected for {paper_id}",
+                        score=quality_assessment['score'],
+                        issues=quality_assessment['issues']
+                    )
+        except Exception as e:
+            logger.warning(f'质量评估失败: {e}')
+
         result = {
             'paper_id': paper_id,
             'title': title,
@@ -165,8 +218,45 @@ async def analyze_paper_content(
             'key_info': key_info,
             'citation_info': citation_info,  # 添加引用信息
             'data_source': '基于论文摘要分析',  # 标注数据来源
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'quality_assessment': quality_assessment  # 🆕 添加质量评估结果
         }
+
+        # 🆕 保存到缓存
+        if use_cache:
+            try:
+                # 添加 paper_search 目录到 sys.path
+                import sys
+                from pathlib import Path as PathLib
+                _CURRENT_FILE = PathLib(__file__)
+                _PAPER_SEARCH_DIR = _CURRENT_FILE.parent.parent.parent
+                if str(_PAPER_SEARCH_DIR) not in sys.path:
+                    sys.path.insert(0, str(_PAPER_SEARCH_DIR))
+
+                from config import ENABLE_ANALYSIS_CACHE
+                if ENABLE_ANALYSIS_CACHE:
+                    from ..shared.cache_manager import get_cache_manager
+                    cache_manager = get_cache_manager()
+                    cache_manager.set(paper, result)
+            except Exception as e:
+                logger.warning(f'缓存保存失败: {e}')
+
+        # 🆕 结果验证
+        try:
+            from ..shared.result_validator import get_result_validator
+            validator = get_result_validator()
+            validation = validator.validate_paper_analysis(result)
+
+            if not validation['is_valid']:
+                logger.warning(
+                    f"Validation failed for {paper_id}",
+                    errors=validation['errors']
+                )
+
+            # 添加验证结果到返回值
+            result['validation'] = validation
+        except Exception as e:
+            logger.warning(f'结果验证失败: {e}')
 
         logger.info(f'Completed analysis for paper {paper_id}')
         return result
@@ -187,16 +277,54 @@ async def analyze_paper_content(
         }
 
 
+def _clean_llm_output(text: str) -> str:
+    """
+    清理 LLM 输出中的格式问题
+
+    Args:
+        text: LLM 原始输出
+
+    Returns:
+        清理后的文本
+    """
+    import re
+
+    if not text:
+        return text
+
+    # 移除多余的分隔符
+    text = re.sub(r'\n\s*---\s*---\s*', '\n', text)
+    text = re.sub(r'\n\s*---\s*\n', '\n\n', text)
+
+    # 清理列表项中的多余破折号
+    text = re.sub(r'^-\s*-\s*-\s*', '- ', text, flags=re.MULTILINE)
+    text = re.sub(r'^-\s*-\s*', '- ', text, flags=re.MULTILINE)
+
+    # 移除空的章节（只有标题和分隔符，没有内容）
+    text = re.sub(r'####\s+[^:\n]+:\s*\n\s*---\s*\n', '', text)
+    text = re.sub(r'####\s+[^:\n]+:\s*\n\s*\n', '', text)
+
+    # 移除连续的空行（保留最多一个空行）
+    text = re.sub(r'\n\n\n+', '\n\n', text)
+
+    return text.strip()
+
+
 def _parse_analysis_text(analysis_text: str) -> Dict[str, str]:
     """
     解析LLM返回的分析文本，提取关键信息
-    
+
+    使用正则表达式提取各部分内容，更加健壮
+
     格式：
-    - 研究目标
-    - 方法论  
-    - 主要结果
-    - 创新点
+    ### 2. 研究目标
+    ### 3. 方法论
+    ### 4. 主要发现与结果
+    ### 5. 创新点与贡献
     """
+    # 🆕 先清理输出
+    analysis_text = _clean_llm_output(analysis_text)
+
     key_info = {
         'objective': '',
         'method': '',
@@ -204,31 +332,86 @@ def _parse_analysis_text(analysis_text: str) -> Dict[str, str]:
         'innovation': ''
     }
 
-    lines = analysis_text.split('\n')
-    current_key = None
+    import re
 
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
+    # 🔧 使用正则表达式提取各部分内容（更健壮）
+    # 提取"研究目标"部分（### 2. 研究目标）
+    objective_match = re.search(
+        r'###\s*2\.\s*研究目标(.*?)(?=###\s*3\.|$)',
+        analysis_text,
+        re.DOTALL | re.IGNORECASE
+    )
+    if objective_match:
+        content = objective_match.group(1).strip()
+        # 移除子标题（如 **具体的研究目标是什么？**）
+        content = re.sub(r'\*\*[^*]+\*\*\s*', '', content)
+        # 移除多余的换行和空格
+        content = re.sub(r'\n\s*\n', '\n', content).strip()
+        key_info['objective'] = content
 
-        # 检测标题
-        if '研究目标' in line or '目标' in line:
-            current_key = 'objective'
-        elif '方法' in line or '方法论' in line:
-            current_key = 'method'
-        elif '结果' in line or '发现' in line:
-            current_key = 'result'
-        elif '创新' in line or '贡献' in line:
-            current_key = 'innovation'
-        elif current_key and line and not line.startswith('**') and not line.startswith('###'):
-            # 累积内容
-            if key_info[current_key]:
-                key_info[current_key] += ' ' + line
-            else:
-                key_info[current_key] = line
+    # 提取"方法论"部分（### 3. 方法论）
+    method_match = re.search(
+        r'###\s*3\.\s*方法论(.*?)(?=###\s*4\.|$)',
+        analysis_text,
+        re.DOTALL | re.IGNORECASE
+    )
+    if method_match:
+        content = method_match.group(1).strip()
+        content = re.sub(r'\*\*[^*]+\*\*\s*', '', content)
+        content = re.sub(r'\n\s*\n', '\n', content).strip()
+        key_info['method'] = content
 
-    # 如果解析失败，使用整个文本作为创新点
+    # 提取"主要发现与结果"部分（### 4. 主要发现与结果）
+    result_match = re.search(
+        r'###\s*4\.\s*主要发现与结果(.*?)(?=###\s*5\.|$)',
+        analysis_text,
+        re.DOTALL | re.IGNORECASE
+    )
+    if result_match:
+        content = result_match.group(1).strip()
+        content = re.sub(r'\*\*[^*]+\*\*\s*', '', content)
+        content = re.sub(r'\n\s*\n', '\n', content).strip()
+        key_info['result'] = content
+
+    # 提取"创新点与贡献"部分（### 5. 创新点与贡献）
+    innovation_match = re.search(
+        r'###\s*5\.\s*创新点与贡献(.*?)(?=###\s*6\.|$)',
+        analysis_text,
+        re.DOTALL | re.IGNORECASE
+    )
+    if innovation_match:
+        content = innovation_match.group(1).strip()
+        content = re.sub(r'\*\*[^*]+\*\*\s*', '', content)
+        content = re.sub(r'\n\s*\n', '\n', content).strip()
+        key_info['innovation'] = content
+
+    # 如果正则表达式解析失败，降级到原有的逐行解析
+    if not any(key_info.values()):
+        lines = analysis_text.split('\n')
+        current_key = None
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # 检测标题
+            if '研究目标' in line or '目标' in line:
+                current_key = 'objective'
+            elif '方法' in line or '方法论' in line:
+                current_key = 'method'
+            elif '结果' in line or '发现' in line:
+                current_key = 'result'
+            elif '创新' in line or '贡献' in line:
+                current_key = 'innovation'
+            elif current_key and line and not line.startswith('**') and not line.startswith('###'):
+                # 累积内容
+                if key_info[current_key]:
+                    key_info[current_key] += ' ' + line
+                else:
+                    key_info[current_key] = line
+
+    # 如果仍然解析失败，使用整个文本作为创新点
     if not any(key_info.values()):
         key_info['innovation'] = analysis_text
 
@@ -236,15 +419,19 @@ def _parse_analysis_text(analysis_text: str) -> Dict[str, str]:
 
 
 async def batch_paper_analysis(
-    papers: List[Dict] = None
+    papers: List[Dict] = None,
+    progress_callback: Optional[Callable[[dict], Any]] = None,
+    max_concurrent: int = None  # 🆕 新增参数
 ) -> Dict[str, Any]:
     """
-    批量分析多篇论文 - 异步并发版本
+    批量分析多篇论文 - 受控并发版本（支持进度追踪）
 
-    仅使用摘要进行快速分析，不处理报告生成
+    使用 Semaphore 控制并发数量，平衡性能和进度更新的实时性
 
     Args:
         papers: 论文列表
+        progress_callback: 进度更新回调函数（可选）
+        max_concurrent: 最大并发数（可选，默认从配置读取）
 
     Returns:
         包含批量分析结果的字典
@@ -261,53 +448,149 @@ async def batch_paper_analysis(
                 'failed_analyses': 0
             }
 
-        logger.info(f'开始批量分析 {len(papers)} 篇论文')
+        # 🆕 从配置读取并发数
+        if max_concurrent is None:
+            # 添加 paper_search 目录到 sys.path
+            import sys
+            from pathlib import Path as PathLib
+            _CURRENT_FILE = PathLib(__file__)
+            _PAPER_SEARCH_DIR = _CURRENT_FILE.parent.parent.parent
+            if str(_PAPER_SEARCH_DIR) not in sys.path:
+                sys.path.insert(0, str(_PAPER_SEARCH_DIR))
 
-        # 创建所有分析任务
-        tasks = []
-        for paper in papers:
-            tasks.append(analyze_paper_content(paper, None))
+            from config import MAX_CONCURRENT_BATCH_ANALYSIS
+            max_concurrent = MAX_CONCURRENT_BATCH_ANALYSIS
 
-        # 并发执行所有任务
-        analysis_results = await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info(f'开始批量分析 {len(papers)} 篇论文（最大并发: {max_concurrent}）')
+
+        # 🆕 初始化进度追踪
+        total_papers = len(papers)
+        completed_count = 0
+
+        # 🆕 创建信号量控制并发
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        # 🆕 创建锁保护共享状态
+        lock = asyncio.Lock()
+
+        # 🆕 发送初始进度
+        if progress_callback:
+            await _send_progress(progress_callback, {
+                "current": 0,
+                "total": total_papers,
+                "progress": 0.0,
+                "message": f"准备分析 {total_papers} 篇论文（并发: {max_concurrent}）...",
+                "status": "running"
+            })
 
         # 处理结果
         results = []
         failed_papers = []
 
-        for i, analysis_result in enumerate(analysis_results):
-            paper = papers[i]
-            paper_id = paper.get('paper_id', 'unknown')
+        # 🆕 使用 Semaphore 控制并发的分析函数
+        async def analyze_with_semaphore(i: int, paper: Dict) -> None:
+            """使用信号量控制并发的分析函数"""
+            nonlocal completed_count
 
-            # 检查是否是异常
-            if isinstance(analysis_result, Exception):
-                error_msg = str(analysis_result)
-                failed_papers.append({
-                    'id': paper_id,
-                    'title': paper.get('title', 'Unknown'),
-                    'error': error_msg
-                })
-                logger.error(
-                    'Paper analysis failed',
-                    paper_id=paper_id,
-                    error_type=type(analysis_result).__name__,
-                    error_message=error_msg[:100]
-                )
-            elif analysis_result.get('status') == 'error':
-                error_msg = analysis_result.get('error', 'Unknown error')
-                failed_papers.append({
-                    'id': paper_id,
-                    'title': paper.get('title', 'Unknown'),
-                    'error': error_msg
-                })
-                logger.error(
-                    'Paper analysis returned error',
-                    paper_id=paper_id,
-                    error_message=error_msg[:100]
-                )
-            else:
-                results.append(analysis_result)
-                logger.info('Paper analysis succeeded', paper_id=paper_id)
+            paper_id = paper.get('paper_id', 'unknown')
+            paper_title = paper.get('title', 'Unknown')[:50]
+
+            async with semaphore:
+                try:
+                    # 🆕 发送当前论文分析进度
+                    if progress_callback:
+                        async with lock:
+                            await _send_progress(progress_callback, {
+                                "current": completed_count,
+                                "total": total_papers,
+                                "progress": completed_count / total_papers,
+                                "message": f"正在分析第 {i+1}/{total_papers} 篇: {paper_title}...",
+                                "status": "running"
+                            })
+
+                    # 分析论文（使用缓存）
+                    analysis_result = await analyze_paper_content(paper, None, use_cache=True)
+
+                    # 检查分析结果
+                    if analysis_result.get('status') == 'error':
+                        error_msg = analysis_result.get('error', 'Unknown error')
+                        async with lock:
+                            failed_papers.append({
+                                'id': paper_id,
+                                'title': paper.get('title', 'Unknown'),
+                                'error': error_msg
+                            })
+                        logger.error(
+                            'Paper analysis returned error',
+                            paper_id=paper_id,
+                            error_message=error_msg[:100]
+                        )
+                    else:
+                        async with lock:
+                            results.append(analysis_result)
+                        logger.info('Paper analysis succeeded', paper_id=paper_id)
+
+                    # 🆕 更新完成计数
+                    async with lock:
+                        completed_count += 1
+                        current_count = completed_count
+
+                    # 🆕 发送完成进度
+                    if progress_callback:
+                        async with lock:
+                            await _send_progress(progress_callback, {
+                                "current": current_count,
+                                "total": total_papers,
+                                "progress": current_count / total_papers,
+                                "message": f"已完成 {current_count}/{total_papers} 篇论文分析",
+                                "status": "running"
+                            })
+
+                except Exception as e:
+                    # 🆕 处理异常
+                    error_msg = str(e)
+                    async with lock:
+                        failed_papers.append({
+                            'id': paper_id,
+                            'title': paper.get('title', 'Unknown'),
+                            'error': error_msg
+                        })
+                        completed_count += 1
+                        current_count = completed_count
+
+                    logger.error(
+                        'Paper analysis failed with exception',
+                        paper_id=paper_id,
+                        error_type=type(e).__name__,
+                        error_message=error_msg[:100]
+                    )
+
+                    # 🆕 即使失败也更新进度
+                    if progress_callback:
+                        async with lock:
+                            await _send_progress(progress_callback, {
+                                "current": current_count,
+                                "total": total_papers,
+                                "progress": current_count / total_papers,
+                                "message": f"论文 {paper_id} 分析失败，继续处理...",
+                                "status": "running"
+                            })
+
+        # 🆕 并发执行所有分析任务
+        tasks = [analyze_with_semaphore(i, paper) for i, paper in enumerate(papers)]
+        await asyncio.gather(*tasks)
+
+        # 🆕 发送完成消息
+        if progress_callback:
+            success_count = len(results)
+            error_count = len(failed_papers)
+            await _send_progress(progress_callback, {
+                "current": total_papers,
+                "total": total_papers,
+                "progress": 1.0,
+                "message": f"批量分析完成！成功: {success_count} 篇，失败: {error_count} 篇",
+                "status": "success"
+            })
 
         # 返回结果
         batch_result = {
@@ -330,11 +613,41 @@ async def batch_paper_analysis(
 
     except Exception as e:
         logger.error(f'批量分析失败: {str(e)}')
+
+        # 🆕 发送错误消息
+        if progress_callback:
+            await _send_progress(progress_callback, {
+                "current": 0,
+                "total": len(papers) if papers else 0,
+                "progress": 0.0,
+                "message": f"批量分析失败: {str(e)}",
+                "status": "error",
+                "error": str(e)
+            })
+
         return {
             'status': 'error',
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }
+
+
+async def _send_progress(callback: Callable, progress_data: dict):
+    """
+    发送进度更新（支持同步和异步回调）
+
+    Args:
+        callback: 回调函数
+        progress_data: 进度数据字典
+    """
+    try:
+        import asyncio
+        if asyncio.iscoroutinefunction(callback):
+            await callback(progress_data)
+        else:
+            callback(progress_data)
+    except Exception as e:
+        logger.error(f"发送进度更新失败: {str(e)}")
 
 
 async def _condense_abstract_to_chinese_async(abstract_en: str) -> str:

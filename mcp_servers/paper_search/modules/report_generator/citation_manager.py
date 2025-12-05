@@ -190,9 +190,19 @@ class CitationManager:
             ref_entry = self.format_reference_gb7714(i)
 
             if use_anchor_links:
-                # 🔧 添加 HTML 锚点，使引用可以跳转到这里
-                # 格式：<a id="ref-n"></a>[n] 作者. 标题...
-                references += f'<a id="ref-{i}"></a>{ref_entry}\n\n'
+                # 🔧 修复：使用加粗的序号，避免 Markdown 解析器混淆
+                # 格式：<a id="ref-n"></a>**[n]** 作者. 标题...
+                # ref_entry 已经包含 [n]，需要移除并用加粗版本替换
+                import re
+                # 匹配 [n] 后面的内容
+                match = re.match(r'\[(\d+)\]\s*(.*)', ref_entry)
+                if match:
+                    num = match.group(1)
+                    content = match.group(2)
+                    references += f'<a id="ref-{i}"></a>**[{num}]** {content}\n\n'
+                else:
+                    # 降级：如果解析失败，使用原格式
+                    references += f'<a id="ref-{i}"></a> {ref_entry}\n\n'
             else:
                 references += f"{ref_entry}\n\n"
 

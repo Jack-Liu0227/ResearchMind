@@ -303,16 +303,30 @@ def save_summary_to_file(
                 analysis_text = result.get('analysis_text', '')
                 if analysis_text:
                     # 如果有完整的分析文本，直接使用
-                    # markdown_lines.append("#### 关键信息\n\n")
                     markdown_lines.append(f"{analysis_text}\n\n")
                 else:
                     # 如果没有完整分析文本，使用简化的关键信息格式（向后兼容）
                     key_info = result.get('key_info', {})
-                    # markdown_lines.append("#### 关键信息\n\n")
-                    markdown_lines.append(f"#### 研究目标:\n\n {key_info.get('objective', '未提取')}\n\n")
-                    markdown_lines.append(f"#### 研究方法:\n\n {key_info.get('method', '未提取')}\n\n")
-                    markdown_lines.append(f"#### 主要结果:\n\n {key_info.get('result', '未提取')}\n\n")
-                    markdown_lines.append(f"#### 创新点:\n\n {key_info.get('innovation', '未提取')}\n\n")
+
+                    # 🔧 修复：只显示非空的字段，避免显示空内容
+                    if key_info.get('objective'):
+                        markdown_lines.append(f"#### 研究目标:\n\n{key_info['objective']}\n\n")
+
+                    if key_info.get('method'):
+                        markdown_lines.append(f"#### 研究方法:\n\n{key_info['method']}\n\n")
+
+                    if key_info.get('result'):
+                        markdown_lines.append(f"#### 主要结果:\n\n{key_info['result']}\n\n")
+                    else:
+                        # 如果主要结果为空，显示提示信息
+                        markdown_lines.append(f"#### 主要结果:\n\n（摘要中未详细说明具体结果）\n\n")
+
+                    if key_info.get('innovation'):
+                        markdown_lines.append(f"#### 创新点:\n\n{key_info['innovation']}\n\n")
+
+                    # 如果所有字段都为空，显示提示信息
+                    if not any(key_info.values()):
+                        markdown_lines.append("（分析信息提取失败，请查看原文）\n\n")
 
                 markdown_lines.append("---\n\n")
 

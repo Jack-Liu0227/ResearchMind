@@ -17,14 +17,26 @@ import json
 import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
+from pathlib import Path
+import sys
 import structlog
 
 logger = structlog.get_logger(__name__)
 
+# 🔧 使用统一的配置路径
+# 添加项目根目录到 sys.path 以便导入 config
+_CURRENT_FILE = Path(__file__)
+_PROJECT_ROOT = _CURRENT_FILE.parent.parent.parent.parent.parent  # ResearchMind根目录
+_PAPER_SEARCH_DIR = _PROJECT_ROOT / "mcp_servers" / "paper_search"
+if str(_PAPER_SEARCH_DIR) not in sys.path:
+    sys.path.insert(0, str(_PAPER_SEARCH_DIR))
+
+from config import SEARCH_CACHE_DIR
+
 # 缓存目录
-CACHE_DIR = "mcp_servers/paper_search/cache"
-SEARCH_HISTORY_FILE = os.path.join(CACHE_DIR, "search_history.json")
-RESULTS_CACHE_DIR = os.path.join(CACHE_DIR, "results")
+CACHE_DIR = str(SEARCH_CACHE_DIR)
+SEARCH_HISTORY_FILE = str(SEARCH_CACHE_DIR / "search_history.json")
+RESULTS_CACHE_DIR = str(SEARCH_CACHE_DIR / "results")
 
 # 缓存过期时间（小时）
 CACHE_EXPIRY_HOURS = 24

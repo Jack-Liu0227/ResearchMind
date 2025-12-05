@@ -1839,8 +1839,35 @@ async def batch_paper_analysis(
 
             logger.info(f"Generated unique session_id: {session_id} for topic: {topic}")
 
-    # 执行批量分析（异步并发执行）
-    result = await batch_paper_analysis_impl(papers=papers)
+    # 🆕 创建进度回调函数
+    async def progress_callback(progress_data: dict):
+        """发送进度更新到前端"""
+        try:
+            # 尝试通过 WebSocket 发送进度更新
+            from services.websocket_server import WebSocketServer
+            from services.message_handler import MessageHandler
+
+            ws_server = WebSocketServer.get_instance()
+            if ws_server and session_id:
+                # 查找该 session_id 对应的 WebSocket 连接
+                for client_id, client_session in ws_server.client_sessions.items():
+                    websocket = ws_server.connected_clients.get(client_id)
+                    if websocket:
+                        await MessageHandler.send_message(websocket, "analysis_progress", {
+                            **progress_data,
+                            "sessionId": session_id,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        logger.debug(f"📊 发送进度更新: {progress_data.get('current')}/{progress_data.get('total')}")
+                        break
+        except Exception as e:
+            logger.warning(f"发送进度更新失败: {str(e)}")
+
+    # 执行批量分析（带进度追踪）
+    result = await batch_paper_analysis_impl(
+        papers=papers,
+        progress_callback=progress_callback
+    )
 
     # 保存总结到 Markdown 文件
     if result.get('status') == 'success':
@@ -1888,6 +1915,49 @@ async def batch_paper_analysis(
                         'abstract_zh': r.get('abstract_zh', '')[:200] + '...' if len(r.get('abstract_zh', '')) > 200 else r.get('abstract_zh', '')  # 限制长度
                     })
             result['results'] = simplified_results
+
+        # 🆕 发送完成消息到前端
+        try:
+            from services.websocket_server import WebSocketServer
+            from services.message_handler import MessageHandler
+
+            ws_server = WebSocketServer.get_instance()
+            if ws_server and session_id:
+                for client_id, client_session in ws_server.client_sessions.items():
+                    websocket = ws_server.connected_clients.get(client_id)
+                    if websocket:
+                        await MessageHandler.send_message(websocket, "analysis_complete", {
+                            "message": f"批量分析完成！成功: {result.get('successful_analyses', 0)} 篇，失败: {result.get('failed_analyses', 0)} 篇",
+                            "success_count": result.get('successful_analyses', 0),
+                            "error_count": result.get('failed_analyses', 0),
+                            "sessionId": session_id,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        logger.info(f"✅ 发送批量分析完成消息")
+                        break
+        except Exception as e:
+            logger.warning(f"发送完成消息失败: {str(e)}")
+    else:
+        # 🆕 发送错误消息到前端
+        try:
+            from services.websocket_server import WebSocketServer
+            from services.message_handler import MessageHandler
+
+            ws_server = WebSocketServer.get_instance()
+            if ws_server and session_id:
+                for client_id, client_session in ws_server.client_sessions.items():
+                    websocket = ws_server.connected_clients.get(client_id)
+                    if websocket:
+                        await MessageHandler.send_message(websocket, "analysis_error", {
+                            "error": result.get('error', '批量分析失败'),
+                            "message": "批量分析过程中发生错误",
+                            "sessionId": session_id,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        logger.error(f"❌ 发送批量分析错误消息")
+                        break
+        except Exception as e:
+            logger.warning(f"发送错误消息失败: {str(e)}")
 
     # 清理返回数据，防止 JSON 解析错误
     return sanitize_tool_response(result)
@@ -2152,10 +2222,35 @@ async def generate_research_report(
             logger.info(f"Generated unique session_id: {session_id} for topic: {topic}")
 
     try:
+        # 🆕 创建进度回调函数
+        async def progress_callback(progress_data: dict):
+            """发送进度更新到前端"""
+            try:
+                # 尝试通过 WebSocket 发送进度更新
+                from services.websocket_server import WebSocketServer
+                from services.message_handler import MessageHandler
+
+                ws_server = WebSocketServer.get_instance()
+                if ws_server and session_id:
+                    # 查找该 session_id 对应的 WebSocket 连接
+                    for client_id, client_session in ws_server.client_sessions.items():
+                        websocket = ws_server.connected_clients.get(client_id)
+                        if websocket:
+                            await MessageHandler.send_message(websocket, "report_progress", {
+                                **progress_data,
+                                "sessionId": session_id,
+                                "timestamp": datetime.now().isoformat()
+                            })
+                            logger.debug(f"📊 发送报告生成进度: {progress_data.get('current')}/{progress_data.get('total')}")
+                            break
+            except Exception as e:
+                logger.warning(f"发送进度更新失败: {str(e)}")
+
         result = await generate_research_report_with_data_collection(
             papers_info=papers_info,
             topic=topic,
-            papers_analysis=papers_analysis
+            papers_analysis=papers_analysis,
+            progress_callback=progress_callback  # 🆕 传递回调
         )
 
         # 保存报告到 Markdown 文件
@@ -2225,6 +2320,48 @@ async def generate_research_report(
             # 删除内部使用的结构化分析数据（已保存到CSV）
             if 'structured_analyses' in result:
                 del result['structured_analyses']
+
+            # 🆕 发送完成消息到前端
+            try:
+                from services.websocket_server import WebSocketServer
+                from services.message_handler import MessageHandler
+
+                ws_server = WebSocketServer.get_instance()
+                if ws_server and session_id:
+                    for client_id, client_session in ws_server.client_sessions.items():
+                        websocket = ws_server.connected_clients.get(client_id)
+                        if websocket:
+                            await MessageHandler.send_message(websocket, "report_complete", {
+                                "message": f"研究报告生成完成！",
+                                "papers_count": result.get('papers_count', 0),
+                                "sessionId": session_id,
+                                "timestamp": datetime.now().isoformat()
+                            })
+                            logger.info(f"✅ 发送报告生成完成消息")
+                            break
+            except Exception as e:
+                logger.warning(f"发送完成消息失败: {str(e)}")
+        else:
+            # 🆕 发送错误消息到前端
+            try:
+                from services.websocket_server import WebSocketServer
+                from services.message_handler import MessageHandler
+
+                ws_server = WebSocketServer.get_instance()
+                if ws_server and session_id:
+                    for client_id, client_session in ws_server.client_sessions.items():
+                        websocket = ws_server.connected_clients.get(client_id)
+                        if websocket:
+                            await MessageHandler.send_message(websocket, "report_error", {
+                                "error": result.get('error', '报告生成失败'),
+                                "message": "报告生成过程中发生错误",
+                                "sessionId": session_id,
+                                "timestamp": datetime.now().isoformat()
+                            })
+                            logger.error(f"❌ 发送报告生成错误消息")
+                            break
+            except Exception as e:
+                logger.warning(f"发送错误消息失败: {str(e)}")
 
         # 清理返回数据，防止 JSON 解析错误
         return sanitize_tool_response(result)

@@ -12,7 +12,7 @@ Reporting Module (报告模块)
 """
 import os
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
 import structlog
 from litellm import completion
@@ -21,10 +21,98 @@ from .citation_manager import CitationManager
 
 logger = structlog.get_logger(__name__)
 
-# 🔧 配置参数（支持环境变量覆盖）
-REPORT_CONTENT_MAX_LENGTH = int(os.getenv('REPORT_CONTENT_MAX_LENGTH', '12000'))  # 内容截断上限
-LLM_ANALYSIS_MAX_TOKENS = int(os.getenv('LLM_ANALYSIS_MAX_TOKENS', '2500'))  # 分析阶段 max_tokens
-LLM_SYNTHESIS_MAX_TOKENS = int(os.getenv('LLM_SYNTHESIS_MAX_TOKENS', '8000'))  # 综合阶段 max_tokens
+
+def _generate_fallback_analysis(
+    paper: Dict[str, Any],
+    reason: str,
+    error_msg: str = ""
+) -> str:
+    """
+    生成 fallback 分析（超时或失败时使用）
+
+    Args:
+        paper: 论文信息字典
+        reason: 失败原因（如"分析超时"、"分析失败"）
+        error_msg: 详细错误信息（可选）
+
+    Returns:
+        Markdown 格式的 fallback 分析文本
+    """
+    abstract = paper.get('abstract', '')
+    full_text = paper.get('full_text', '')
+    content_type = paper.get('content_type', '未知')
+
+    # 生成内容预览
+    if abstract:
+        content_preview = abstract[:200]
+    elif full_text:
+        content_preview = full_text[:200]
+    else:
+        content_preview = "信息不足（无摘要和全文）"
+
+    # 生成 fallback 文本
+    fallback_text = f"""### 1. 研究背景与动机
+
+**研究解决什么问题？**
+{content_preview}
+
+**为什么这个问题重要？**
+（{reason}，详细信息请参考原文）
+
+---
+
+### 2. 研究目标
+
+（{reason}，详细信息请参考原文）
+
+---
+
+### 3. 方法论
+
+**使用了什么方法？**
+（{reason}，详细信息请参考原文）
+
+**方法有何创新之处？**
+（{reason}，详细信息请参考原文）
+
+---
+
+### 4. 主要发现与结果
+
+**关键结果是什么？**
+（{reason}，详细信息请参考原文）
+
+**有哪些重要发现？**
+（{reason}，详细信息请参考原文）
+
+---
+
+### 5. 创新点与贡献
+
+**这项工作的创新之处？**
+（{reason}，详细信息请参考原文）
+
+**对领域的贡献？**
+（{reason}，详细信息请参考原文）
+
+---
+
+### 6. 局限性
+
+**存在哪些局限性？**
+（{reason}，详细信息请参考原文）
+
+**有哪些未解决的问题？**
+（{reason}，详细信息请参考原文）
+
+---
+
+**可用内容**: {content_type}
+**内容预览**: {abstract[:500] if abstract else (full_text[:500] if full_text else '无内容')}
+
+*注：{reason}{f'（{error_msg}）' if error_msg else ''}，仅显示可用内容*
+"""
+    return fallback_text
 
 
 def extract_structured_analysis(analysis_text: str) -> Dict[str, str]:
@@ -76,9 +164,25 @@ def extract_structured_analysis(analysis_text: str) -> Dict[str, str]:
 
     return sections
 
-# 全局超时配置
-FETCH_TIMEOUT = 30  # 获取全文超时时间（秒）
-ANALYSIS_TIMEOUT = 300  # 分析论文超时时间（秒）- 增加到120秒以适应LLM响应延迟
+# 🆕 从配置文件导入
+import sys
+from pathlib import Path as PathLib
+
+# 添加 paper_search 目录到 sys.path
+_CURRENT_FILE = PathLib(__file__)
+_PAPER_SEARCH_DIR = _CURRENT_FILE.parent.parent.parent
+if str(_PAPER_SEARCH_DIR) not in sys.path:
+    sys.path.insert(0, str(_PAPER_SEARCH_DIR))
+
+from config import (
+    FETCH_TIMEOUT,
+    ANALYSIS_TIMEOUT,
+    REPORT_CONTENT_MAX_LENGTH,
+    LLM_ANALYSIS_MAX_TOKENS,
+    LLM_SYNTHESIS_MAX_TOKENS,
+    MAX_CONCURRENT_FETCH,
+    MAX_CONCURRENT_ANALYSIS
+)
 
 
 class ResearchReportGenerator:
@@ -106,7 +210,8 @@ class ResearchReportGenerator:
         self,
         papers_info: List[Dict[str, Any]],
         topic: str,
-        papers_analysis: Optional[List[Dict[str, Any]]] = None
+        papers_analysis: Optional[List[Dict[str, Any]]] = None,
+        progress_callback: Optional[Callable[[dict], Any]] = None  # 🆕 新增进度回调
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         生成综合调研报告（按块生成每篇论文的详细分析，然后合并）
@@ -120,6 +225,7 @@ class ResearchReportGenerator:
             papers_info: 论文信息列表（包含title, authors, abstract, full_text等）
             topic: 研究主题
             papers_analysis: 论文分析列表（可选，如果有会包含更多细节）
+            progress_callback: 进度回调函数（可选）
 
         Returns:
             str: Markdown 格式的综合研究报告
@@ -148,8 +254,7 @@ class ResearchReportGenerator:
 
             # 如果有需要获取内容的论文，则并行获取
             if papers_needing_content:
-                # 内存优化：减少并发任务数量以降低API压力
-                MAX_CONCURRENT_TASKS = 10# 设置为5个并发任务以降低API压力和超时风险
+                # 🆕 使用配置中的并发数
 
                 async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> tuple:
                     """异步获取单篇论文的全文（带超时控制）"""
@@ -185,18 +290,28 @@ class ResearchReportGenerator:
                         enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': str(e)}
                         return (i, enriched_paper, 'error')
 
-                # 批量顺序处理论文：先执行前MAX_CONCURRENT_TASKS个，完成后再执行后面的
-                logger.info(f"Fetching content for {len(papers_needing_content)} papers with max {MAX_CONCURRENT_TASKS} concurrent tasks (timeout: {FETCH_TIMEOUT}s)...")
+                # 批量顺序处理论文：先执行前 MAX_CONCURRENT_FETCH 个，完成后再执行后面的
+                logger.info(f"Fetching content for {len(papers_needing_content)} papers with max {MAX_CONCURRENT_FETCH} concurrent tasks (timeout: {FETCH_TIMEOUT}s)...")
 
                 fetched_results = []
                 total_papers = len(papers_needing_content)
 
                 # 分批处理
-                for batch_start in range(0, total_papers, MAX_CONCURRENT_TASKS):
-                    batch_end = min(batch_start + MAX_CONCURRENT_TASKS, total_papers)
+                for batch_start in range(0, total_papers, MAX_CONCURRENT_FETCH):
+                    batch_end = min(batch_start + MAX_CONCURRENT_FETCH, total_papers)
                     batch_papers = papers_needing_content[batch_start:batch_end]
 
                     logger.info(f"Processing batch: papers {batch_start+1}-{batch_end}/{total_papers}")
+
+                    # 🆕 发送进度更新
+                    if progress_callback:
+                        await _send_progress(progress_callback, {
+                            "current": batch_start,
+                            "total": len(papers_info) + 1,
+                            "progress": batch_start / (len(papers_info) + 1),
+                            "message": f"正在获取论文内容 ({batch_start+1}-{batch_end}/{total_papers})...",
+                            "status": "running"
+                        })
 
                     # 创建当前批次的任务
                     batch_tasks = [fetch_paper_content(i, paper) for i, paper in batch_papers]
@@ -207,7 +322,7 @@ class ResearchReportGenerator:
 
                     # 及时释放内存
                     gc.collect()
-                    logger.info(f"Batch {batch_start//MAX_CONCURRENT_TASKS + 1} completed, memory freed")
+                    logger.info(f"Batch {batch_start//MAX_CONCURRENT_FETCH + 1} completed, memory freed")
 
                 # 将获取到的内容放回正确的位置
                 for original_index, enriched_paper, status in fetched_results:
@@ -239,53 +354,73 @@ class ResearchReportGenerator:
                     content_type = "仅标题"
                     logger.warning(f"Paper {i+1} has no content, using title only")
 
-                # 🔧 内存优化：截断内容长度（使用环境变量配置）
-                content = content[:REPORT_CONTENT_MAX_LENGTH]
+                # 🆕 智能内容截断（保留重要章节）
+                if len(content) > REPORT_CONTENT_MAX_LENGTH:
+                    try:
+                        from ..shared.content_truncator import get_content_truncator
+                        truncator = get_content_truncator()
+                        content = truncator.truncate(content, paper)
+                        logger.info(f"Content truncated intelligently to {len(content)} chars")
+                    except Exception as e:
+                        logger.warning(f"Smart truncation failed, using simple truncation: {e}")
+                        content = content[:REPORT_CONTENT_MAX_LENGTH]
 
                 logger.info(f"Analyzing paper {i+1} using {content_type} ({len(content)} chars, max={REPORT_CONTENT_MAX_LENGTH})")
 
                 # 将content_type存储到paper字典中，以便后续使用
                 paper['content_type'] = content_type
 
-                # 生成单篇论文的详细分析
-                analysis_prompt = f"""请对以下论文进行深度分析：
+                # 🆕 使用领域特定Prompt
+                try:
+                    from ..shared.domain_prompts import get_domain_prompt
+                    analysis_prompt, detected_domain = get_domain_prompt(
+                        paper=paper,
+                        content=content,
+                        content_type=content_type
+                    )
+                    # 存储检测到的领域
+                    paper['detected_domain'] = detected_domain
+                    logger.info(f"Using {detected_domain} domain prompt for paper {i+1}")
+                except Exception as e:
+                    logger.warning(f"Failed to get domain prompt, using general prompt: {e}")
+                    # 降级到通用Prompt
+                    analysis_prompt = f"""分析以下论文（中文输出）：
 
+**论文信息**
 标题: {paper.get('title', 'Unknown')}
-作者: {', '.join(paper.get('authors', []))}
-发表时间: {paper.get('published', 'Unknown')}
-URL: {paper.get('url', 'N/A')}
-分析依据: {content_type}
+作者: {', '.join(paper.get('authors', [])[:3])}{'等' if len(paper.get('authors', [])) > 3 else ''}
+发表: {paper.get('published', 'Unknown')}
+依据: {content_type}
 
-内容:
+**内容**
 {content}
 
-请按照以下结构分析（使用中文）：
+**输出格式示例**
 
 ### 1. 研究背景与动机
-- 研究解决什么问题？
-- 为什么这个问题重要？
+本研究针对[具体问题]，该问题在[领域]中至关重要，因为[原因]。
 
 ### 2. 研究目标
-- 具体的研究目标是什么？
+旨在[具体目标1]、[具体目标2]。
 
 ### 3. 方法论
-- 使用了什么方法？
-- 方法有何创新之处？
+采用[方法名称]，创新点在于[具体创新]。
 
 ### 4. 主要发现与结果
-- 关键结果是什么？
-- 有哪些重要发现？
+- 关键发现1：[具体结果]
+- 关键发现2：[具体结果]
 
 ### 5. 创新点与贡献
-- 这项工作的创新之处？
-- 对领域的贡献？
+- 创新：[具体创新点]
+- 贡献：[对领域的具体贡献]
 
 ### 6. 局限性
-- 存在哪些局限性？
-- 有哪些未解决的问题？
+- 局限1：[具体局限]
+- 未解决：[具体问题]
 
-要求：详细、专业、客观、简洁
+**要求**：专业、客观、简洁（每部分2-3句）
 """
+                    paper['detected_domain'] = 'general'
 
                 try:
                     # 使用 asyncio 包装同步的 completion 调用，并添加超时控制
@@ -323,166 +458,36 @@ URL: {paper.get('url', 'N/A')}
 
                 except asyncio.TimeoutError:
                     logger.warning(f"Timeout analyzing paper {i+1} (>{ANALYSIS_TIMEOUT}s), using fallback")
-                    # 超时时使用完整结构的简化分析作为后备
-                    # 根据可用内容生成fallback
-                    content_preview = ""
-                    if abstract:
-                        content_preview = abstract[:200]
-                    elif full_text:
-                        content_preview = full_text[:200]
-                    else:
-                        content_preview = "信息不足（无摘要和全文）"
-
-                    fallback_analysis = f"""### 1. 研究背景与动机
-
-**研究解决什么问题？**
-{content_preview}
-
-**为什么这个问题重要？**
-（分析超时，详细信息请参考原文）
-
----
-
-### 2. 研究目标
-
-（分析超时，详细信息请参考原文）
-
----
-
-### 3. 方法论
-
-**使用了什么方法？**
-（分析超时，详细信息请参考原文）
-
-**方法有何创新之处？**
-（分析超时，详细信息请参考原文）
-
----
-
-### 4. 主要发现与结果
-
-**关键结果是什么？**
-（分析超时，详细信息请参考原文）
-
-**有哪些重要发现？**
-（分析超时，详细信息请参考原文）
-
----
-
-### 5. 创新点与贡献
-
-**这项工作的创新之处？**
-（分析超时，详细信息请参考原文）
-
-**对领域的贡献？**
-（分析超时，详细信息请参考原文）
-
----
-
-### 6. 局限性
-
-**存在哪些局限性？**
-（分析超时，详细信息请参考原文）
-
-**有哪些未解决的问题？**
-（分析超时，详细信息请参考原文）
-
----
-
-**可用内容**: {content_type}
-**内容预览**: {abstract[:500] if abstract else (full_text[:500] if full_text else '无内容')}
-
-*注：分析超时，仅显示可用内容*
-"""
+                    # 🆕 使用统一的 fallback 函数
+                    fallback_analysis = _generate_fallback_analysis(paper, "分析超时")
                     return (i, {'paper': paper, 'analysis': fallback_analysis}, 'timeout')
                 except Exception as e:
                     logger.error(f"Failed to analyze paper {i+1}: {e}")
-                    # 使用完整结构的简化分析作为后备
-                    # 根据可用内容生成fallback
-                    content_preview = ""
-                    if abstract:
-                        content_preview = abstract[:200]
-                    elif full_text:
-                        content_preview = full_text[:200]
-                    else:
-                        content_preview = "信息不足（无摘要和全文）"
-
-                    fallback_analysis = f"""### 1. 研究背景与动机
-
-**研究解决什么问题？**
-{content_preview}
-
-**为什么这个问题重要？**
-（分析失败，详细信息请参考原文）
-
----
-
-### 2. 研究目标
-
-（分析失败，详细信息请参考原文）
-
----
-
-### 3. 方法论
-
-**使用了什么方法？**
-（分析失败，详细信息请参考原文）
-
-**方法有何创新之处？**
-（分析失败，详细信息请参考原文）
-
----
-
-### 4. 主要发现与结果
-
-**关键结果是什么？**
-（分析失败，详细信息请参考原文）
-
-**有哪些重要发现？**
-（分析失败，详细信息请参考原文）
-
----
-
-### 5. 创新点与贡献
-
-**这项工作的创新之处？**
-（分析失败，详细信息请参考原文）
-
-**对领域的贡献？**
-（分析失败，详细信息请参考原文）
-
----
-
-### 6. 局限性
-
-**存在哪些局限性？**
-（分析失败，详细信息请参考原文）
-
-**有哪些未解决的问题？**
-（分析失败，详细信息请参考原文）
-
----
-
-**可用内容**: {content_type}
-**内容预览**: {abstract[:500] if abstract else (full_text[:500] if full_text else '无内容')}
-
-*注：分析失败（{str(e)}），仅显示可用内容*
-"""
+                    # 🆕 使用统一的 fallback 函数
+                    fallback_analysis = _generate_fallback_analysis(paper, "分析失败", str(e))
                     return (i, {'paper': paper, 'analysis': fallback_analysis}, 'error')
 
-            # 批量顺序处理论文：先执行前MAX_CONCURRENT_TASKS个，完成后再执行后面的
-            MAX_CONCURRENT_TASKS = 10  # 设置为5个并发任务以降低API压力和超时风险
-
-            logger.info(f"Starting batch analysis of {len(enriched_papers)} papers (max {MAX_CONCURRENT_TASKS} concurrent, timeout: {ANALYSIS_TIMEOUT}s)...")
+            # 批量顺序处理论文：先执行前 MAX_CONCURRENT_ANALYSIS 个，完成后再执行后面的
+            logger.info(f"Starting batch analysis of {len(enriched_papers)} papers (max {MAX_CONCURRENT_ANALYSIS} concurrent, timeout: {ANALYSIS_TIMEOUT}s)...")
             detailed_analyses = []
             total_papers = len(enriched_papers)
 
             # 分批处理
-            for batch_start in range(0, total_papers, MAX_CONCURRENT_TASKS):
-                batch_end = min(batch_start + MAX_CONCURRENT_TASKS, total_papers)
+            for batch_start in range(0, total_papers, MAX_CONCURRENT_ANALYSIS):
+                batch_end = min(batch_start + MAX_CONCURRENT_ANALYSIS, total_papers)
                 batch_papers = enriched_papers[batch_start:batch_end]
 
                 logger.info(f"Processing analysis batch: papers {batch_start+1}-{batch_end}/{total_papers}")
+
+                # 🆕 发送进度更新
+                if progress_callback:
+                    await _send_progress(progress_callback, {
+                        "current": batch_start,
+                        "total": len(papers_info) + 1,
+                        "progress": batch_start / (len(papers_info) + 1),
+                        "message": f"正在分析论文 ({batch_start+1}-{batch_end}/{total_papers})...",
+                        "status": "running"
+                    })
 
                 # 创建当前批次的任务
                 batch_tasks = [analyze_single_paper(i, paper) for i, paper in enumerate(batch_papers)]
@@ -496,7 +501,7 @@ URL: {paper.get('url', 'N/A')}
 
                 # 及时释放内存
                 gc.collect()
-                logger.info(f"Completed analysis batch {batch_start//MAX_CONCURRENT_TASKS + 1}, memory freed")
+                logger.info(f"Completed analysis batch {batch_start//MAX_CONCURRENT_ANALYSIS + 1}, memory freed")
 
             logger.info(f"Completed analysis of {len(enriched_papers)} papers")
 
@@ -668,29 +673,55 @@ URL: {paper.get('url', 'N/A')}
 5. 避免空泛表述，注重实质内容
 """
 
+            # 🆕 发送综合报告生成进度
+            if progress_callback:
+                await _send_progress(progress_callback, {
+                    "current": len(papers_info),
+                    "total": len(papers_info) + 1,
+                    "progress": len(papers_info) / (len(papers_info) + 1),
+                    "message": "正在生成综合研究报告...",
+                    "status": "running"
+                })
+
             try:
-                response = completion(
+                # 🆕 使用流式生成处理器
+                from ..shared.streaming_handler import get_streaming_handler
+
+                # 添加 paper_search 目录到 sys.path
+                import sys
+                from pathlib import Path as PathLib
+                _CURRENT_FILE = PathLib(__file__)
+                _PAPER_SEARCH_DIR = _CURRENT_FILE.parent.parent.parent
+                if str(_PAPER_SEARCH_DIR) not in sys.path:
+                    sys.path.insert(0, str(_PAPER_SEARCH_DIR))
+
+                from config import ENABLE_STREAMING
+
+                streaming_handler = get_streaming_handler(
                     model=self.model,
-                    messages=[{"role": "user", "content": synthesis_prompt}],
-                    temperature=0.7,
-                    max_tokens=LLM_SYNTHESIS_MAX_TOKENS  # 🔧 使用环境变量配置
+                    enable_streaming=ENABLE_STREAMING
                 )
 
-                # 安全地处理响应对象
-                report_content = ""
-                if response is not None:
-                    # 使用字典方式访问属性以避免类型检查错误
-                    response_dict = vars(response) if hasattr(response, '__dict__') else {}
-                    choices = response_dict.get('choices', [])
-                    if choices and len(choices) > 0:
-                        choice = choices[0]
-                        choice_dict = vars(choice) if hasattr(choice, '__dict__') else {}
-                        message = choice_dict.get('message')
-                        if message is not None:
-                            message_dict = vars(message) if hasattr(message, '__dict__') else {}
-                            content = message_dict.get('content', '')
-                            if content:
-                                report_content = content.strip()
+                # 定义流式回调函数
+                async def stream_callback(content_chunk: str):
+                    """流式内容回调"""
+                    if progress_callback:
+                        await _send_progress(progress_callback, {
+                            "current": len(papers_info),
+                            "total": len(papers_info) + 1,
+                            "progress": len(papers_info) / (len(papers_info) + 1),
+                            "message": "正在生成综合研究报告...",
+                            "status": "streaming",
+                            "stream_content": content_chunk  # 🆕 流式内容片段
+                        })
+
+                # 使用流式生成（如果启用）
+                report_content = await streaming_handler.generate_with_streaming(
+                    messages=[{"role": "user", "content": synthesis_prompt}],
+                    temperature=0.7,
+                    max_tokens=LLM_SYNTHESIS_MAX_TOKENS,
+                    stream_callback=stream_callback if ENABLE_STREAMING else None
+                )
 
                 if not report_content:
                     logger.warning("LLM returned empty content for synthesis, using fallback")
@@ -790,7 +821,10 @@ URL: {paper.get('url', 'N/A')}
 async def generate_research_report(
     papers_info: List[Dict[str, Any]],
     topic: str,
-    papers_analysis: Optional[List[Dict[str, Any]]] = None
+    papers_analysis: Optional[List[Dict[str, Any]]] = None,
+    progress_callback: Optional[Callable[[dict], Any]] = None,  # 🆕 新增进度回调
+    session_id: str = "default",  # 🆕 新增会话ID参数
+    save_version: bool = True  # 🆕 新增是否保存版本参数
 ) -> Dict[str, Any]:
     """
     生成综合研究报告
@@ -804,14 +838,28 @@ async def generate_research_report(
         papers_info: 论文信息列表（必须包含title, authors, abstract等）
         topic: 研究主题
         papers_analysis: 论文分析列表（可选，如果有会包含更多细节）
+        progress_callback: 进度回调函数（可选）
+        session_id: 会话ID（用于版本管理）
+        save_version: 是否保存版本（默认True）
 
     Returns:
         Dict containing:
         - report_content: Markdown format的报告内容
         - metadata: 报告元数据
+        - version_info: 版本信息（如果save_version=True）
     """
     try:
         logger.info(f'Generating comprehensive research report for topic: {topic} with {len(papers_info)} papers')
+
+        # 🆕 发送初始进度
+        if progress_callback:
+            await _send_progress(progress_callback, {
+                "current": 0,
+                "total": len(papers_info) + 1,  # 论文数 + 1个综合步骤
+                "progress": 0.0,
+                "message": f"准备生成研究报告（{len(papers_info)} 篇论文）...",
+                "status": "running"
+            })
 
         # Initialize report generator
         report_gen = ResearchReportGenerator()
@@ -828,10 +876,45 @@ async def generate_research_report(
         full_report, structured_analyses = await report_gen.generate_comprehensive_report(
             papers_info=papers_info,
             topic=topic,
-            papers_analysis=papers_analysis
+            papers_analysis=papers_analysis,
+            progress_callback=progress_callback  # 🆕 传递回调
         )
 
         logger.info(f'Research report generated successfully')
+
+        # 🆕 保存报告版本（如果启用）
+        version_info = None
+        if save_version:
+            try:
+                from ..shared.report_version_manager import get_version_manager
+
+                version_manager = get_version_manager(session_id)
+                version_info = version_manager.save_report_version(
+                    report_content=full_report,
+                    topic=topic,
+                    papers_count=len(papers_info),
+                    analysis_params={
+                        'model': report_gen.model,
+                        'mode': 'comprehensive'
+                    },
+                    metadata={
+                        'structured_analyses_count': len(structured_analyses)
+                    }
+                )
+                logger.info(f"Report version saved: {version_info['version_id']}")
+            except Exception as e:
+                logger.error(f"Failed to save report version: {e}")
+                # 不影响主流程，继续执行
+
+        # 🆕 发送完成消息
+        if progress_callback:
+            await _send_progress(progress_callback, {
+                "current": len(papers_info) + 1,
+                "total": len(papers_info) + 1,
+                "progress": 1.0,
+                "message": f"研究报告生成完成！",
+                "status": "success"
+            })
 
         # 返回内容供前端使用
         result = {
@@ -842,7 +925,8 @@ async def generate_research_report(
             'timestamp': datetime.now().isoformat(),
             'message': 'Research report generated successfully.',
             'mode': 'comprehensive',
-            'structured_analyses': structured_analyses  # 添加结构化分析数据
+            'structured_analyses': structured_analyses,  # 添加结构化分析数据
+            'version_info': version_info  # 🆕 添加版本信息
         }
 
         return result
@@ -851,6 +935,18 @@ async def generate_research_report(
         logger.error(f'Failed to generate research report: {str(e)}')
         import traceback
         logger.error(f'Traceback: {traceback.format_exc()}')
+
+        # 🆕 发送错误消息
+        if progress_callback:
+            await _send_progress(progress_callback, {
+                "current": 0,
+                "total": len(papers_info) + 1 if papers_info else 1,
+                "progress": 0.0,
+                "message": f"报告生成失败: {str(e)}",
+                "status": "error",
+                "error": str(e)
+            })
+
         return {
             'status': 'error',
             'error': str(e),
@@ -858,10 +954,25 @@ async def generate_research_report(
         }
 
 
+async def _send_progress(callback: Callable, progress_data: dict):
+    """发送进度更新（支持同步和异步回调）"""
+    try:
+        import asyncio
+        if asyncio.iscoroutinefunction(callback):
+            await callback(progress_data)
+        else:
+            callback(progress_data)
+    except Exception as e:
+        logger.error(f"发送进度更新失败: {str(e)}")
+
+
 async def generate_research_report_with_data_collection(
     papers_info: List[Dict[str, Any]],
     topic: str,
-    papers_analysis: Optional[List[Dict[str, Any]]] = None
+    papers_analysis: Optional[List[Dict[str, Any]]] = None,
+    progress_callback: Optional[Callable[[dict], Any]] = None,  # 🆕 新增进度回调
+    session_id: str = "default",  # 🆕 新增会话ID参数
+    save_version: bool = True  # 🆕 新增是否保存版本参数
 ) -> Dict[str, Any]:
     """
     生成研究报告（增强版，自动获取全文）
@@ -876,6 +987,9 @@ async def generate_research_report_with_data_collection(
         papers_info: 论文信息列表（包含title, authors, abstract, url等）
         topic: 研究主题
         papers_analysis: 论文分析列表（可选）
+        progress_callback: 进度回调函数（可选）
+        session_id: 会话ID（用于版本管理）
+        save_version: 是否保存版本（默认True）
 
     Returns:
         Dict containing report and metadata
@@ -887,7 +1001,7 @@ async def generate_research_report_with_data_collection(
         import gc
         from ..paper_manager.content_fetcher import get_paper_content_by_source_async
 
-        MAX_CONCURRENT_TASKS = 5  # 最多5个并发任务以降低API压力
+        # 🆕 使用配置中的并发数
 
         async def fetch_paper_content(i: int, paper: Dict[str, Any]) -> tuple:
             """异步获取单篇论文的全文（带超时控制）"""
@@ -923,15 +1037,15 @@ async def generate_research_report_with_data_collection(
                 enriched_paper['content_metadata'] = {'fallback': True, 'fallback_reason': str(e)}
                 return (i, enriched_paper, 'error')
 
-        # 批量顺序处理论文：先执行前MAX_CONCURRENT_TASKS个，完成后再执行后面的
-        logger.info(f"Fetching content for {len(papers_info)} papers (max {MAX_CONCURRENT_TASKS} concurrent, timeout: {FETCH_TIMEOUT}s)...")
+        # 批量顺序处理论文：先执行前 MAX_CONCURRENT_FETCH 个，完成后再执行后面的
+        logger.info(f"Fetching content for {len(papers_info)} papers (max {MAX_CONCURRENT_FETCH} concurrent, timeout: {FETCH_TIMEOUT}s)...")
 
         enriched_papers = []
         total_papers = len(papers_info)
 
         # 分批处理
-        for batch_start in range(0, total_papers, MAX_CONCURRENT_TASKS):
-            batch_end = min(batch_start + MAX_CONCURRENT_TASKS, total_papers)
+        for batch_start in range(0, total_papers, MAX_CONCURRENT_FETCH):
+            batch_end = min(batch_start + MAX_CONCURRENT_FETCH, total_papers)
             batch_papers = papers_info[batch_start:batch_end]
 
             logger.info(f"Processing fetch batch: papers {batch_start+1}-{batch_end}/{total_papers}")
@@ -948,13 +1062,16 @@ async def generate_research_report_with_data_collection(
 
             # 及时释放内存
             gc.collect()
-            logger.info(f"Completed fetch batch {batch_start//MAX_CONCURRENT_TASKS + 1}, memory freed")
+            logger.info(f"Completed fetch batch {batch_start//MAX_CONCURRENT_FETCH + 1}, memory freed")
 
         # 使用增强后的论文信息生成报告
         return await generate_research_report(
             papers_info=enriched_papers,
             topic=topic,
-            papers_analysis=papers_analysis
+            papers_analysis=papers_analysis,
+            progress_callback=progress_callback,  # 🆕 传递回调
+            session_id=session_id,  # 🆕 传递会话ID
+            save_version=save_version  # 🆕 传递版本保存标志
         )
 
     except Exception as e:

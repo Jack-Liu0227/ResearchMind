@@ -69,6 +69,8 @@ from .report_generator.reporting import (
 from .paper_manager.export_tools import (
     save_papers_to_csv,
     save_analysis_results_to_csv,
+    save_summary_to_file,
+    save_report_to_file,
 )
 
 # Uploaded Documents Module (用户上传文件处理)
@@ -154,12 +156,13 @@ __all__ = [
     # Export Tools (导出工具)
     'save_papers_to_csv',
     'save_analysis_results_to_csv',
-    'save_report_papers_to_csv',
+    'save_summary_to_file',
+    'save_report_to_file',
     'ingest_uploaded_documents',
 
     # Unified Tools (统一工具)
     'search_papers',
-    'get_paper_content',
+    'get_paper_content_async',
     'download_paper_file',
     'get_paper_info',
 

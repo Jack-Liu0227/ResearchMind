@@ -886,6 +886,38 @@ const ChatPage: React.FC = () => {
         if (message.data.success && message.data.data) {
           setGlobalBillingStats(message.data.data)
         }
+      } else if (message.type === 'analysis_complete' && message.data) {
+        // 处理批量分析完成
+        console.log('✅ [批量分析] 分析完成:', message.data)
+
+        toast.success(message.data.message || '批量分析已完成！', {
+          duration: 5000,
+          icon: '✅'
+        })
+      } else if (message.type === 'analysis_error' && message.data) {
+        // 处理批量分析错误
+        console.error('❌ [批量分析] 分析失败:', message.data)
+
+        toast.error(message.data.error || '批量分析失败', {
+          duration: 6000,
+          icon: '❌'
+        })
+      } else if (message.type === 'report_complete' && message.data) {
+        // 处理报告生成完成
+        console.log('✅ [报告生成] 生成完成:', message.data)
+
+        toast.success(message.data.message || '研究报告生成完成！', {
+          duration: 5000,
+          icon: '📄'
+        })
+      } else if (message.type === 'report_error' && message.data) {
+        // 处理报告生成错误
+        console.error('❌ [报告生成] 生成失败:', message.data)
+
+        toast.error(message.data.error || '报告生成失败', {
+          duration: 6000,
+          icon: '❌'
+        })
       }
     })
 

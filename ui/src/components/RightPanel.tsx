@@ -16,6 +16,7 @@ import { downloadFile, copyToClipboard } from '../utils'
 import { getJournalInfo, JournalInfo } from '../services/easyScholarService'
 import { API_CONFIG } from '../constants'
 import { wsService } from '../services/websocket'
+import BatchAnalysisPanel from './BatchAnalysisPanel'
 
 interface RightPanelProps {
   className?: string
@@ -1119,25 +1120,13 @@ session_id="${sessionId}"`
           )}
         </div>
 
-        {/* 🆕 第四行：批量操作按钮（始终显示，支持未选择时使用所有文献） */}
-        <div className="flex gap-2">
-          <button
-            onClick={handleBatchAnalysis}
-            disabled={loading}
-            className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            <BarChart3 className="w-3 h-3" />
-            {selectedIds.length > 0 ? `批量分析 (${selectedIds.length})` : '分析全部'}
-          </button>
-          <button
-            onClick={handleGenerateReport}
-            disabled={loading}
-            className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            <FileText className="w-3 h-3" />
-            {selectedIds.length > 0 ? `生成报告 (${selectedIds.length})` : '报告全部'}
-          </button>
-        </div>
+        {/* 🆕 批量分析面板（集成进度追踪） */}
+        <BatchAnalysisPanel
+          csvFilePath={csvFilePath}
+          sessionId={sessionId}
+          selectedPaperIds={selectedIds}
+          totalPapers={papers.length}
+        />
       </div>
 
       {/* 文献列表 */}
