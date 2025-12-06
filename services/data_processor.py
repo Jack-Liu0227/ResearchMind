@@ -66,14 +66,17 @@ class DataProcessor:
                 "message": "正在处理数据..."
             })
 
-            # Process structure data
-            structures_sent = await DataProcessor._process_structures(data, agent_id, websocket, session_id)
+            # 🔧 优化处理顺序：先发送结构化内容（文件、图片、表格），再发送其他数据
+            # 这样可以确保在前端展示时，结构化内容显示在最顶端
 
-            # Process image data
+            # 1. 优先处理文件链接（CSV 和 MD 文件）
+            await DataProcessor._process_file_links(data, agent_id, websocket, session_id)
+
+            # 2. 处理图片数据
             images_sent = await DataProcessor._process_images(data, agent_id, websocket, session_id)
 
-            # Process file links (CSV and MD files from paper_search MCP)
-            await DataProcessor._process_file_links(data, agent_id, websocket, session_id)
+            # 3. 最后处理结构数据
+            structures_sent = await DataProcessor._process_structures(data, agent_id, websocket, session_id)
 
         except Exception as e:
             logger.error(f"❌ Failed to process tool result: {e}", exc_info=True)

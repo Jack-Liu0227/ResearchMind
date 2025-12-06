@@ -28,8 +28,40 @@ const sanitizeRelativePath = (value?: string) => {
   if (!value) return undefined
   const trimmed = value.trim()
   if (!trimmed) return undefined
-  const withoutPrefix = trimmed.replace(/^([./\\])+/, '')
-  return withoutPrefix.replace(/\\/g, '/')
+
+  // 规范化路径分隔符
+  let normalized = trimmed.replace(/\\/g, '/')
+
+  // 🔧 处理绝对路径：提取 session_data/ 后面的部分
+  if (normalized.includes('session_data/')) {
+    const parts = normalized.split('session_data/')
+    if (parts.length > 1 && parts[1]) {
+      normalized = parts[1]
+      console.log('🔧 sanitizeRelativePath - extracted from session_data/:', normalized)
+    }
+  }
+  // 处理 Windows 绝对路径（如 D:/...）
+  else if (/^[A-Za-z]:\//.test(normalized)) {
+    // 尝试提取 papers/ 或其他已知目录后面的部分
+    if (normalized.includes('/papers/')) {
+      const parts = normalized.split('/papers/')
+      if (parts.length > 1 && parts[1]) {
+        normalized = 'papers/' + parts[1]
+        console.log('🔧 sanitizeRelativePath - extracted from /papers/:', normalized)
+      }
+    } else {
+      // 如果无法识别，只使用文件名
+      const filename = normalized.split('/').pop()
+      if (filename) {
+        normalized = filename
+        console.warn('⚠️ sanitizeRelativePath - could not extract relative path, using filename:', normalized)
+      }
+    }
+  }
+
+  // 移除前导的 ./ 和 /
+  const withoutPrefix = normalized.replace(/^([./])+/, '')
+  return withoutPrefix
 }
 
 const normalizeDownloadPath = (value: string): string => {
