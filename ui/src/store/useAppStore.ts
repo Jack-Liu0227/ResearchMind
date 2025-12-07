@@ -814,7 +814,21 @@ export const useAppStore = create<AppState>()(
           phononDisplayMode: state.phononDisplayMode,
         }
       },
-      onRehydrateStorage: () => (state) => {
+      // 🔧 存储恢复和错误处理（合并版本）
+      onRehydrateStorage: () => (state, error) => {
+        // 处理 Hydration 错误
+        if (error) {
+          console.error('❌ Hydration 错误:', error)
+          // 清除损坏的数据
+          try {
+            localStorage.removeItem('researchmind-app-store')
+            console.log('✅ 已清除损坏的存储数据')
+          } catch (e) {
+            console.error('清除存储失败:', e)
+          }
+          return
+        }
+
         if (!state) return
 
         console.log('🔄 恢复存储数据...')
@@ -945,15 +959,33 @@ export const useAppStore = create<AppState>()(
         if (!Array.isArray(state.phononImages)) {
           state.phononImages = []
         }
+
+        console.log('✅ Hydration 成功')
       },
-      // 🔧 添加存储错误处理
       storage: {
         getItem: (name) => {
           try {
             const str = localStorage.getItem(name)
-            return str ? JSON.parse(str) : null
+            if (!str) return null
+
+            // 尝试解析 JSON
+            const parsed = JSON.parse(str)
+
+            // 验证数据结构
+            if (parsed && typeof parsed === 'object' && parsed.state) {
+              return parsed
+            }
+
+            console.warn('⚠️ 存储数据格式不正确，返回 null')
+            return null
           } catch (error) {
             console.error('❌ 读取存储时出错:', error)
+            // 清除损坏的数据
+            try {
+              localStorage.removeItem(name)
+            } catch (e) {
+              // 忽略清除错误
+            }
             return null
           }
         },

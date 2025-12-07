@@ -8,10 +8,20 @@ import './index.css'
 import { initStorage } from './utils/storage'
 
 // 初始化存储系统（自动修复侧边栏状态）
-try {
-  initStorage()
-} catch (error) {
-  console.error('存储初始化失败:', error)
+// 🔧 添加浏览器环境检查，防止 SSR Hydration 错误
+if (typeof window !== 'undefined') {
+  try {
+    initStorage()
+  } catch (error) {
+    console.error('存储初始化失败:', error)
+    // 清除损坏的数据
+    try {
+      localStorage.clear()
+      console.log('✅ 已清除损坏的存储数据，请刷新页面')
+    } catch (e) {
+      console.error('清除存储失败:', e)
+    }
+  }
 }
 
 const queryClient = new QueryClient({

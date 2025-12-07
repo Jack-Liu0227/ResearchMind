@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>修复存储问题 - ResearchMind</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button.danger {
+            background: #dc3545;
+        }
+        button.danger:hover {
+            background: #c82333;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .log {
+            max-height: 300px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            font-family: monospace;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 ResearchMind 存储修复工具</h1>
+        
+        <div class="info">
+            <strong>说明：</strong>此工具用于修复 Hydration 错误和存储问题
+        </div>
+
+        <div id="status"></div>
+
+        <h2>操作选项</h2>
+        
+        <button onclick="checkStorage()">🔍 检查存储状态</button>
+        <button onclick="repairStorage()">🔧 修复存储</button>
+        <button onclick="clearStorage()" class="danger">🗑️ 清除所有存储</button>
+        <button onclick="goToApp()">🏠 返回应用</button>
+
+        <div id="log" class="log" style="display: none;">
+            <h3>操作日志</h3>
+            <div id="logContent"></div>
+        </div>
+    </div>
+
+    <script>
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const logContent = document.getElementById('logContent');
+            logDiv.style.display = 'block';
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logContent.appendChild(entry);
+            logContent.scrollTop = logContent.scrollHeight;
+        }
+
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+        }
+
+        function checkStorage() {
+            log('开始检查存储状态...');
+            
+            try {
+                const keys = Object.keys(localStorage);
+                log(`找到 ${keys.length} 个 localStorage 键`);
+                
+                const researchMindKeys = keys.filter(k => k.includes('researchmind'));
+                log(`ResearchMind 相关键: ${researchMindKeys.length} 个`);
+                
+                researchMindKeys.forEach(key => {
+                    const value = localStorage.getItem(key);
+                    const size = new Blob([value]).size;
+                    log(`  - ${key}: ${(size / 1024).toFixed(2)} KB`);
+                });
+                
+                // 检查数据有效性
+                const appStore = localStorage.getItem('researchmind-app-store');
+                if (appStore) {
+                    try {
+                        const data = JSON.parse(appStore);
+                        log('✅ 应用存储数据格式正确');
+                        showStatus('存储状态正常', 'success');
+                    } catch (e) {
+                        log('❌ 应用存储数据格式错误: ' + e.message, 'error');
+                        showStatus('存储数据损坏，建议修复', 'error');
+                    }
+                } else {
+                    log('⚠️ 未找到应用存储数据');
+                    showStatus('未找到存储数据', 'info');
+                }
+                
+            } catch (error) {
+                log('检查失败: ' + error.message, 'error');
+                showStatus('检查失败: ' + error.message, 'error');
+            }
+        }
+
+        function repairStorage() {
+            log('开始修复存储...');
+            
+            try {
+                // 备份当前数据
+                const backup = {};
+                Object.keys(localStorage).forEach(key => {
+                    if (key.includes('researchmind')) {
+                        backup[key] = localStorage.getItem(key);
+                    }
+                });
+                log(`已备份 ${Object.keys(backup).length} 个键`);
+                
+                // 清除损坏的数据
+                localStorage.removeItem('researchmind-app-store');
+                log('已清除应用存储');
+                
+                // 设置版本号
+                localStorage.setItem('researchmind-version', '2.0.0');
+                log('已设置版本号');
+                
+                showStatus('修复完成！请刷新页面', 'success');
+                log('✅ 修复完成');
+                
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+                
+            } catch (error) {
+                log('修复失败: ' + error.message, 'error');
+                showStatus('修复失败: ' + error.message, 'error');
+            }
+        }
+
+        function clearStorage() {
+            if (!confirm('确定要清除所有存储数据吗？此操作不可恢复！')) {
+                return;
+            }
+            
+            log('开始清除所有存储...');
+            
+            try {
+                localStorage.clear();
+                sessionStorage.clear();
+                log('✅ 已清除所有 localStorage 和 sessionStorage');
+                
+                showStatus('清除完成！正在跳转...', 'success');
+                
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 1500);
+                
+            } catch (error) {
+                log('清除失败: ' + error.message, 'error');
+                showStatus('清除失败: ' + error.message, 'error');
+            }
+        }
+
+        function goToApp() {
+            window.location.href = '/';
+        }
+
+        // 页面加载时自动检查
+        window.addEventListener('load', () => {
+            log('页面加载完成');
+            checkStorage();
+        });
+    </script>
+</body>
+</html>
+

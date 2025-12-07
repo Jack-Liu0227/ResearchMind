@@ -136,7 +136,48 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
   }
 
   const parseCsv = (text: string): CsvData => {
-    const lines = text.split('\n').filter(line => line.trim())
+    // 使用更智能的方式解析 CSV，正确处理引号内的换行符
+    const lines: string[] = []
+    let currentLine = ''
+    let inQuotes = false
+
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i]
+      const nextChar = text[i + 1]
+
+      if (char === '"') {
+        if (inQuotes && nextChar === '"') {
+          // 转义的引号
+          currentLine += '"'
+          i++
+        } else {
+          // 切换引号状态
+          inQuotes = !inQuotes
+        }
+        currentLine += char
+      } else if (char === '\n' && !inQuotes) {
+        // 只有在引号外的换行符才是真正的行分隔符
+        if (currentLine.trim()) {
+          lines.push(currentLine)
+        }
+        currentLine = ''
+      } else if (char === '\r' && nextChar === '\n' && !inQuotes) {
+        // 处理 Windows 风格的换行符 \r\n
+        if (currentLine.trim()) {
+          lines.push(currentLine)
+        }
+        currentLine = ''
+        i++ // 跳过 \n
+      } else {
+        currentLine += char
+      }
+    }
+
+    // 添加最后一行
+    if (currentLine.trim()) {
+      lines.push(currentLine)
+    }
+
     if (lines.length === 0) {
       return { headers: [], rows: [] }
     }
@@ -158,12 +199,15 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
 
       if (char === '"') {
         if (inQuotes && nextChar === '"') {
+          // 转义的引号（两个连续的引号表示一个引号字符）
           current += '"'
           i++
         } else {
+          // 切换引号状态
           inQuotes = !inQuotes
         }
       } else if (char === ',' && !inQuotes) {
+        // 只有在引号外的逗号才是字段分隔符
         result.push(current.trim())
         current = ''
       } else {
@@ -280,7 +324,7 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
     return expandedCells.has(`${rowIndex}-${cellIndex}`)
   }
 
-  const shouldTruncate = (text: string, maxLength: number = 100) => {
+  const shouldTruncate = (text: string, maxLength: number = 200) => {
     return text && text.length > maxLength
   }
 
@@ -289,12 +333,12 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
     const needsTruncate = shouldTruncate(cell)
 
     if (!needsTruncate) {
-      return <span>{cell}</span>
+      return <span className="whitespace-pre-wrap">{cell}</span>
     }
 
     return (
       <div className="group">
-        <div className={isExpanded ? '' : 'line-clamp-2'}>
+        <div className={isExpanded ? 'whitespace-pre-wrap' : 'line-clamp-4'}>
           {cell}
         </div>
         <button
@@ -302,9 +346,19 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
             e.stopPropagation()
             toggleCellExpansion(rowIndex, cellIndex)
           }}
-          className="mt-1 text-xs text-blue-600 hover:text-blue-800 hover:underline focus:outline-none"
+          className="mt-1 text-xs text-blue-600 hover:text-blue-800 hover:underline focus:outline-none inline-flex items-center gap-1"
         >
-          {isExpanded ? '收起' : '展开全部'}
+          {isExpanded ? (
+            <>
+              <ChevronRight className="w-3 h-3" />
+              收起
+            </>
+          ) : (
+            <>
+              <ChevronDown className="w-3 h-3" />
+              展开全部 ({cell.length} 字符)
+            </>
+          )}
         </button>
       </div>
     )
@@ -400,13 +454,13 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
 
             {/* Table */}
             <div className="overflow-auto flex-1">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-100 sticky top-0">
+              <table className="w-full text-sm table-auto">
+                <thead className="bg-gray-100 sticky top-0 z-10">
                   <tr>
                     {csvData.headers.map((header, index) => (
                       <th
                         key={index}
-                        className="px-4 py-2 text-left font-medium text-gray-700 border-b border-gray-200 whitespace-nowrap"
+                        className="px-4 py-2 text-left font-medium text-gray-700 border-b border-gray-200 whitespace-nowrap min-w-[120px]"
                       >
                         {header}
                       </th>
@@ -424,7 +478,7 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
                           key={cellIndex}
                           className="px-4 py-2 text-gray-700 border-b border-gray-100 align-top"
                         >
-                          <div className="max-w-2xl">
+                          <div className="min-w-[200px] max-w-[600px] break-words whitespace-pre-wrap">
                             {renderCellContent(cell, rowIndex, cellIndex)}
                           </div>
                         </td>
@@ -487,13 +541,13 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
               className="overflow-auto"
               style={{ maxHeight }}
             >
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100 sticky top-0">
+            <table className="w-full text-sm table-auto">
+              <thead className="bg-gray-100 sticky top-0 z-10">
                 <tr>
                   {csvData.headers.map((header, index) => (
                     <th
                       key={index}
-                      className="px-4 py-2 text-left font-medium text-gray-700 border-b border-gray-200 whitespace-nowrap"
+                      className="px-4 py-2 text-left font-medium text-gray-700 border-b border-gray-200 whitespace-nowrap min-w-[120px]"
                     >
                       {header}
                     </th>
@@ -511,7 +565,7 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
                         key={cellIndex}
                         className="px-4 py-2 text-gray-700 border-b border-gray-100 align-top"
                       >
-                        <div className="max-w-md">
+                        <div className="min-w-[200px] max-w-[600px] break-words whitespace-pre-wrap">
                           {renderCellContent(cell, rowIndex, cellIndex)}
                         </div>
                       </td>

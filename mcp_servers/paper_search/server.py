@@ -1863,10 +1863,12 @@ async def batch_paper_analysis(
         except Exception as e:
             logger.warning(f"发送进度更新失败: {str(e)}")
 
-    # 执行批量分析（带进度追踪）
+    # 执行批量分析（带进度追踪 + 综合总结）
     result = await batch_paper_analysis_impl(
         papers=papers,
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
+        generate_summary=True,  # 🆕 启用综合总结
+        topic=topic  # 🆕 传递研究主题
     )
 
     # 保存总结到 Markdown 文件

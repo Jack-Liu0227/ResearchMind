@@ -421,10 +421,12 @@ def _parse_analysis_text(analysis_text: str) -> Dict[str, str]:
 async def batch_paper_analysis(
     papers: List[Dict] = None,
     progress_callback: Optional[Callable[[dict], Any]] = None,
-    max_concurrent: int = None  # 🆕 新增参数
+    max_concurrent: int = None,  # 🆕 新增参数
+    generate_summary: bool = True,  # 🆕 新增参数：是否生成综合总结
+    topic: str = None  # 🆕 新增参数：研究主题（生成综合总结时需要）
 ) -> Dict[str, Any]:
     """
-    批量分析多篇论文 - 受控并发版本（支持进度追踪）
+    批量分析多篇论文 - 受控并发版本（支持进度追踪 + 综合总结）
 
     使用 Semaphore 控制并发数量，平衡性能和进度更新的实时性
 
@@ -432,9 +434,11 @@ async def batch_paper_analysis(
         papers: 论文列表
         progress_callback: 进度更新回调函数（可选）
         max_concurrent: 最大并发数（可选，默认从配置读取）
+        generate_summary: 是否生成综合总结（默认 True）
+        topic: 研究主题（如果 generate_summary=True，建议提供以生成更准确的总结）
 
     Returns:
-        包含批量分析结果的字典
+        包含批量分析结果的字典，如果 generate_summary=True，还包含 overall_analysis 字段
     """
     try:
         import asyncio
@@ -592,6 +596,49 @@ async def batch_paper_analysis(
                 "status": "success"
             })
 
+        # 🆕 生成综合总结（如果启用）
+        overall_analysis = None
+        if generate_summary and results:
+            try:
+                logger.info(f'开始生成综合总结（共 {len(results)} 篇论文）')
+
+                # 发送进度更新
+                if progress_callback:
+                    await _send_progress(progress_callback, {
+                        "current": total_papers,
+                        "total": total_papers + 1,  # +1 表示还有综合总结步骤
+                        "progress": total_papers / (total_papers + 1),
+                        "message": "正在生成综合总结...",
+                        "status": "running"
+                    })
+
+                # 调用综合总结生成函数
+                summary_result = await generate_batch_summary(
+                    analysis_results=results,
+                    topic=topic or "研究主题",
+                    progress_callback=progress_callback
+                )
+
+                if summary_result.get('status') == 'success':
+                    overall_analysis = summary_result.get('overall_analysis')
+                    logger.info('综合总结生成成功')
+                else:
+                    logger.warning(f'综合总结生成失败: {summary_result.get("error")}')
+
+                # 发送综合总结完成进度
+                if progress_callback:
+                    await _send_progress(progress_callback, {
+                        "current": total_papers + 1,
+                        "total": total_papers + 1,
+                        "progress": 1.0,
+                        "message": "综合总结生成完成！",
+                        "status": "success"
+                    })
+
+            except Exception as e:
+                logger.error(f'生成综合总结时出错: {str(e)}')
+                # 不影响主流程，继续返回结果
+
         # 返回结果
         batch_result = {
             'status': 'success',
@@ -600,6 +647,7 @@ async def batch_paper_analysis(
             'failed_analyses': len(failed_papers),
             'results': results,
             'failures': failed_papers,
+            'overall_analysis': overall_analysis,  # 🆕 添加综合总结字段
             'timestamp': datetime.now().isoformat()
         }
 
@@ -607,7 +655,8 @@ async def batch_paper_analysis(
             'Batch analysis completed',
             total=len(papers),
             successful=len(results),
-            failed=len(failed_papers)
+            failed=len(failed_papers),
+            has_summary=overall_analysis is not None
         )
         return batch_result
 
@@ -629,6 +678,166 @@ async def batch_paper_analysis(
             'status': 'error',
             'error': str(e),
             'timestamp': datetime.now().isoformat()
+        }
+
+
+async def generate_batch_summary(
+    analysis_results: List[Dict[str, Any]],
+    topic: str,
+    progress_callback: Optional[Callable[[dict], Any]] = None
+) -> Dict[str, Any]:
+    """
+    基于批量分析结果生成综合研究总结
+
+    使用 LLM 分析所有论文的关键信息，生成包含以下内容的综合报告：
+    - 研究趋势总结
+    - 方法论对比分析
+    - 关键发现汇总
+    - 研究空白识别
+    - 技术路线总结
+
+    Args:
+        analysis_results: 批量分析的 results 列表（来自 batch_paper_analysis）
+        topic: 研究主题
+        progress_callback: 进度回调函数（可选）
+
+    Returns:
+        Dict containing:
+        - status: 'success' or 'error'
+        - overall_analysis: 综合总结文本（Markdown 格式）
+        - topic: 研究主题
+        - papers_count: 分析的论文数量
+    """
+    try:
+        from litellm import completion
+        import os
+        import asyncio
+
+        if not analysis_results:
+            return {
+                'status': 'error',
+                'error': 'No analysis results provided'
+            }
+
+        logger.info(f'生成综合总结：{len(analysis_results)} 篇论文，主题：{topic}')
+
+        # 提取所有论文的关键信息
+        papers_summary = []
+        for i, result in enumerate(analysis_results, 1):
+            key_info = result.get('key_info', {})
+            title = result.get('title', 'Unknown')
+
+            # 构建单篇论文的摘要
+            paper_summary = f"""
+【论文 {i}】{title}
+- 研究目标：{key_info.get('objective', '未提取')}
+- 研究方法：{key_info.get('method', '未提取')}
+- 主要结果：{key_info.get('result', '未提取')}
+- 创新点：{key_info.get('innovation', '未提取')}
+"""
+            papers_summary.append(paper_summary.strip())
+
+        # 构建综合总结 Prompt
+        papers_text = '\n\n'.join(papers_summary)
+
+        prompt = f"""你是一位资深的学术研究分析专家。请基于以下 {len(analysis_results)} 篇论文的分析结果，生成一份综合研究报告。
+
+研究主题：{topic}
+
+论文分析摘要：
+{papers_text}
+
+请生成一份结构化的综合分析报告，包含以下五个部分（使用 Markdown 格式）：
+
+## 1. 研究趋势总结
+总结该领域的主要研究方向和发展趋势，识别热点问题和研究重点。（200-300字）
+
+## 2. 方法论对比分析
+对比不同论文使用的研究方法，分析各方法的优势、局限性和适用场景。（200-300字）
+
+## 3. 关键发现汇总
+提炼所有论文的核心发现和结论，总结该领域已取得的重要成果。（200-300字）
+
+## 4. 研究空白识别
+识别当前研究中的空白、未解决的问题和潜在的研究机会。（200-300字）
+
+## 5. 技术路线总结
+总结主流的技术实现路径和方法论框架，为后续研究提供参考。（200-300字）
+
+要求：
+- 使用学术化、专业的语言
+- 结构清晰，逻辑严谨
+- 基于提供的论文信息进行分析，不要编造内容
+- 每部分控制在 200-300 字
+- 使用中文输出
+"""
+
+        # 配置 LLM 参数
+        model = os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')
+        api_key = os.getenv('OPENAI_API_KEY')
+        api_base = os.getenv('OPENAI_BASE_URL')
+
+        # 重试机制
+        max_retries = 3
+        retry_delay = 3
+
+        for attempt in range(max_retries):
+            try:
+                logger.info(f'调用 LLM 生成综合总结（尝试 {attempt + 1}/{max_retries}）')
+
+                loop = asyncio.get_event_loop()
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: completion(
+                            model=model,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0.3,
+                            timeout=120,  # 综合总结需要更长时间
+                            api_key=api_key,
+                            api_base=api_base
+                        )
+                    ),
+                    timeout=130
+                )
+                break
+
+            except (asyncio.TimeoutError, Exception) as e:
+                error_type = type(e).__name__
+                logger.warning(
+                    f'综合总结生成尝试 {attempt + 1}/{max_retries} 失败',
+                    error_type=error_type,
+                    error_message=str(e)[:100]
+                )
+
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    error_msg = f'综合总结生成失败（{max_retries} 次尝试后）: {error_type}'
+                    logger.error(error_msg)
+                    return {
+                        'status': 'error',
+                        'error': error_msg
+                    }
+
+        # 提取 LLM 响应
+        overall_analysis = response.choices[0].message.content.strip()
+
+        logger.info(f'综合总结生成成功（长度: {len(overall_analysis)} 字符）')
+
+        return {
+            'status': 'success',
+            'overall_analysis': overall_analysis,
+            'topic': topic,
+            'papers_count': len(analysis_results)
+        }
+
+    except Exception as e:
+        logger.error(f'生成综合总结时出错: {str(e)}')
+        return {
+            'status': 'error',
+            'error': str(e)
         }
 
 
