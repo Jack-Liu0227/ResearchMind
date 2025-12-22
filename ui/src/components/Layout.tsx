@@ -99,7 +99,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, [isResizingSidebar, isResizingRightPanel, sidebarWidth, rightPanelWidth])
 
   return (
-    <div className="fixed inset-0 w-full h-[100dvh] bg-transparent overflow-hidden">
+    <div className="fixed inset-0 w-full bg-transparent overflow-hidden">
       {/* 顶部导航栏 - Absolute positioning inside fixed container */}
       <div className="absolute top-0 left-0 right-0 h-14 z-[200]">
         <Navbar />
@@ -168,7 +168,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         )}
 
         {/* 中间主要内容区域 */}
-        <div className={`flex-1 flex flex-col min-w-0 overflow-hidden relative transition-all ${!isMobile ? 'glass-panel shadow-none' : 'bg-transparent'}`}>
+        <div className={`flex-1 flex flex-col min-w-0 h-full overflow-hidden relative transition-all ${!isMobile ? 'glass-panel shadow-none' : 'bg-transparent'}`}>
           {children}
         </div>
 

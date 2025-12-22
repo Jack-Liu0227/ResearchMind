@@ -503,7 +503,7 @@ const ChatInterface: React.FC = () => {
       </div>
 
       {/* 输入区域 (Floating Glass Style on Desktop, Docked on Mobile) */}
-      <div className="flex-shrink-0 bg-transparent z-10 transition-all duration-300 ease-in-out sm:p-5">
+      <div className="flex-shrink-0 bg-transparent z-10 transition-all duration-300 ease-in-out p-2 sm:p-5 pb-24 sm:pb-5">
         <div className="max-w-4xl mx-auto relative group">
 
           {/* 玻璃拟态容器 */}
