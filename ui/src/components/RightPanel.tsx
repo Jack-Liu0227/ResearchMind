@@ -3,7 +3,7 @@
  */
 
 import React, { useMemo, useState, useEffect } from 'react'
-import { Download, ExternalLink, Image as ImageIcon, FileText, Table as TableIcon, ChevronDown, ChevronRight, CheckSquare, Square, BarChart3, Calendar, User, BookOpen, Award, RefreshCw, AlertCircle } from 'lucide-react'
+import { Download, ExternalLink, Image as ImageIcon, FileText, Table as TableIcon, ChevronDown, ChevronRight, CheckSquare, Square, BarChart3, Calendar, User, BookOpen, Award, RefreshCw, AlertCircle, X } from 'lucide-react'
 import StructureViewerThreeJS from './StructureViewerThreeJS'
 import StructureList from './StructureList'
 import FullscreenViewer from './FullscreenViewer'
@@ -286,12 +286,11 @@ const RightPanel: React.FC<RightPanelProps> = ({
         {onToggle && (
           <button
             onClick={onToggle}
-            className="p-1.5 hover:bg-white/50 rounded-lg transition-colors"
-            title="隐藏面板"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors text-sm font-medium"
+            title="关闭面板"
           >
-            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X className="w-4 h-4" />
+            <span>关闭</span>
           </button>
         )}
       </div>
@@ -300,8 +299,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
         <button
           onClick={() => setActiveTab('structures')}
           className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-lg transition-all ${activeTab === 'structures'
-              ? 'bg-white shadow-sm text-primary-700'
-              : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+            ? 'bg-white shadow-sm text-primary-700'
+            : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
             }`}
         >
           结构 ({structureCount})
@@ -309,8 +308,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
         <button
           onClick={() => setActiveTab('images')}
           className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-lg transition-all ${activeTab === 'images'
-              ? 'bg-white shadow-sm text-primary-700'
-              : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+            ? 'bg-white shadow-sm text-primary-700'
+            : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
             }`}
         >
           图片 ({sortedPhononImages.length})
@@ -318,8 +317,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
         <button
           onClick={() => setActiveTab('files')}
           className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-lg transition-all ${activeTab === 'files'
-              ? 'bg-white shadow-sm text-primary-700'
-              : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+            ? 'bg-white shadow-sm text-primary-700'
+            : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
             }`}
         >
           数据 ({dataFiles.length})
@@ -327,8 +326,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
         <button
           onClick={() => setActiveTab('papers')}
           className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-lg transition-all ${activeTab === 'papers'
-              ? 'bg-white shadow-sm text-primary-700'
-              : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+            ? 'bg-white shadow-sm text-primary-700'
+            : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
             }`}
         >
           文献 ({currentPapersCount})
@@ -525,8 +524,8 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
                       toggleDataExpansion(index)
                     }}
                     className={`px-3 py-1.5 rounded transition-colors flex items-center space-x-1 text-sm font-medium ${isDataExpanded
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                        : 'bg-black bg-opacity-50 hover:bg-opacity-70 text-white'
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                      : 'bg-black bg-opacity-50 hover:bg-opacity-70 text-white'
                       }`}
                     title={isDataExpanded ? "隐藏原始数据" : "显示原始数据"}
                   >
@@ -813,6 +812,19 @@ const PapersTab: React.FC = () => {
   const loadPapers = async () => {
     if (!csvFilePath || !sessionId) return
 
+    // 🔧 路径清理：如果传入的是下载URL，尝试提取真实路径
+    let cleanPath = csvFilePath
+    // 如果包含 /api/download/，说明是 URL，尝试提取真实路径
+    // 格式可能为: http://host:port/api/download/path/to/file.csv
+    // 或者: /api/download/path/to/file.csv
+    if (cleanPath.includes('/api/download/')) {
+      const parts = cleanPath.split('/api/download/')
+      if (parts.length > 1) {
+        cleanPath = parts[1]
+        console.log('🔧 [RightPanel] 自动修正 CSV 路径:', { original: csvFilePath, cleaned: cleanPath })
+      }
+    }
+
     setLoading(true)
     try {
       const response = await fetch(`${API_CONFIG.BASE_URL}/api/mcp/call_tool`, {
@@ -824,13 +836,21 @@ const PapersTab: React.FC = () => {
         body: JSON.stringify({
           tool_name: 'list_papers_from_csv',
           arguments: {
-            csv_file_path: csvFilePath,
+            csv_file_path: cleanPath,
             session_id: sessionId,
           }
         })
       })
 
-      const result = await response.json()
+      let result
+      try {
+        result = await response.json()
+      } catch (jsonError) {
+        console.error('❌ Failed to parse JSON response:', jsonError)
+        const text = await response.text().catch(() => 'No response body')
+        console.error('❌ Response text:', text.slice(0, 500)) // Log first 500 chars
+        throw new Error(`服务器响应格式错误 (${response.status} ${response.statusText})`)
+      }
 
       // 🆕 调试：检查 API 响应
       console.log('🔍 API 响应:', {
@@ -1137,8 +1157,8 @@ session_id="${sessionId}"`
             <button
               onClick={() => setGroupByTopic(!groupByTopic)}
               className={`text-xs px-3 py-1 rounded transition-colors ${groupByTopic
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                 }`}
             >
               {groupByTopic ? '分组显示' : '列表显示'}

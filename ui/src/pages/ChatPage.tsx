@@ -39,7 +39,8 @@ const ChatPage: React.FC = () => {
     setUserBillingStats,
     setGlobalBillingStats,
     setPapersData,
-    messages
+    messages,
+    isLoading
   } = useAppStore()
 
   const pendingFileMetadataRef = useRef<any[]>([])
@@ -627,7 +628,7 @@ const ChatPage: React.FC = () => {
 
         // 不自动显示全屏，让用户在右侧面板查看
         // setShowPhononVisualization(true)
-      } else if (message.type === 'tool_execution' && message.data) {
+      } else if ((message.type as any) === 'tool_execution' && message.data) {
         // 🆕 处理工具执行消息
         console.log('🔧 收到工具执行消息:', message.data)
         console.log('🔧 消息类型:', message.type)
@@ -869,24 +870,24 @@ const ChatPage: React.FC = () => {
           const phononFiles = createSessionFilesFromPhononData(phononData, currentMessage.id)
           phononFiles.forEach((file) => addToCurrentSessionFiles(file))
         }
-      } else if (message.type === 'conversation_stats' && message.data) {
+      } else if ((message.type as any) === 'conversation_stats' && message.data) {
         // 🆕 处理会话计费统计响应
         console.log('📊 [计费统计] 收到会话统计:', message.data)
         // 会话统计已经通过 billingData 更新，这里不需要额外处理
         // BillingStatsPanel 会监听 billingData 的变化
-      } else if (message.type === 'user_stats' && message.data) {
+      } else if ((message.type as any) === 'user_stats' && message.data) {
         // 🆕 处理用户计费统计响应
         console.log('📊 [计费统计] 收到用户统计:', message.data)
         if (message.data.success && message.data.data) {
           setUserBillingStats(message.data.data)
         }
-      } else if (message.type === 'global_stats' && message.data) {
+      } else if ((message.type as any) === 'global_stats' && message.data) {
         // 🆕 处理全局计费统计响应
         console.log('📊 [计费统计] 收到全局统计:', message.data)
         if (message.data.success && message.data.data) {
           setGlobalBillingStats(message.data.data)
         }
-      } else if (message.type === 'analysis_complete' && message.data) {
+      } else if ((message.type as any) === 'analysis_complete' && message.data) {
         // 处理批量分析完成
         console.log('✅ [批量分析] 分析完成:', message.data)
 
@@ -894,7 +895,7 @@ const ChatPage: React.FC = () => {
           duration: 5000,
           icon: '✅'
         })
-      } else if (message.type === 'analysis_error' && message.data) {
+      } else if ((message.type as any) === 'analysis_error' && message.data) {
         // 处理批量分析错误
         console.error('❌ [批量分析] 分析失败:', message.data)
 
@@ -902,7 +903,7 @@ const ChatPage: React.FC = () => {
           duration: 6000,
           icon: '❌'
         })
-      } else if (message.type === 'report_complete' && message.data) {
+      } else if ((message.type as any) === 'report_complete' && message.data) {
         // 处理报告生成完成
         console.log('✅ [报告生成] 生成完成:', message.data)
 
@@ -910,7 +911,7 @@ const ChatPage: React.FC = () => {
           duration: 5000,
           icon: '📄'
         })
-      } else if (message.type === 'report_error' && message.data) {
+      } else if ((message.type as any) === 'report_error' && message.data) {
         // 处理报告生成错误
         console.error('❌ [报告生成] 生成失败:', message.data)
 
@@ -944,7 +945,10 @@ const ChatPage: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col">
-      {/* 智能体选择器 - 已移除，功能集成至顶部导航栏 */}
+      {/* 智能体选择器 - 恢复显示，以确保用户明确当前使用的智能体 */}
+      <div className="flex-none bg-white border-b border-gray-200 z-10 relative hidden md:block">
+        <AgentSelector />
+      </div>
 
       {/* 主内容区域 */}
       <div className="flex-1 min-h-0">

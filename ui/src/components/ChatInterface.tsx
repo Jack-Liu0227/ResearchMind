@@ -498,16 +498,16 @@ const ChatInterface: React.FC = () => {
   return (
     <div className="h-full flex flex-col">
       {/* 消息列表 */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden pt-[88px] md:pt-0">
         <MessageList messages={messages} onRegenerate={handleRegenerate} />
       </div>
 
-      {/* 输入区域 (Floating Glass Style) */}
-      <div className="flex-shrink-0 p-2 sm:p-5 bg-transparent z-10 transition-all duration-300 ease-in-out">
+      {/* 输入区域 (Floating Glass Style on Desktop, Docked on Mobile) */}
+      <div className="flex-shrink-0 bg-transparent z-10 transition-all duration-300 ease-in-out sm:p-5">
         <div className="max-w-4xl mx-auto relative group">
 
           {/* 玻璃拟态容器 */}
-          <div className="glass-panel rounded-2xl p-1.5 sm:p-3 shadow-2xl backdrop-blur-xl border border-white/40 bg-white/60 transition-all hover:bg-white/70 hover:shadow-primary-500/10">
+          <div className="glass-panel border-t border-white/40 bg-white/60 shadow-2xl backdrop-blur-xl sm:rounded-2xl sm:border p-1.5 sm:p-3 transition-all hover:bg-white/70 hover:shadow-primary-500/10">
 
             {/* 文件上传控件 */}
             <input
@@ -579,8 +579,8 @@ const ChatInterface: React.FC = () => {
                                 }
                               }}
                               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-left ${currentAgent?.id === agent.id
-                                  ? 'bg-primary-50 text-primary-900 border border-primary-100'
-                                  : 'hover:bg-black/5 text-gray-700 border border-transparent'
+                                ? 'bg-primary-50 text-primary-900 border border-primary-100'
+                                : 'hover:bg-black/5 text-gray-700 border border-transparent'
                                 }`}
                             >
                               <Bot className={`w-4 h-4 ${currentAgent?.id === agent.id ? 'text-primary-600' : 'text-gray-400'}`} />

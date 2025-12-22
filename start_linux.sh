@@ -35,6 +35,10 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # ----------------------------- 全局配置 -----------------------------
+# 路径配置
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+LOG_DIR="${PROJECT_ROOT}/../data/logs"
+
 # 重启配置
 MAX_RESTART_ATTEMPTS=3          # 最大重启尝试次数
 RESTART_DELAY_BASE=5            # 基础重启延迟（秒）
@@ -44,14 +48,14 @@ PORT_WAIT_TIMEOUT=120           # 端口释放等待超时（秒）- 同步增�
 PORT_CHECK_INTERVAL=1           # 端口检查间隔（秒）
 
 # 日志文件
-STARTUP_LOG="logs/startup.log"
-RESTART_LOG="logs/restart.log"
+STARTUP_LOG="${LOG_DIR}/startup.log"
+RESTART_LOG="${LOG_DIR}/restart.log"
 
 # ----------------------------- 日志工具 -----------------------------
 # 确保日志目录存在
 ensure_log_dir() {
-    if [ ! -d "logs" ]; then
-        mkdir -p logs
+    if [ ! -d "${LOG_DIR}" ]; then
+        mkdir -p "${LOG_DIR}"
     fi
 }
 
@@ -214,10 +218,10 @@ install_dependencies() {
     if [[ "$OSTYPE" != "msys" && "$OSTYPE" != "win32" && -z "${MSYSTEM-}" ]]; then
         if [ -f "uv.lock" ] || [ -f "pyproject.toml" ]; then
             log_info "检测到项目配置文件，运行 uv sync..."
-            if uv sync > logs/install.log 2>&1; then
+            if uv sync > "${LOG_DIR}/install.log" 2>&1; then
                 log_success "依赖同步完成"
             else
-                log_error "依赖同步失败，请检查 logs/install.log"
+                log_error "依赖同步失败，请检查 ${LOG_DIR}/install.log"
                 # 尝试继续，也许只是部分失败
             fi
         fi
@@ -225,7 +229,7 @@ install_dependencies() {
 }
 
 prepare_workspace() {
-    mkdir -p logs
+    ensure_log_dir
     : > .service_pids
     : > "$STARTUP_LOG"
     : > "$RESTART_LOG"
@@ -493,9 +497,9 @@ start_mcp_service() {
     if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
         log_info "检测到 Windows/Git Bash 环境，使用兼容模式启动..."
         unset VIRTUAL_ENV
-        nohup uv run --no-project python "$script_path" > "../logs/${log_name}" 2>&1 &
+        nohup uv run --no-project python "$script_path" > "${LOG_DIR}/${log_name}" 2>&1 &
     else
-        nohup uv run python "$script_path" > "../logs/${log_name}" 2>&1 &
+        nohup uv run python "$script_path" > "${LOG_DIR}/${log_name}" 2>&1 &
     fi
 
     local pid=$!
@@ -535,9 +539,9 @@ start_backend() {
     if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
         log_info "检测到 Windows/Git Bash 环境，使用兼容模式启动..."
         unset VIRTUAL_ENV
-        nohup uv run --no-project python main.py > logs/backend.log 2>&1 &
+        nohup uv run --no-project python main.py > "${LOG_DIR}/backend.log" 2>&1 &
     else
-        nohup uv run python main.py > logs/backend.log 2>&1 &
+        nohup uv run python main.py > "${LOG_DIR}/backend.log" 2>&1 &
     fi
 
     local pid=$!
@@ -579,7 +583,7 @@ start_frontend() {
 
     log_info "启动 Vite 开发服务器 (${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT})..."
     pushd ui >/dev/null
-    nohup npm run dev -- --host "${VITE_FRONTEND_HOST}" --port "${VITE_FRONTEND_PORT}" > ../logs/frontend.log 2>&1 &
+    nohup npm run dev -- --host "${VITE_FRONTEND_HOST}" --port "${VITE_FRONTEND_PORT}" > "${LOG_DIR}/frontend.log" 2>&1 &
     local pid=$!
     popd >/dev/null
     register_pid "$pid"
@@ -665,13 +669,13 @@ print_summary() {
     fi
 
     echo -e "${BLUE}日志文件:${NC}"
-    echo "  logs/backend.log      - 后端日志"
-    echo "  logs/database.log     - 数据库 MCP 日志"
-    echo "  logs/paper_search.log - 论文搜索 MCP 日志"
-    echo "  logs/simulation.log   - 仿真 MCP 日志"
-    echo "  logs/frontend.log     - 前端日志"
-    echo "  logs/startup.log      - 启动日志"
-    echo "  logs/restart.log      - 重启日志"
+    echo "  ${LOG_DIR}/backend.log      - 后端日志"
+    echo "  ${LOG_DIR}/database.log     - 数据库 MCP 日志"
+    echo "  ${LOG_DIR}/paper_search.log - 论文搜索 MCP 日志"
+    echo "  ${LOG_DIR}/simulation.log   - 仿真 MCP 日志"
+    echo "  ${LOG_DIR}/frontend.log     - 前端日志"
+    echo "  ${LOG_DIR}/startup.log      - 启动日志"
+    echo "  ${LOG_DIR}/restart.log      - 重启日志"
     echo ""
 
     echo -e "${CYAN}自动重启已启用:${NC}"
@@ -693,9 +697,9 @@ prompt_log_view() {
 
     # 使用 tail -f 同时监控两个文件，并用 sed 添加颜色标记
     # 保存 tail 进程的 PID 以便在 cleanup 时终止
-    tail -f logs/backend.log | sed "s/^/$(echo -e '\033[0;32m')[后端] /" &  
+    tail -f "${LOG_DIR}/backend.log" | sed "s/^/$(echo -e '\033[0;32m')[后端] /" &  
     TAIL_PIDS+=($!)
-    tail -f logs/frontend.log | sed "s/^/$(echo -e '\033[0;34m')[前端] /" &  
+    tail -f "${LOG_DIR}/frontend.log" | sed "s/^/$(echo -e '\033[0;34m')[前端] /" &  
     TAIL_PIDS+=($!)
 }
 

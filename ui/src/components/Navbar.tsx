@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { Menu, Settings, Wifi, WifiOff, Bot, Database, BarChart3, DollarSign, MoreVertical, X, ChevronRight, ChevronDown } from 'lucide-react'
+import { Menu, Settings, Wifi, WifiOff, Bot, Database, BarChart3, DollarSign, MoreVertical, X, ChevronRight, ChevronDown, RefreshCw, ArrowLeft } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import BillingIndicator from './BillingIndicator'
 import BohriumAuthButton from './BohriumAuthButton'
 import BillingStatsPanel from './BillingStatsPanel'
@@ -18,24 +18,40 @@ const Navbar: React.FC = () => {
     setCurrentAgent
   } = useAppStore()
 
+  const location = useLocation()
+  const navigate = useNavigate()
+  // 判断是否在主页 (chat page is home)
+  const isHomePage = location.pathname === '/' || location.pathname === '/chat'
+
   const [showBillingStats, setShowBillingStats] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [isAgentMenuOpen, setIsAgentMenuOpen] = useState(false) // Mobile Agent Switcher
+  const [isAgentMenuOpen, setIsAgentMenuOpen] = useState(false)
 
   return (
-    <nav className="h-14 glass border-b border-white/20 px-4 transition-all sticky top-0 z-50">
+    <nav className="h-14 bg-white border-b border-gray-200 px-4 transition-all fixed top-0 left-0 right-0 z-[100]">
       <div className="h-full max-w-[1920px] mx-auto flex items-center justify-between">
 
-        {/* 1. 左侧区域：侧边栏开关 + (Mobile: Agent Switcher / PC: Logo) */}
-        <div className="flex items-center gap-3">
-          {/* 侧边栏开关 */}
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 -ml-2 hover:bg-white/20 rounded-xl transition-all text-gray-700 active:scale-95"
-            title="切换侧边栏"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
+        {/* 1. 左侧区域：侧边栏开关 + Agent Switcher */}
+        <div className="flex items-center gap-4">
+          {/* 侧边栏开关 或 返回按钮 */}
+          {isHomePage ? (
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-2 hover:bg-white/20 rounded-xl transition-all text-gray-700 active:scale-95"
+              title="切换侧边栏"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate('/')}
+              className="p-2 hover:bg-white/20 rounded-xl transition-all text-gray-700 active:scale-95 flex items-center gap-1"
+              title="返回主界面"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span className="text-sm font-medium hidden sm:block">返回</span>
+            </button>
+          )}
 
           {/* Agent Switcher (Universal) */}
           <div className="relative">
@@ -58,13 +74,10 @@ const Navbar: React.FC = () => {
             {/* Agent Dropdown Menu */}
             {isAgentMenuOpen && (
               <>
-                {/* Backdrop to close */}
                 <div
                   className="fixed inset-0 z-40 bg-transparent"
                   onClick={() => setIsAgentMenuOpen(false)}
                 />
-
-                {/* Menu Content */}
                 <div className="absolute top-full left-0 mt-2 w-72 bg-white/90 backdrop-blur-xl border border-white/40 rounded-xl shadow-2xl z-50 overflow-hidden animate-slide-up origin-top-left ring-1 ring-black/5">
                   <div className="p-1 max-h-[70vh] overflow-y-auto custom-scrollbar">
                     <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center justify-between">
@@ -79,8 +92,8 @@ const Navbar: React.FC = () => {
                           setIsAgentMenuOpen(false);
                         }}
                         className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-all text-left group ${currentAgent?.id === agent.id
-                            ? 'bg-primary-50 text-primary-900 shadow-sm ring-1 ring-primary-100'
-                            : 'hover:bg-white/60 hover:shadow-sm text-gray-700'
+                          ? 'bg-primary-50 text-primary-900 shadow-sm ring-1 ring-primary-100'
+                          : 'hover:bg-white/60 hover:shadow-sm text-gray-700'
                           }`}
                       >
                         <div className={`p-1.5 rounded-lg transition-colors ${currentAgent?.id === agent.id ? 'bg-primary-100 text-primary-600' : 'bg-gray-100/50 text-gray-500 group-hover:bg-white group-hover:text-primary-500'}`}>
@@ -104,12 +117,10 @@ const Navbar: React.FC = () => {
           </div>
         </div>
 
-
-
         {/* 3. 右侧区域：操作按钮 */}
         <div className="flex items-center gap-1 sm:gap-2">
 
-          {/* 移动端 & PC 通用：数据面板开关 (重点！) */}
+          {/* 移动端 & PC 通用：数据面板开关 */}
           <button
             onClick={() => setRightPanelOpen(!useAppStore.getState().rightPanelOpen)}
             className={`p-2 rounded-xl transition-all active:scale-95 flex items-center gap-1.5 ${useAppStore.getState().rightPanelOpen
@@ -119,11 +130,10 @@ const Navbar: React.FC = () => {
             title="数据面板"
           >
             <Database className="w-5 h-5" />
-            {/* PC端显示文字提示 */}
             <span className="hidden lg:inline text-sm font-medium">数据</span>
           </button>
 
-          {/* 分隔线 (Mobile hidden) */}
+          {/* 分隔线 */}
           <div className="h-5 w-px bg-gray-300/50 hidden md:block mx-1" />
 
           {/* 移动端：更多菜单 */}
@@ -137,91 +147,42 @@ const Navbar: React.FC = () => {
           </div>
 
           {/* PC端：常规按钮组 */}
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden md:flex items-center space-x-2">
             <BohriumAuthButton />
-            {/* ...其他按钮保持不变... */}
+            <div className="h-6 w-px bg-gray-300" />
+            <BillingIndicator />
+            {billingData && <div className="h-6 w-px bg-gray-300" />}
+            <button
+              onClick={() => setShowBillingStats(true)}
+              className="p-2 hover:bg-gray-100 rounded-md transition-colors"
+              title="查看详细计费统计"
+            >
+              <BarChart3 className="w-5 h-5 text-purple-600" />
+            </button>
+            <div className="h-6 w-px bg-gray-300" />
+            <div className="flex items-center space-x-1">
+              {connected ? (
+                <Wifi className="w-4 h-4 text-green-500" />
+              ) : (
+                <WifiOff className="w-4 h-4 text-red-500" />
+              )}
+              <span className={`text-xs ${connected ? 'text-green-600' : 'text-red-600'}`}>
+                {connected ? '已连接' : '未连接'}
+              </span>
+            </div>
+            <div className="h-6 w-px bg-gray-300" />
+            <Link to="/pricing" className="p-2 hover:bg-gray-100 rounded-md transition-colors" title="收费标准">
+              <DollarSign className="w-5 h-5 text-green-600" />
+            </Link>
+            <Link to="/storage-test" className="p-2 hover:bg-gray-100 rounded-md transition-colors" title="存储测试">
+              <Database className="w-5 h-5" />
+            </Link>
+            <Link to="/settings" className="p-2 hover:bg-gray-100 rounded-md transition-colors" title="设置">
+              <Settings className="w-5 h-5" />
+            </Link>
           </div>
         </div>
       </div>
-
-      {/* 右侧状态和控制 (Desktop) */}
-      <div className="hidden md:flex items-center space-x-2">
-        {/* 数据面板开关 */}
-        <button
-          onClick={() => setRightPanelOpen(!useAppStore.getState().rightPanelOpen)}
-          className="p-2 hover:bg-white/50 rounded-lg transition-colors text-primary-600"
-          title="切换结构与数据面板"
-        >
-          <Database className="w-5 h-5" />
-        </button>
-        <div className="h-6 w-px bg-gray-300/50" />
-
-        {/* Bohrium OAuth 登录按钮 */}
-        <BohriumAuthButton />
-
-        {/* 分隔线 */}
-        <div className="h-6 w-px bg-gray-300" />
-
-        {/* 计费指示器 */}
-        <BillingIndicator />
-
-        {billingData && <div className="h-6 w-px bg-gray-300" />}
-
-        {/* 计费统计按钮 */}
-        <button
-          onClick={() => setShowBillingStats(true)}
-          className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-          title="查看详细计费统计"
-        >
-          <BarChart3 className="w-5 h-5 text-purple-600" />
-        </button>
-
-        <div className="h-6 w-px bg-gray-300" />
-
-        {/* 连接状态 */}
-        <div className="flex items-center space-x-1">
-          {connected ? (
-            <Wifi className="w-4 h-4 text-green-500" />
-          ) : (
-            <WifiOff className="w-4 h-4 text-red-500" />
-          )}
-          <span className={`text-xs ${connected ? 'text-green-600' : 'text-red-600'}`}>
-            {connected ? '已连接' : '未连接'}
-          </span>
-        </div>
-
-        <div className="h-6 w-px bg-gray-300" />
-
-        {/* 定价页面按钮 */}
-        <Link
-          to="/pricing"
-          className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-          title="收费标准"
-        >
-          <DollarSign className="w-5 h-5 text-green-600" />
-        </Link>
-
-        {/* 存储测试按钮 */}
-        <Link
-          to="/storage-test"
-          className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-          title="存储测试"
-        >
-          <Database className="w-5 h-5" />
-        </Link>
-
-        {/* 设置按钮 */}
-        <Link
-          to="/settings"
-          className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-          title="设置"
-        >
-          <Settings className="w-5 h-5" />
-        </Link>
-      </div>
-
-      {/* 这里的旧代码已被上面的结构覆盖，清空多余的闭合标签以防万一 */}
-      {/* Mobile Menu Dropdown */}
 
       {/* Mobile Menu Dropdown */}
       {mobileMenuOpen && (
@@ -261,7 +222,7 @@ const Navbar: React.FC = () => {
             <BillingIndicator />
           </div>
 
-          {/* 🆕 数据面板快捷入口 */}
+          {/* 数据面板快捷入口 */}
           <button
             onClick={() => {
               setRightPanelOpen(true)

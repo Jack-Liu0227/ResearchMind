@@ -73,7 +73,21 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
       setError(null)
 
       // 处理相对路径 URL
-      const resolvedUrl = resolveFileUrl(url)
+      let resolvedUrl = resolveFileUrl(url)
+
+      // 🔧 URL 清洗：修复常见的路径错误
+      // 修复包含 data/session_data 的路径，这通常是文件系统路径被错误地拼接到 URL 中导致的
+      // 例如：/api/download/data/session_data/papers/... -> /api/download/papers/...
+      if (resolvedUrl.includes('/api/download/data/session_data/')) {
+        const original = resolvedUrl
+        resolvedUrl = resolvedUrl.replace('/api/download/data/session_data/', '/api/download/')
+        console.log('🔧 [CsvViewer] Fixed URL (removed data/session_data):', { original, fixed: resolvedUrl })
+      } else if (resolvedUrl.includes('/api/download/session_data/')) {
+        const original = resolvedUrl
+        resolvedUrl = resolvedUrl.replace('/api/download/session_data/', '/api/download/')
+        console.log('🔧 [CsvViewer] Fixed URL (removed session_data):', { original, fixed: resolvedUrl })
+      }
+
       console.log('📊 CsvViewer - Loading CSV from URL:', resolvedUrl)
       console.log('📊 CsvViewer - Original URL:', url)
 

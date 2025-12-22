@@ -49,16 +49,19 @@ class WebSocketService {
   private ws: WebSocket | null = null
   private url: string
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
-  private reconnectInterval = 1000
+  // 基础重连配置
+  private maxReconnectAttempts = -1 // -1 代表无限重连
+  private reconnectInterval = 3000 // 基础重连间隔3秒
+
+  // 状态和处理器
   private messageHandlers: MessageHandler[] = []
   private connectionHandlers: ConnectionHandler[] = []
   private clientId: string
-  private isConnecting = false // 防止重复连接的标志
-  private heartbeatInterval: number | null = null // 心跳定时器
-  private heartbeatTimeout: number | null = null // 心跳超时定时器
-  private readonly HEARTBEAT_INTERVAL = 30000 // 30秒发送一次心跳
-  private readonly HEARTBEAT_TIMEOUT = 10000 // 10秒内未收到响应则认为连接断开
+  private isConnecting = false
+
+  // 心跳配置 (仅用于保活，不用于断开检测)
+  private heartbeatInterval: number | null = null
+  private readonly HEARTBEAT_INTERVAL = 30000 // 30秒发送一次Ping保活
 
   // 🔧 优化：请求去重 - 跟踪待处理的消息
   private pendingMessages = new Set<string>() // 存储消息内容的哈希
@@ -104,7 +107,7 @@ class WebSocketService {
         }
         wsUrl = `${wsUrl}/${this.clientId}`
 
-        console.log(`🔌 连接 WebSocket: ${wsUrl}`)
+        console.log(`🔌 连接 WebSocket (无限重连模式): ${wsUrl}`)
         this.ws = new WebSocket(wsUrl)
 
         this.ws.onopen = () => {
@@ -113,7 +116,7 @@ class WebSocketService {
           this.reconnectAttempts = 0
           this.notifyConnectionHandlers(true)
 
-          // 启动心跳检测
+          // 启动保活心跳
           this.startHeartbeat()
 
           // 🆕 发送 JWT Token 进行认证
@@ -126,9 +129,9 @@ class WebSocketService {
           try {
             const message: WebSocketMessage = JSON.parse(event.data)
 
-            // 处理心跳响应
+            // 处理心跳响应 (仅记录日志，不作超时处理)
             if (message.type === 'pong') {
-              this.resetHeartbeatTimeout()
+              // console.debug('💓 Received pong') 
               return
             }
 
@@ -140,64 +143,55 @@ class WebSocketService {
 
         this.ws.onclose = (event) => {
           console.log('WebSocket disconnected:', event.code, event.reason)
-          console.log('🔧 Connection was clean:', event.wasClean)
-          console.log('🔧 Reconnect attempts:', this.reconnectAttempts, '/', this.maxReconnectAttempts)
           this.isConnecting = false
           this.notifyConnectionHandlers(false)
 
-          // 停止心跳检测
+          // 停止心跳
           this.stopHeartbeat()
 
-          // 只有在非正常关闭且未达到最大重试次数时才重连
-          if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
-            console.log('🔄 Schedule reconnect...')
+          //只要不是手动关闭，永远尝试重连
+          if (this.ws) {
+            console.log('🔄 Connection lost. Scheduling infinite reconnect...')
             this.scheduleReconnect()
-          } else {
-            console.log('🚫 No reconnect scheduled')
           }
         }
 
         this.ws.onerror = (error) => {
           console.error('WebSocket error:', error)
           this.isConnecting = false
-          reject(error)
+          // 不reject，让重连逻辑处理
         }
       } catch (error) {
         this.isConnecting = false
-        reject(error)
+        // 尝试重连
+        this.scheduleReconnect()
       }
     })
   }
 
   disconnect(): void {
     if (this.ws) {
-      console.log('🔌 正在断开WebSocket连接...')
+      console.log('🔌 用户主动断开WebSocket连接...')
       this.stopHeartbeat()
-      this.ws.close(1000, 'Client disconnect')
-      this.ws = null
+      const ws = this.ws
+      this.ws = null // 先清空引用，标记为主动断开，阻止重连
+      ws.close(1000, 'Client disconnect')
       this.isConnecting = false
       this.notifyConnectionHandlers(false)
     }
   }
 
   /**
-   * 启动心跳检测
+   * 启动保活心跳
+   * 仅发送Ping以保持链路活跃（防止Nginx/防火墙超时），不主动检测超时断开
    */
   private startHeartbeat(): void {
-    console.log('💓 启动心跳检测')
     this.stopHeartbeat() // 先清除旧的定时器
 
     this.heartbeatInterval = window.setInterval(() => {
       if (this.isConnected) {
-        console.log('💓 发送心跳 ping')
+        // console.debug('💓 发送保活 Ping')
         this.send({ type: 'ping', data: { timestamp: Date.now() } })
-
-        // 设置心跳超时检测
-        this.heartbeatTimeout = window.setTimeout(() => {
-          console.warn('💔 心跳超时，连接可能已断开')
-          // 主动关闭连接，触发重连
-          this.ws?.close(4000, 'Heartbeat timeout')
-        }, this.HEARTBEAT_TIMEOUT)
       }
     }, this.HEARTBEAT_INTERVAL)
   }
@@ -207,24 +201,16 @@ class WebSocketService {
    */
   private stopHeartbeat(): void {
     if (this.heartbeatInterval) {
-      console.log('💓 停止心跳检测')
       clearInterval(this.heartbeatInterval)
       this.heartbeatInterval = null
-    }
-    if (this.heartbeatTimeout) {
-      clearTimeout(this.heartbeatTimeout)
-      this.heartbeatTimeout = null
     }
   }
 
   /**
-   * 重置心跳超时定时器
+   * 重置心跳超时定时器 - 已废弃，但保留空方法防止调用报错
    */
   private resetHeartbeatTimeout(): void {
-    if (this.heartbeatTimeout) {
-      clearTimeout(this.heartbeatTimeout)
-      this.heartbeatTimeout = null
-    }
+    // Legacy support
   }
 
   /**
@@ -393,10 +379,6 @@ class WebSocketService {
     return null
   }
 
-  // sendUserBohriumConfig 已删除
-  // 用户配置现在通过登录流程（/api/auth/login-from-cookie）保存到数据库
-  // WebSocket 认证时只需发送 JWT Token 即可
-
   onMessage(handler: MessageHandler): () => void {
     this.messageHandlers.push(handler)
     return () => {
@@ -445,9 +427,13 @@ class WebSocketService {
     }
 
     this.reconnectAttempts++
-    const delay = this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1)
+    // 限制最大重连延迟为30秒，并在几次尝试后保持恒定，防止等待时间过长
+    const maxDelay = 30000
+    const calculatedDelay = this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1)
+    const delay = Math.min(calculatedDelay, maxDelay)
 
-    console.log(`🔄 Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+    const maxAttemptsLog = this.maxReconnectAttempts === -1 ? '∞' : this.maxReconnectAttempts
+    console.log(`🔄 Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${maxAttemptsLog})`)
 
     setTimeout(() => {
       // 再次检查状态，避免重复连接
@@ -458,7 +444,10 @@ class WebSocketService {
 
       this.connect().catch(error => {
         console.error('❌ Reconnection failed:', error)
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        // Check if we should continue reconnecting:
+        // 1. If maxReconnectAttempts is -1 (infinite)
+        // 2. Or if current attempts < max allowed
+        if (this.maxReconnectAttempts === -1 || this.reconnectAttempts < this.maxReconnectAttempts) {
           this.scheduleReconnect()
         } else {
           console.log('🚫 Max reconnect attempts reached')

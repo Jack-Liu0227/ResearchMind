@@ -949,21 +949,25 @@ async def search_papers(
     # 异步并行搜索多个检索词
     import asyncio
 
-    async def search_single_query(q: str) -> List[Dict[str, Any]]:
-        """异步搜索单个检索词"""
+    # 用于收集所有搜索结果中使用的源
+    actual_sources_used = set()
+    
+    async def search_single_query(q: str) -> tuple[List[Dict[str, Any]], List[str]]:
+        """异步搜索单个检索词，返回论文列表和使用的源"""
         try:
             logger.info(f"Searching with query: {q}")
             result = await search_papers_unified(query=q, sources=sources, max_results=max_results, session_id=session_id)
             if result.get('status') == 'success':
                 papers = result.get('papers', [])
+                sources_used = result.get('sources_used', [])
                 logger.info(f"Found {len(papers)} papers for query: {q}")
-                return papers
+                return papers, sources_used
             else:
                 logger.warning(f"Search failed for query: {q}")
-                return []
+                return [], []
         except Exception as e:
             logger.error(f"Error searching query '{q}': {e}")
-            return []
+            return [], []
 
     # 并行执行所有搜索任务
     if len(queries_to_search) > 1:
@@ -972,11 +976,13 @@ async def search_papers(
         search_tasks = [search_single_query(q) for q in queries_to_search]
         search_results = await asyncio.gather(*search_tasks)
         all_papers = []
-        for papers in search_results:
+        for papers, sources_used in search_results:
             all_papers.extend(papers)
+            actual_sources_used.update(sources_used)
     else:
         # 单个检索词时直接执行
-        all_papers = await search_single_query(queries_to_search[0])
+        all_papers, sources_used = await search_single_query(queries_to_search[0])
+        actual_sources_used.update(sources_used)
 
     # 去重（基于 paper_id）
     unique_papers = {}
@@ -1011,7 +1017,7 @@ async def search_papers(
 
     final_result = {
         'status': 'success',
-        'sources_used': sources or ['arxiv', 'tavily_academic', 'tavily'],
+        'sources_used': list(actual_sources_used) if actual_sources_used else (sources or ['arxiv', 'tavily_academic', 'semantic_scholar']),
         'total_results': len(final_papers),
         'papers_added': papers_added,
         'total_papers_in_csv': total_papers,

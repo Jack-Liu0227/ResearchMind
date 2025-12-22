@@ -958,6 +958,22 @@ interface LoadingMessageProps {
 }
 
 const LoadingMessage: React.FC<LoadingMessageProps> = ({ message = '⏳ 智能体正在思考...' }) => {
+  const [seconds, setSeconds] = useState(0)
+  const [showWarning, setShowWarning] = useState(false)
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSeconds(prev => {
+        const next = prev + 1
+        // 超过120秒显示提示
+        if (next >= 90) setShowWarning(true)
+        return next
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [])
+
   // 根据消息内容生成更友好的辅助提示
   const getHelpText = () => {
     const lowerMsg = message.toLowerCase()
@@ -972,6 +988,13 @@ const LoadingMessage: React.FC<LoadingMessageProps> = ({ message = '⏳ 智能�
     if (lowerMsg.includes('连接')) return '🔌 正在建立连接...'
     if (lowerMsg.includes('上传')) return '📤 正在上传文件...'
     return '⏳ 后端正在处理，请稍候...'
+  }
+
+  // 格式化时间显示
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60)
+    const s = secs % 60
+    return `${m > 0 ? `${m}分` : ''}${s}秒`
   }
 
   return (
@@ -995,7 +1018,12 @@ const LoadingMessage: React.FC<LoadingMessageProps> = ({ message = '⏳ 智能�
                   <div className="w-2 h-2 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                   <div className="w-2 h-2 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                 </div>
-                <span className="text-sm font-medium text-primary-700">{message}</span>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-primary-700">{message}</span>
+                  {seconds > 5 && (
+                    <span className="text-xs text-primary-400 mt-0.5">已耗时: {formatTime(seconds)}</span>
+                  )}
+                </div>
               </div>
 
               {/* 进度条 */}
@@ -1012,10 +1040,17 @@ const LoadingMessage: React.FC<LoadingMessageProps> = ({ message = '⏳ 智能�
                 <span>{getHelpText()}</span>
               </div>
 
-              {/* 提示信息 */}
-              <div className="text-xs text-primary-500 mt-1">
-                💡 提示：如果长时间没有响应，请检查网络连接或后端服务状态
-              </div>
+              {/* 提示信息 - 仅在超时后显示 */}
+              {showWarning && (
+                <div className="text-xs text-orange-500 mt-1 animate-fade-in bg-orange-50 p-1.5 rounded border border-orange-100">
+                  <div className="font-semibold mb-0.5">⚠️ 响应时间较长</div>
+                  <div>如果长时间未完成，建议：</div>
+                  <ul className="list-disc list-inside ml-1 text-orange-600/80">
+                    <li>检查网络连接是否正常</li>
+                    <li>如果是复杂任务（如生成报告，声子谱计算，结构生成），请耐心等待</li>
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         </div>

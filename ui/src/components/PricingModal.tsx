@@ -48,7 +48,7 @@ const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose }) => {
     try {
       const response = await fetch('/api/billing/pricing/config')
       const data = await response.json()
-      
+
       if (data.success) {
         setConfig(data)
       } else {
@@ -108,16 +108,16 @@ const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose }) => {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+    <div className="fixed inset-0 z-[100] overflow-y-auto">
       {/* 背景遮罩 */}
-      <div 
+      <div
         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
         onClick={handleClose}
       />
-      
+
       {/* 弹窗内容 */}
       <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="relative bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[85vh] overflow-hidden flex flex-col">
           {/* 头部 */}
           <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
             <div>
@@ -133,8 +133,8 @@ const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose }) => {
             </button>
           </div>
 
-          {/* 内容区域 - 可滚动 */}
-          <div className="flex-1 overflow-y-auto px-6 py-4" style={{ maxHeight: 'calc(90vh - 180px)' }}>
+          {/* 内容区域 - 可滚动，自适应高度 */}
+          <div className="flex-1 overflow-y-auto px-6 py-4">
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <div className="text-gray-600">加载中...</div>

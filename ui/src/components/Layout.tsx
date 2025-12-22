@@ -5,6 +5,7 @@ import Sidebar from './Sidebar'
 import RightPanel from './RightPanel'
 import { ChevronLeft, ChevronRight, X, Database } from 'lucide-react'
 import { useMediaQuery } from '../hooks/useMediaQuery'
+import DraggableDataButton from './DraggableDataButton'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -98,14 +99,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, [isResizingSidebar, isResizingRightPanel, sidebarWidth, rightPanelWidth])
 
   return (
-    <div className="h-screen flex flex-col bg-transparent">
-      {/* 顶部导航栏 */}
-      <div className="sticky top-0 z-40">
+    <div className="relative w-full h-[100dvh] bg-transparent overflow-hidden">
+      {/* 顶部导航栏 - 固定在顶部，层级最高 */}
+      <div className="fixed top-0 left-0 right-0 h-14 z-[100]">
         <Navbar />
       </div>
 
-      {/* 主要内容区域 */}
-      <div className={`flex-1 flex overflow-hidden relative ${!isMobile ? 'p-4 gap-4' : ''}`}>
+      {/* 主要内容区域 - 绝对定位，top-14 物理避让导航栏 */}
+      <div className={`absolute inset-0 top-14 flex overflow-hidden ${!isMobile ? 'p-4 gap-4' : ''}`}>
         {/* 左侧边栏 - 对话历史 */}
         {/* Desktop Sidebar */}
         {!isMobile && sidebarOpen && (
@@ -131,7 +132,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         {/* Mobile Sidebar (Drawer) */}
         {isMobile && sidebarOpen && (
-          <div className="fixed inset-0 z-50 flex">
+          <div className="fixed inset-0 z-[110] flex">
             {/* Backdrop */}
             <div
               className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
@@ -175,7 +176,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         </div>
 
         {/* 右侧面板 - 结构查看器 */}
-        {/* 右侧面板 - 结构查看器 */}
         {/* Desktop RightPanel */}
         {!isMobile && rightPanelOpen && (
           <div
@@ -203,7 +203,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         {/* Mobile RightPanel (Drawer) */}
         {isMobile && rightPanelOpen && (
-          <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="fixed inset-0 z-[110] flex justify-end">
             {/* Backdrop */}
             <div
               className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
@@ -238,16 +238,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </div>
 
       {/* 📱 Mobile Floating Action Button (FAB) for Data Panel */}
-      {isMobile && !rightPanelOpen && (
-        <button
-          onClick={() => setRightPanelOpen(true)}
-          className="fixed bottom-24 right-4 z-50 w-12 h-12 rounded-full glass border border-white/40 shadow-xl flex items-center justify-center text-primary-600 animate-slide-in-right active:scale-90 transition-transform bg-white/80 backdrop-blur-lg"
-          style={{ boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15)' }}
-        >
-          <Database className="w-6 h-6" />
-          <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-        </button>
-      )}
+      <DraggableDataButton
+        visible={isMobile && !rightPanelOpen}
+        onClick={() => setRightPanelOpen(true)}
+      />
     </div>
   )
 }
