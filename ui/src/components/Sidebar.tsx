@@ -19,7 +19,7 @@ const Sidebar: React.FC = () => {
     settings,
     forceSave
   } = useAppStore()
-  
+
   const [searchTerm, setSearchTerm] = useState('')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -115,12 +115,12 @@ const Sidebar: React.FC = () => {
   return (
     <div className="h-full flex flex-col">
       {/* 头部 */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="p-4 border-b border-white/10">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-900">对话历史</h2>
+          <h2 className="text-lg font-semibold text-gray-800">对话历史</h2>
           <button
             onClick={handleSaveData}
-            className="btn btn-secondary btn-sm"
+            className="p-1.5 bg-white/50 hover:bg-white text-gray-600 rounded-lg transition-colors shadow-sm"
             title="手动保存数据"
           >
             <Save className="w-4 h-4" />
@@ -128,14 +128,14 @@ const Sidebar: React.FC = () => {
         </div>
 
         {/* 搜索框 */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <div className="relative group">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 group-hover:text-primary-500 transition-colors" />
           <input
             type="text"
             placeholder="搜索对话..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="input pl-10 w-full"
+            className="w-full pl-10 pr-4 py-2 bg-white/40 border border-white/40 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:bg-white/60 transition-all text-sm placeholder-gray-400"
           />
         </div>
       </div>
@@ -177,11 +177,10 @@ const Sidebar: React.FC = () => {
               <div
                 key={session.id}
                 onClick={() => setCurrentSession(session)}
-                className={`group relative p-3 rounded-lg cursor-pointer transition-colors ${
-                  currentSession?.id === session.id
-                    ? 'bg-primary-50 border border-primary-200'
-                    : 'hover:bg-gray-50'
-                }`}
+                className={`group relative p-3 rounded-xl cursor-pointer transition-all duration-200 border ${currentSession?.id === session.id
+                    ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-md border-primary-400/50'
+                    : 'hover:bg-white/60 border-transparent hover:border-white/40 hover:shadow-sm text-gray-700'
+                  }`}
               >
                 {editingSessionId === session.id ? (
                   <div className="space-y-2">
@@ -218,46 +217,55 @@ const Sidebar: React.FC = () => {
                   <>
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-medium text-gray-900 truncate">
+                        <h3 className={`text-sm font-medium truncate ${currentSession?.id === session.id ? 'text-white' : 'text-gray-900 group-hover:text-primary-700'}`}>
                           {session.title}
                         </h3>
-                        <div className="flex items-center mt-1 text-xs text-gray-500">
+                        <div className={`flex items-center mt-1 text-xs ${currentSession?.id === session.id ? 'text-blue-100' : 'text-gray-500'}`}>
                           <Calendar className="w-3 h-3 mr-1" />
                           {session.updatedAt && !isNaN(new Date(session.updatedAt).getTime())
                             ? formatDistanceToNow(new Date(session.updatedAt), {
-                                addSuffix: true,
-                                locale: zhCN
-                              })
+                              addSuffix: true,
+                              locale: zhCN
+                            })
                             : '刚刚'
                           }
                         </div>
-                        <p className="text-xs text-gray-400 mt-1">
+                        <p className={`text-xs mt-1 ${currentSession?.id === session.id ? 'text-blue-200' : 'text-gray-400'}`}>
                           {session.messages.length} 条消息
                         </p>
                       </div>
-                      
+
                       {/* 操作按钮 */}
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
                         <button
                           onClick={(e) => handleEditSession(session, e)}
-                          className="p-1 hover:bg-gray-200 rounded"
+                          className={`p-1.5 rounded-lg transition-colors ${currentSession?.id === session.id
+                              ? 'hover:bg-white/20 text-white'
+                              : 'hover:bg-gray-200 text-gray-500'
+                            }`}
                           title="重命名"
                         >
-                          <Edit3 className="w-3 h-3" />
+                          <Edit3 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={(e) => handleClearSession(session.id, e)}
-                          className="p-1 hover:bg-yellow-100 text-yellow-600 rounded"
+                          className={`p-1.5 rounded-lg transition-colors ${currentSession?.id === session.id
+                              ? 'hover:bg-white/20 text-white'
+                              : 'hover:bg-yellow-100 text-yellow-600'
+                            }`}
                           title="清除内容"
                         >
-                          <Eraser className="w-3 h-3" />
+                          <Eraser className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={(e) => handleDeleteSession(session.id, e)}
-                          className="p-1 hover:bg-red-100 text-red-600 rounded"
+                          className={`p-1.5 rounded-lg transition-colors ${currentSession?.id === session.id
+                              ? 'hover:bg-white/20 text-white'
+                              : 'hover:bg-red-100 text-red-600'
+                            }`}
                           title="删除会话"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>

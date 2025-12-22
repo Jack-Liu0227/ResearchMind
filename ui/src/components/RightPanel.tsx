@@ -280,60 +280,56 @@ const RightPanel: React.FC<RightPanelProps> = ({
   }
 
   return (
-    <div className={`h-full flex flex-col bg-gray-50 ${className}`}>
-      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+    <div className={`h-full flex flex-col bg-transparent ${className}`}>
+      <div className="flex items-center justify-between p-4 border-b border-white/10 flex-shrink-0">
         <h2 className="text-lg font-semibold text-gray-800">结构与数据</h2>
         {onToggle && (
           <button
             onClick={onToggle}
-            className="p-1 hover:bg-gray-200 rounded transition-colors"
+            className="p-1.5 hover:bg-white/50 rounded-lg transition-colors"
             title="隐藏面板"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         )}
       </div>
 
-      <div className="flex border-b border-gray-200 flex-shrink-0">
+      <div className="flex border-b border-white/10 flex-shrink-0 p-1 mx-4 mt-2 bg-gray-100/50 rounded-xl">
         <button
           onClick={() => setActiveTab('structures')}
-          className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
-            activeTab === 'structures'
-              ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-              : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-          }`}
+          className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-lg transition-all ${activeTab === 'structures'
+              ? 'bg-white shadow-sm text-primary-700'
+              : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+            }`}
         >
           结构 ({structureCount})
         </button>
         <button
           onClick={() => setActiveTab('images')}
-          className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
-            activeTab === 'images'
-              ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-              : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-          }`}
+          className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-lg transition-all ${activeTab === 'images'
+              ? 'bg-white shadow-sm text-primary-700'
+              : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+            }`}
         >
           图片 ({sortedPhononImages.length})
         </button>
         <button
           onClick={() => setActiveTab('files')}
-          className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
-            activeTab === 'files'
-              ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-              : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-          }`}
+          className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-lg transition-all ${activeTab === 'files'
+              ? 'bg-white shadow-sm text-primary-700'
+              : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+            }`}
         >
           数据 ({dataFiles.length})
         </button>
         <button
           onClick={() => setActiveTab('papers')}
-          className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
-            activeTab === 'papers'
-              ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-              : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-          }`}
+          className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-lg transition-all ${activeTab === 'papers'
+              ? 'bg-white shadow-sm text-primary-700'
+              : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+            }`}
         >
           文献 ({currentPapersCount})
         </button>
@@ -528,11 +524,10 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
                       e.stopPropagation()
                       toggleDataExpansion(index)
                     }}
-                    className={`px-3 py-1.5 rounded transition-colors flex items-center space-x-1 text-sm font-medium ${
-                      isDataExpanded
+                    className={`px-3 py-1.5 rounded transition-colors flex items-center space-x-1 text-sm font-medium ${isDataExpanded
                         ? 'bg-blue-600 hover:bg-blue-700 text-white'
                         : 'bg-black bg-opacity-50 hover:bg-opacity-70 text-white'
-                    }`}
+                      }`}
                     title={isDataExpanded ? "隐藏原始数据" : "显示原始数据"}
                   >
                     <span>数据</span>
@@ -712,75 +707,75 @@ const FilesTab: React.FC<FilesTabProps> = ({ files }) => {
 
         return (
           <React.Fragment key={key}>
-          <div
-            className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3 shadow-sm hover:border-blue-300 transition-colors"
-          >
-            <div className="flex items-center space-x-3 min-w-0">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-50">
-                {getFileIcon(file.type)}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate" title={displayName}>
-                  {displayName}
-                </p>
-                <div className="flex items-center flex-wrap gap-2 text-xs text-gray-500 mt-1">
-                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 font-medium">
-                    {formatFileType(file.type)}
-                  </span>
-                  <span>{sourceLabel}</span>
-                  {created && <span>{created.toLocaleString()}</span>}
+            <div
+              className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3 shadow-sm hover:border-blue-300 transition-colors"
+            >
+              <div className="flex items-center space-x-3 min-w-0">
+                <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-50">
+                  {getFileIcon(file.type)}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate" title={displayName}>
+                    {displayName}
+                  </p>
+                  <div className="flex items-center flex-wrap gap-2 text-xs text-gray-500 mt-1">
+                    <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 font-medium">
+                      {formatFileType(file.type)}
+                    </span>
+                    <span>{sourceLabel}</span>
+                    {created && <span>{created.toLocaleString()}</span>}
+                  </div>
                 </div>
               </div>
+              <div className="flex items-center space-x-2 flex-shrink-0">
+                <button
+                  onClick={() => handleDownload(file)}
+                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-500 disabled:opacity-40 whitespace-nowrap"
+                  disabled={!url}
+                >
+                  <Download className="w-4 h-4 mr-1" />
+                  Download
+                </button>
+                <button
+                  onClick={() => handleCopyLink(file)}
+                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 whitespace-nowrap"
+                >
+                  Copy
+                </button>
+                <button
+                  onClick={() => handleOpen(file, key)}
+                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 whitespace-nowrap"
+                  disabled={!url}
+                >
+                  <ExternalLink className="w-4 h-4 mr-1" />
+                  View
+                </button>
+              </div>
             </div>
-            <div className="flex items-center space-x-2 flex-shrink-0">
-              <button
-                onClick={() => handleDownload(file)}
-                className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-500 disabled:opacity-40 whitespace-nowrap"
-                disabled={!url}
-              >
-                <Download className="w-4 h-4 mr-1" />
-                Download
-              </button>
-              <button
-                onClick={() => handleCopyLink(file)}
-                className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 whitespace-nowrap"
-              >
-                Copy
-              </button>
-              <button
-                onClick={() => handleOpen(file, key)}
-                className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 whitespace-nowrap"
-                disabled={!url}
-              >
-                <ExternalLink className="w-4 h-4 mr-1" />
-                View
-              </button>
-            </div>
-          </div>
-          {previewKey === key && url && (
-            <div className="mt-2">
-              {(() => {
-                const fileType = (file.type || '').toLowerCase()
-                console.log('📄 Rendering preview for file:', {
-                  key,
-                  type: fileType,
-                  url,
-                  displayName
-                })
+            {previewKey === key && url && (
+              <div className="mt-2">
+                {(() => {
+                  const fileType = (file.type || '').toLowerCase()
+                  console.log('📄 Rendering preview for file:', {
+                    key,
+                    type: fileType,
+                    url,
+                    displayName
+                  })
 
-                if (fileType.startsWith('csv') || fileType === 'csv') {
-                  console.log('📊 Rendering CsvViewer for:', displayName)
-                  return <CsvViewer url={url} filename={displayName} defaultExpanded={true} />
-                } else if (fileType.startsWith('md') || fileType === 'md') {
-                  console.log('📝 Rendering MarkdownViewer for:', displayName)
-                  return <MarkdownViewer url={url} filename={displayName} defaultExpanded={true} />
-                } else {
-                  console.warn('⚠️ Unknown file type for preview:', fileType)
-                  return null
-                }
-              })()}
-            </div>
-          )}
+                  if (fileType.startsWith('csv') || fileType === 'csv') {
+                    console.log('📊 Rendering CsvViewer for:', displayName)
+                    return <CsvViewer url={url} filename={displayName} defaultExpanded={true} />
+                  } else if (fileType.startsWith('md') || fileType === 'md') {
+                    console.log('📝 Rendering MarkdownViewer for:', displayName)
+                    return <MarkdownViewer url={url} filename={displayName} defaultExpanded={true} />
+                  } else {
+                    console.warn('⚠️ Unknown file type for preview:', fileType)
+                    return null
+                  }
+                })()}
+              </div>
+            )}
           </React.Fragment>
         )
       })}
@@ -1141,11 +1136,10 @@ session_id="${sessionId}"`
           {topics.length > 1 && (
             <button
               onClick={() => setGroupByTopic(!groupByTopic)}
-              className={`text-xs px-3 py-1 rounded transition-colors ${
-                groupByTopic
+              className={`text-xs px-3 py-1 rounded transition-colors ${groupByTopic
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
+                }`}
             >
               {groupByTopic ? '分组显示' : '列表显示'}
             </button>
@@ -1691,19 +1685,19 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
 
                 {/* 🆕 期刊信息获取失败提示 + 重试按钮 */}
                 {!loadingJournal && !journalInfo && journalInfoFetched && (paper.journal_name || paper.source || paper.url) &&
-                 paper.source !== 'arxiv' && !paper.url?.includes('arxiv.org') && (
-                  <button
-                    onClick={() => {
-                      setJournalInfoFetched(false)
-                      fetchJournalInfo(false)
-                    }}
-                    className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-medium rounded hover:bg-orange-200 transition-colors"
-                    title="点击重试获取期刊信息"
-                  >
-                    <RefreshCw className="w-2.5 h-2.5" />
-                    重试获取期刊信息
-                  </button>
-                )}
+                  paper.source !== 'arxiv' && !paper.url?.includes('arxiv.org') && (
+                    <button
+                      onClick={() => {
+                        setJournalInfoFetched(false)
+                        fetchJournalInfo(false)
+                      }}
+                      className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-medium rounded hover:bg-orange-200 transition-colors"
+                      title="点击重试获取期刊信息"
+                    >
+                      <RefreshCw className="w-2.5 h-2.5" />
+                      重试获取期刊信息
+                    </button>
+                  )}
 
                 {/* 🆕 无法获取期刊名称的提示 */}
                 {!loadingJournal && !journalInfo && journalInfoFetched && !paper.journal_name && !paper.source && !paper.url && (
@@ -1850,33 +1844,33 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
                         {/* 🆕 收录索引 - 温和标签 */}
                         {(journalInfo.sci || journalInfo.ei || journalInfo.ssci || journalInfo.cscd ||
                           journalInfo.pku_core || journalInfo.nju_core || journalInfo.sci_tech_core) && (
-                          <div className="pt-2 border-t border-indigo-100">
-                            <div className="text-[10px] text-gray-600 mb-1.5 font-medium">📚 收录索引</div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {journalInfo.sci && (
-                                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded border border-blue-200">SCI</span>
-                              )}
-                              {journalInfo.ei && (
-                                <span className="px-2 py-0.5 bg-green-50 text-green-700 text-[10px] font-semibold rounded border border-green-200">EI</span>
-                              )}
-                              {journalInfo.ssci && (
-                                <span className="px-2 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-semibold rounded border border-purple-200">SSCI</span>
-                              )}
-                              {journalInfo.cscd && (
-                                <span className="px-2 py-0.5 bg-orange-50 text-orange-700 text-[10px] font-semibold rounded border border-orange-200">CSCD</span>
-                              )}
-                              {journalInfo.pku_core && (
-                                <span className="px-2 py-0.5 bg-pink-50 text-pink-700 text-[10px] font-semibold rounded border border-pink-200">北大核心</span>
-                              )}
-                              {journalInfo.nju_core && (
-                                <span className="px-2 py-0.5 bg-rose-50 text-rose-700 text-[10px] font-semibold rounded border border-rose-200">南大核心</span>
-                              )}
-                              {journalInfo.sci_tech_core && (
-                                <span className="px-2 py-0.5 bg-cyan-50 text-cyan-700 text-[10px] font-semibold rounded border border-cyan-200">科技核心</span>
-                              )}
+                            <div className="pt-2 border-t border-indigo-100">
+                              <div className="text-[10px] text-gray-600 mb-1.5 font-medium">📚 收录索引</div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {journalInfo.sci && (
+                                  <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded border border-blue-200">SCI</span>
+                                )}
+                                {journalInfo.ei && (
+                                  <span className="px-2 py-0.5 bg-green-50 text-green-700 text-[10px] font-semibold rounded border border-green-200">EI</span>
+                                )}
+                                {journalInfo.ssci && (
+                                  <span className="px-2 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-semibold rounded border border-purple-200">SSCI</span>
+                                )}
+                                {journalInfo.cscd && (
+                                  <span className="px-2 py-0.5 bg-orange-50 text-orange-700 text-[10px] font-semibold rounded border border-orange-200">CSCD</span>
+                                )}
+                                {journalInfo.pku_core && (
+                                  <span className="px-2 py-0.5 bg-pink-50 text-pink-700 text-[10px] font-semibold rounded border border-pink-200">北大核心</span>
+                                )}
+                                {journalInfo.nju_core && (
+                                  <span className="px-2 py-0.5 bg-rose-50 text-rose-700 text-[10px] font-semibold rounded border border-rose-200">南大核心</span>
+                                )}
+                                {journalInfo.sci_tech_core && (
+                                  <span className="px-2 py-0.5 bg-cyan-50 text-cyan-700 text-[10px] font-semibold rounded border border-cyan-200">科技核心</span>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
 
                         {/* 其他信息 */}
                         {(journalInfo.issn || journalInfo.publisher || journalInfo.country) && (

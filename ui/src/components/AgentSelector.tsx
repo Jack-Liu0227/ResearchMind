@@ -67,7 +67,7 @@ const AgentSelector: React.FC = () => {
                   <div className="font-medium text-gray-900">
                     {currentAgent.name}
                   </div>
-                  <div className="text-sm text-gray-500">
+                  <div className="text-sm text-gray-500 hidden sm:block">
                     {currentAgent.description}
                   </div>
                 </div>
@@ -79,7 +79,7 @@ const AgentSelector: React.FC = () => {
                   <div className="font-medium text-gray-500">
                     选择智能体
                   </div>
-                  <div className="text-sm text-gray-400">
+                  <div className="text-sm text-gray-400 hidden sm:block">
                     请选择一个智能体开始对话
                   </div>
                 </div>
@@ -102,9 +102,8 @@ const AgentSelector: React.FC = () => {
                   <button
                     key={agent.id}
                     onClick={() => handleSelectAgent(agent)}
-                    className={`w-full flex items-center space-x-3 p-3 rounded-lg text-left hover:bg-gray-50 transition-colors ${
-                      currentAgent?.id === agent.id ? 'bg-primary-50 border border-primary-200' : ''
-                    }`}
+                    className={`w-full flex items-center space-x-3 p-3 rounded-lg text-left hover:bg-gray-50 transition-colors ${currentAgent?.id === agent.id ? 'bg-primary-50 border border-primary-200' : ''
+                      }`}
                   >
                     <IconComponent className="w-5 h-5 text-primary-600 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -145,7 +144,7 @@ const AgentSelector: React.FC = () => {
 
       {/* 当前智能体能力展示 */}
       {currentAgent && currentAgent.capabilities && currentAgent.capabilities.length > 0 && (
-        <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+        <div className="mt-4 p-3 bg-gray-50 rounded-lg hidden sm:block">
           <div className="text-sm font-medium text-gray-700 mb-2">
             智能体能力
           </div>

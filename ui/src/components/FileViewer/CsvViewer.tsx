@@ -7,7 +7,8 @@
  */
 
 import React, { useEffect, useState, useRef } from 'react'
-import { Download, AlertCircle, Loader2, Maximize2, Minimize2, Move, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Download, AlertCircle, Loader2, Maximize2, Minimize2, Move, X, ChevronDown, ChevronRight, Link, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { resolveFileUrl } from '../../utils/apiClient'
 import { copyToClipboard } from '../../utils'
@@ -41,6 +42,7 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set())
+  const [rawContent, setRawContent] = useState<string>('')
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -50,6 +52,7 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
       try {
         setLoading(true)
         setError(null)
+        setRawContent(inlineContent!)
         const parsed = parseCsv(inlineContent!)
         setCsvData(parsed)
       } catch (err) {
@@ -105,6 +108,7 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
       console.log(`📊 CsvViewer - CSV parsed: ${parsed.headers.length} columns, ${parsed.rows.length} rows`)
       console.log(`📊 CsvViewer - Headers:`, parsed.headers)
       setCsvData(parsed)
+      setRawContent(text)
     } catch (err) {
       console.error('❌ Failed to load CSV:', err)
       console.error('❌ Error details:', {
@@ -270,6 +274,24 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
     }
   }
 
+  const handleCopyContent = async () => {
+    try {
+      if (!rawContent) {
+        toast.error('没有内容可复制')
+        return
+      }
+      const success = await copyToClipboard(rawContent)
+      if (success) {
+        toast.success('CSV内容已复制到剪贴板')
+      } else {
+        toast.error('复制失败')
+      }
+    } catch (err) {
+      console.error('复制内容失败:', err)
+      toast.error('复制失败')
+    }
+  }
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isFullscreen && e.target === e.currentTarget) {
       setIsDragging(true)
@@ -405,55 +427,162 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
 
   return (
     <>
-      {isFullscreen && (
+      {isFullscreen && createPortal(
         <div
-          className="fixed inset-0 z-50 bg-black bg-opacity-90"
+          className="fixed inset-0 z-[9999] bg-black bg-opacity-90 flex items-center justify-center p-4 sm:p-8"
           onClick={() => setIsFullscreen(false)}
         >
           <div
             ref={containerRef}
-            className="bg-white w-full h-full flex flex-col"
+            className="bg-white w-full h-full max-w-7xl rounded-xl shadow-2xl flex flex-col overflow-hidden animate-fade-in"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div
-              className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200 flex-shrink-0"
+              className="flex items-center justify-between px-6 py-4 bg-gray-50 border-b border-gray-200 flex-shrink-0"
             >
-              <div className="flex items-center space-x-3">
-                <span className="text-sm font-medium text-gray-700">
+              <div className="flex items-center space-x-3 flex-1 min-w-0 pr-4">
+                <span className="text-lg font-semibold text-gray-800 truncate" title={filename || 'CSV数据'}>
                   {filename || 'CSV数据'}
                 </span>
-                <span className="text-xs text-gray-500">
-                  ({csvData.rows.length} 行)
+                <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium flex-shrink-0">
+                  {csvData.rows.length} 行
                 </span>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-3 flex-shrink-0">
                 <button
                   onClick={handleDownload}
-                  className="flex items-center space-x-1 px-3 py-1.5 text-sm text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
+                  className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors shadow-sm"
                 >
                   <Download className="w-4 h-4" />
-                  <span>下载</span>
+                  <span className="hidden sm:inline">下载</span>
+                </button>
+                <button
+                  onClick={handleCopyContent}
+                  className="flex items-center space-x-2 px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-200 rounded-lg transition-colors border border-gray-300"
+                  title="复制内容"
+                >
+                  <Copy className="w-4 h-4" />
+                  <span className="hidden sm:inline">复制内容</span>
                 </button>
                 <button
                   onClick={handleCopyLink}
-                  className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                  className="flex items-center space-x-2 px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-200 rounded-lg transition-colors border border-gray-300"
                   title="复制链接"
                 >
-                  <span>复制</span>
+                  <Link className="w-4 h-4" />
+                  <span className="hidden sm:inline">复制链接</span>
                 </button>
                 <button
-                  onClick={toggleFullscreen}
-                  className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                  onClick={() => setIsFullscreen(false)}
+                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
                   title="退出全屏"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-6 h-6" />
                 </button>
               </div>
             </div>
 
             {/* Table */}
-            <div className="overflow-auto flex-1">
+            <div className="overflow-auto flex-1 bg-white p-4">
+              <table className="w-full text-sm table-auto border-separate border-spacing-0">
+                <thead className="bg-gray-100 sticky top-0 z-10 shadow-sm">
+                  <tr>
+                    {csvData.headers.map((header, index) => (
+                      <th
+                        key={index}
+                        className="px-6 py-3 text-left font-semibold text-gray-700 border-b border-gray-300 whitespace-nowrap min-w-[150px] bg-gray-100 first:rounded-tl-lg last:rounded-tr-lg"
+                      >
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {csvData.rows.map((row, rowIndex) => (
+                    <tr
+                      key={rowIndex}
+                      className={`hover:bg-blue-50 transition-colors ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}
+                    >
+                      {row.map((cell, cellIndex) => (
+                        <td
+                          key={cellIndex}
+                          className="px-6 py-3 text-gray-700 border-b border-gray-100 align-top"
+                        >
+                          <div className="min-w-[200px] max-w-[800px] break-words whitespace-pre-wrap leading-relaxed">
+                            {renderCellContent(cell, rowIndex, cellIndex)}
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {!isFullscreen && (
+        <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="flex items-center space-x-2 text-sm font-medium text-gray-700 hover:text-gray-900 flex-1 min-w-0 pr-2 overflow-hidden"
+              title={filename}
+            >
+              {isExpanded ? (
+                <ChevronDown className="w-4 h-4 flex-shrink-0" />
+              ) : (
+                <ChevronRight className="w-4 h-4 flex-shrink-0" />
+              )}
+              <span className="truncate">{filename || 'CSV数据'}</span>
+              <span className="text-xs text-gray-500 flex-shrink-0">
+                ({csvData.rows.length} 行)
+              </span>
+            </button>
+            <div className="flex items-center space-x-2 flex-shrink-0">
+              <button
+                onClick={handleDownload}
+                className="flex items-center space-x-1 px-3 py-1 text-sm text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span className="hidden sm:inline">下载</span>
+              </button>
+              <button
+                onClick={handleCopyContent}
+                className="flex items-center space-x-1 px-2 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                title="复制内容"
+              >
+                <Copy className="w-4 h-4" />
+                <span className="hidden sm:inline">复制</span>
+              </button>
+              <button
+                onClick={handleCopyLink}
+                className="flex items-center space-x-1 px-2 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                title="复制链接"
+              >
+                <Link className="w-4 h-4" />
+                <span className="hidden sm:inline">链接</span>
+              </button>
+              <button
+                onClick={toggleFullscreen}
+                className="p-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                title="全屏查看"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Table */}
+          {isExpanded && (
+            <div
+              className="overflow-auto"
+              style={{ maxHeight }}
+            >
               <table className="w-full text-sm table-auto">
                 <thead className="bg-gray-100 sticky top-0 z-10">
                   <tr>
@@ -488,93 +617,6 @@ export const CsvViewer: React.FC<CsvViewerProps> = ({
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-      )}
-
-      {!isFullscreen && (
-        <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="flex items-center space-x-2 text-sm font-medium text-gray-700 hover:text-gray-900"
-            >
-              {isExpanded ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronRight className="w-4 h-4" />
-              )}
-              <span>{filename || 'CSV数据'}</span>
-              <span className="text-xs text-gray-500">
-                ({csvData.rows.length} 行)
-              </span>
-            </button>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={handleDownload}
-                className="flex items-center space-x-1 px-3 py-1 text-sm text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                <span>下载</span>
-              </button>
-              <button
-                onClick={handleCopyLink}
-                className="flex items-center space-x-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                title="复制链接"
-              >
-                <span>复制</span>
-              </button>
-              <button
-                onClick={toggleFullscreen}
-                className="p-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                title="全屏查看"
-              >
-                <Maximize2 className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Table */}
-          {isExpanded && (
-            <div
-              className="overflow-auto"
-              style={{ maxHeight }}
-            >
-            <table className="w-full text-sm table-auto">
-              <thead className="bg-gray-100 sticky top-0 z-10">
-                <tr>
-                  {csvData.headers.map((header, index) => (
-                    <th
-                      key={index}
-                      className="px-4 py-2 text-left font-medium text-gray-700 border-b border-gray-200 whitespace-nowrap min-w-[120px]"
-                    >
-                      {header}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {csvData.rows.map((row, rowIndex) => (
-                  <tr
-                    key={rowIndex}
-                    className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
-                  >
-                    {row.map((cell, cellIndex) => (
-                      <td
-                        key={cellIndex}
-                        className="px-4 py-2 text-gray-700 border-b border-gray-100 align-top"
-                      >
-                        <div className="min-w-[200px] max-w-[600px] break-words whitespace-pre-wrap">
-                          {renderCellContent(cell, rowIndex, cellIndex)}
-                        </div>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
           )}
         </div>
       )}

@@ -79,6 +79,7 @@ interface AppState {
 
   // UI flags
   sidebarOpen: boolean
+  rightPanelOpen: boolean  // 右侧面板状态
 
   // Session scoped artefacts
   currentStructure: CrystalStructure | null
@@ -126,6 +127,7 @@ interface AppState {
   updateMessage: (messageId: string, updates: Partial<Message>) => void
 
   setSidebarOpen: (open: boolean) => void
+  setRightPanelOpen: (open: boolean) => void  // 设置右侧面板状态
 
   setCurrentStructure: (structure: CrystalStructure | null) => void
   setStructureList: (structures: CrystalStructure[]) => void
@@ -240,6 +242,7 @@ export const useAppStore = create<AppState>()(
       messages: [],
 
       sidebarOpen: true,  // 🆕 默认展开左侧边栏
+      rightPanelOpen: true,  // 🆕 默认展开右侧面板
 
       currentStructure: null,
       structureList: [],
@@ -390,6 +393,7 @@ export const useAppStore = create<AppState>()(
       },
 
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
+      setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
 
       setCurrentStructure: (structure) => set({ currentStructure: structure }),
       setStructureList: (structures) => set({ structureList: structures }),
@@ -601,16 +605,16 @@ export const useAppStore = create<AppState>()(
           billingData: current
             ? { ...current, ...data }
             : {
-                session_total_tokens: data.session_total_tokens || 0,
-                session_total_photons: data.session_total_photons || 0,
-                requests_count: data.requests_count || 0,
-                charged: data.charged ?? false,  // 🔧 修复：添加 charged 字段
-                billing_source: data.billing_source,  // 🔧 修复：添加 billing_source 字段
-                feature_charges: data.feature_charges || [],  // 🆕 添加 feature_charges 字段
-                current_tokens: data.current_tokens,
-                current_photons: data.current_photons,
-                model_name: data.model_name,
-              },
+              session_total_tokens: data.session_total_tokens || 0,
+              session_total_photons: data.session_total_photons || 0,
+              requests_count: data.requests_count || 0,
+              charged: data.charged ?? false,  // 🔧 修复：添加 charged 字段
+              billing_source: data.billing_source,  // 🔧 修复：添加 billing_source 字段
+              feature_charges: data.feature_charges || [],  // 🆕 添加 feature_charges 字段
+              current_tokens: data.current_tokens,
+              current_photons: data.current_photons,
+              model_name: data.model_name,
+            },
         })
       },
 
@@ -685,13 +689,13 @@ export const useAppStore = create<AppState>()(
         const nextSessions = sessions.map((session) =>
           session.id === sessionId
             ? {
-                ...session,
-                messages: [],
-                structures: [],
-                phononImages: [],
-                files: [],
-                updatedAt: new Date(),
-              }
+              ...session,
+              messages: [],
+              structures: [],
+              phononImages: [],
+              files: [],
+              updatedAt: new Date(),
+            }
             : session
         )
 

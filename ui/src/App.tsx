@@ -92,7 +92,7 @@ function App() {
         />
 
         {/* 主应用界面 */}
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-transparent">
           <Router future={routerFutureFlags}>
             <Routes>
               {/* 诊断页面 */}

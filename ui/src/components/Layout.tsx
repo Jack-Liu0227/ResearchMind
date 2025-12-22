@@ -3,7 +3,8 @@ import { useAppStore } from '../store/useAppStore'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import RightPanel from './RightPanel'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X, Database } from 'lucide-react'
+import { useMediaQuery } from '../hooks/useMediaQuery'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -12,10 +13,10 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   console.log('Layout component rendering...')
 
-  const { sidebarOpen, setSidebarOpen, settings } = useAppStore()
+  const { sidebarOpen, setSidebarOpen, rightPanelOpen, setRightPanelOpen, settings } = useAppStore()
 
-  // 🆕 使用设置中的默认值初始化右侧边栏状态
-  const [rightPanelOpen, setRightPanelOpen] = useState(settings.rightSidebarOpen ?? true)
+  // 🆕 使用设置中的默认值初始化右侧边栏状态（已移至全局 store）
+  // const [rightPanelOpen, setRightPanelOpen] = useState(settings.rightSidebarOpen ?? true)
 
   // 拖拽调整大小 - 从 localStorage 读取保存的宽度
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -28,6 +29,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   })
   const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const [isResizingRightPanel, setIsResizingRightPanel] = useState(false)
+
+  // 📱 Mobile detection
+  const isMobile = useMediaQuery('(max-width: 768px)')
+
+  // Close sidebar/panels automatically when switching to mobile to avoid clutter
+  useEffect(() => {
+    if (isMobile) {
+      setSidebarOpen(false)
+      setRightPanelOpen(false)
+    }
+  }, [isMobile, setSidebarOpen])
 
   // 🆕 当设置变化时，同步更新侧边栏状态
   useEffect(() => {
@@ -86,70 +98,101 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, [isResizingSidebar, isResizingRightPanel, sidebarWidth, rightPanelWidth])
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="h-screen flex flex-col bg-transparent">
       {/* 顶部导航栏 */}
-      <Navbar />
+      <div className="sticky top-0 z-40">
+        <Navbar />
+      </div>
 
       {/* 主要内容区域 */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className={`flex-1 flex overflow-hidden relative ${!isMobile ? 'p-4 gap-4' : ''}`}>
         {/* 左侧边栏 - 对话历史 */}
-        {sidebarOpen && (
+        {/* Desktop Sidebar */}
+        {!isMobile && sidebarOpen && (
           <div
-            className="border-r border-gray-200 bg-white flex-shrink-0 relative"
+            className="glass-panel rounded-2xl flex-shrink-0 relative overflow-hidden"
             style={{ width: sidebarWidth }}
           >
             <Sidebar />
-            {/* 拖拽条 */}
+            {/* 拖拽条 - 增加点击区域宽度，居中显示视觉线 */}
             <div
-              className="absolute right-0 top-0 w-1 h-full cursor-col-resize bg-transparent hover:bg-blue-500 transition-colors z-20 group"
+              className="absolute right-0 top-0 w-3 h-full cursor-col-resize bg-transparent z-20 group flex justify-center"
+              style={{ transform: 'translateX(50%)' }} // 让点击区域跨越边缘
               onMouseDown={(e) => {
                 e.preventDefault()
                 setIsResizingSidebar(true)
               }}
               title="拖拽调整宽度"
             >
-              {/* 拖拽提示线 */}
-              <div className="absolute right-0 top-0 w-0.5 h-full bg-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="w-1 h-full bg-primary-400/0 group-hover:bg-primary-400/50 transition-colors rounded-full" />
             </div>
           </div>
         )}
 
-        {/* 左侧边栏折叠按钮 */}
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute top-1/2 transform -translate-y-1/2 z-10 bg-white border border-gray-200 rounded-r-lg p-1 hover:bg-gray-50 transition-colors shadow-sm"
-          style={{ left: sidebarOpen ? `${sidebarWidth}px` : '0' }}
-          title={sidebarOpen ? '隐藏对话历史' : '显示对话历史'}
-        >
-          {sidebarOpen ? (
-            <ChevronLeft className="w-4 h-4 text-gray-600" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-gray-600" />
-          )}
-        </button>
+        {/* Mobile Sidebar (Drawer) */}
+        {isMobile && sidebarOpen && (
+          <div className="fixed inset-0 z-50 flex">
+            {/* Backdrop */}
+            <div
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
+              onClick={() => setSidebarOpen(false)}
+            />
+
+            {/* Drawer Content */}
+            <div className="relative w-4/5 max-w-xs glass-panel border-r border-white/20 h-full shadow-2xl flex flex-col animate-slide-in-left">
+              <div className="absolute top-2 right-2 z-10">
+                <button
+                  onClick={() => setSidebarOpen(false)}
+                  className="p-1 hover:bg-white/50 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+              <Sidebar />
+            </div>
+          </div>
+        )}
+
+        {/* 左侧边栏折叠按钮 (Desktop Only) */}
+        {!isMobile && (
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="absolute top-1/2 transform -translate-y-1/2 z-30 glass border border-white/40 rounded-full p-1.5 hover:bg-white transition-all shadow-lg text-primary-600 hover:scale-110"
+            style={{ left: sidebarOpen ? `${sidebarWidth - 12}px` : '12px' }}
+            title={sidebarOpen ? '隐藏对话历史' : '显示对话历史'}
+          >
+            {sidebarOpen ? (
+              <ChevronLeft className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </button>
+        )}
 
         {/* 中间主要内容区域 */}
-        <div className="flex-1 flex flex-col min-w-0 bg-white overflow-y-auto">
+        <div className={`flex-1 flex flex-col min-w-0 overflow-hidden relative transition-all ${!isMobile ? 'glass-panel rounded-2xl shadow-xl' : 'bg-transparent'}`}>
           {children}
         </div>
 
         {/* 右侧面板 - 结构查看器 */}
-        {rightPanelOpen && (
+        {/* 右侧面板 - 结构查看器 */}
+        {/* Desktop RightPanel */}
+        {!isMobile && rightPanelOpen && (
           <div
-            className="border-l border-gray-200 bg-white flex-shrink-0 relative h-full"
+            className="glass-panel rounded-2xl flex-shrink-0 relative h-full overflow-hidden"
             style={{ width: rightPanelWidth }}
           >
-            {/* 拖拽条 */}
+            {/* 拖拽条 - 增加点击区域宽度，居中显示视觉线 */}
             <div
-              className="absolute left-0 top-0 w-1 h-full cursor-col-resize bg-transparent hover:bg-blue-500 transition-colors z-20 group"
+              className="absolute left-0 top-0 w-3 h-full cursor-col-resize bg-transparent z-20 group flex justify-center"
+              style={{ transform: 'translateX(-50%)' }} // 让点击区域跨越边缘
               onMouseDown={(e) => {
                 e.preventDefault()
                 setIsResizingRightPanel(true)
               }}
               title="拖拽调整宽度"
             >
-              {/* 拖拽提示线 */}
-              <div className="absolute left-0 top-0 w-0.5 h-full bg-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="w-1 h-full bg-primary-400/0 group-hover:bg-primary-400/50 transition-colors rounded-full" />
             </div>
             <RightPanel
               isVisible={true}
@@ -158,20 +201,53 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         )}
 
-        {/* 右侧面板折叠按钮 */}
-        <button
-          onClick={() => setRightPanelOpen(!rightPanelOpen)}
-          className="absolute top-1/2 transform -translate-y-1/2 z-10 bg-white border border-gray-200 rounded-l-lg p-1 hover:bg-gray-50 transition-colors shadow-sm"
-          style={{ right: rightPanelOpen ? `${rightPanelWidth}px` : '0' }}
-          title={rightPanelOpen ? '隐藏结构面板' : '显示结构面板'}
-        >
-          {rightPanelOpen ? (
-            <ChevronRight className="w-4 h-4 text-gray-600" />
-          ) : (
-            <ChevronLeft className="w-4 h-4 text-gray-600" />
-          )}
-        </button>
+        {/* Mobile RightPanel (Drawer) */}
+        {isMobile && rightPanelOpen && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            {/* Backdrop */}
+            <div
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
+              onClick={() => setRightPanelOpen(false)}
+            />
+
+            {/* Drawer Content */}
+            <div className="relative w-4/5 max-w-md glass-panel border-l border-white/20 h-full shadow-2xl flex flex-col animate-slide-in-right">
+              <RightPanel
+                isVisible={true}
+                onToggle={() => setRightPanelOpen(false)}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* 右侧面板折叠按钮 (Desktop Only) */}
+        {!isMobile && (
+          <button
+            onClick={() => setRightPanelOpen(!rightPanelOpen)}
+            className="absolute top-1/2 transform -translate-y-1/2 z-30 glass border border-white/40 rounded-full p-1.5 hover:bg-white transition-all shadow-lg text-primary-600 hover:scale-110"
+            style={{ right: rightPanelOpen ? `${rightPanelWidth - 12}px` : '12px' }}
+            title={rightPanelOpen ? '隐藏结构面板' : '显示结构面板'}
+          >
+            {rightPanelOpen ? (
+              <ChevronRight className="w-4 h-4" />
+            ) : (
+              <ChevronLeft className="w-4 h-4" />
+            )}
+          </button>
+        )}
       </div>
+
+      {/* 📱 Mobile Floating Action Button (FAB) for Data Panel */}
+      {isMobile && !rightPanelOpen && (
+        <button
+          onClick={() => setRightPanelOpen(true)}
+          className="fixed bottom-24 right-4 z-50 w-12 h-12 rounded-full glass border border-white/40 shadow-xl flex items-center justify-center text-primary-600 animate-slide-in-right active:scale-90 transition-transform bg-white/80 backdrop-blur-lg"
+          style={{ boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15)' }}
+        >
+          <Database className="w-6 h-6" />
+          <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+        </button>
+      )}
     </div>
   )
 }

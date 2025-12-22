@@ -38,9 +38,9 @@ NC='\033[0m'
 # 重启配置
 MAX_RESTART_ATTEMPTS=3          # 最大重启尝试次数
 RESTART_DELAY_BASE=5            # 基础重启延迟（秒）
-HEALTH_CHECK_TIMEOUT=60         # 健康检查超时（秒）- 增加到 60 秒以支持较慢的服务启动
+HEALTH_CHECK_TIMEOUT=120        # 健康检查超时（秒）- 增加到 120 秒以支持较慢的服务启动
 HEALTH_CHECK_INTERVAL=2         # 健康检查间隔（秒）
-PORT_WAIT_TIMEOUT=60            # 端口释放等待超时（秒）- 同步增加到 60 秒
+PORT_WAIT_TIMEOUT=120           # 端口释放等待超时（秒）- 同步增加到 120 秒
 PORT_CHECK_INTERVAL=1           # 端口检查间隔（秒）
 
 # 日志文件
@@ -205,6 +205,23 @@ check_dependencies() {
         exit 1
     fi
     log_success "python3 可用: $(python3 --version)"
+}
+
+install_dependencies() {
+    log_info "正在同步环境依赖（防止并发构建冲突）..."
+    
+    # 仅在 Linux 环境下执行同步（Windows 使用 --no-project 模式）
+    if [[ "$OSTYPE" != "msys" && "$OSTYPE" != "win32" && -z "${MSYSTEM-}" ]]; then
+        if [ -f "uv.lock" ] || [ -f "pyproject.toml" ]; then
+            log_info "检测到项目配置文件，运行 uv sync..."
+            if uv sync > logs/install.log 2>&1; then
+                log_success "依赖同步完成"
+            else
+                log_error "依赖同步失败，请检查 logs/install.log"
+                # 尝试继续，也许只是部分失败
+            fi
+        fi
+    fi
 }
 
 prepare_workspace() {
@@ -378,7 +395,30 @@ check_http_health() {
     fi
 }
 
-# 等待服务健康
+# 等待端口开始监听（用于 MCP 服务器）
+wait_for_port_listening() {
+    local service_name=$1
+    local host=$2
+    local port=$3
+    local timeout=$HEALTH_CHECK_TIMEOUT
+    local elapsed=0
+
+    log_info "等待 ${service_name} 端口 ${port} 开始监听..."
+
+    while ! is_port_in_use "$port"; do
+        if [ $elapsed -ge $timeout ]; then
+            log_error "${service_name} 端口 ${port} 在 ${timeout} 秒内未开始监听"
+            return 1
+        fi
+        sleep $HEALTH_CHECK_INTERVAL
+        elapsed=$((elapsed + HEALTH_CHECK_INTERVAL))
+    done
+
+    log_success "${service_name} 端口 ${port} 已监听"
+    return 0
+}
+
+# 等待服务健康（用于 HTTP 服务）
 wait_for_service_health() {
     local service_name=$1
     local host=$2
@@ -430,7 +470,7 @@ start_mcp_service() {
             log_warning "端口 $port 已被占用，尝试释放..."
             if ! force_release_port "$port"; then
                 log_error "无法释放端口 $port，${service_name} 启动失败"
-                exit 1
+                return 1
             fi
         fi
     else
@@ -465,47 +505,9 @@ start_mcp_service() {
     # 保存最后启动的服务 PID 到全局变量
     LAST_SERVICE_PID=$pid
 
-    # 等待进程启动
-    sleep 3
-
-    # 检查进程是否存活
-    if ! kill -0 "$pid" 2>/dev/null; then
-        log_error "${service_name} 启动失败（进程已退出）"
-        log_error "查看日志: logs/${log_name}"
-        tail -n 20 "logs/${log_name}" | while read line; do
-            log_error "  $line"
-        done
-        exit 1
-    fi
-
-    # MCP 服务：使用端口监听状态作为健康检查，避免 SSE /sse 接口导致 curl 失败
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
-        log_warning "Windows 环境下跳过 HTTP 健康检查，仅验证进程和端口..."
-        sleep 5
-        if is_port_in_use "$port"; then
-            log_success "${service_name} 端口 $port 已监听"
-        else
-            log_warning "${service_name} 端口 $port 未监听，但进程仍在运行"
-        fi
-    else
-        log_info "检查 ${service_name} 端口 ${port} 是否监听..."
-        local elapsed=0
-        while ! is_port_in_use "$port"; do
-            if [ $elapsed -ge $HEALTH_CHECK_TIMEOUT ]; then
-                log_error "${service_name} 端口 $port 在 ${HEALTH_CHECK_TIMEOUT} 秒内未开始监听"
-                log_error "查看日志: logs/${log_name}"
-                tail -n 20 "logs/${log_name}" | while read line; do
-                    log_error "  $line"
-                done
-                exit 1
-            fi
-            sleep $HEALTH_CHECK_INTERVAL
-            elapsed=$((elapsed + HEALTH_CHECK_INTERVAL))
-        done
-        log_success "${service_name} 端口 $port 已监听"
-    fi
-
-    log_success "${service_name} 已启动 (PID ${pid})"
+    # 并行启动模式：不再在此处等待端口监听
+    # 健康检查将移至主流程统一处理
+    log_success "已触发 ${service_name} 启动 (PID ${pid})"
 }
 
 # 启动后端服务（带重启支持）
@@ -525,7 +527,7 @@ start_backend() {
         log_warning "端口 $http_port 已被占用，尝试释放..."
         if ! force_release_port "$http_port"; then
             log_error "无法释放端口 $http_port，后端启动失败"
-            exit 1
+            return 1
         fi
     fi
 
@@ -544,30 +546,9 @@ start_backend() {
     # 保存最后启动的服务 PID 到全局变量
     LAST_SERVICE_PID=$pid
 
-    # 等待进程启动
-    sleep 4
-
-    # 检查进程是否存活
-    if ! kill -0 "$pid" 2>/dev/null; then
-        log_error "后端启动失败（进程已退出）"
-        log_error "查看日志: logs/backend.log"
-        tail -n 20 "logs/backend.log" | while read line; do
-            log_error "  $line"
-        done
-        exit 1
-    fi
-
-    # 健康检查（Windows 环境下跳过）
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
-        log_warning "Windows 环境下跳过 HTTP 健康检查"
-        sleep 3
-    else
-        if ! wait_for_service_health "$service_name" "${RESEARCHMIND_HTTP_HOST}" "$http_port" "/docs"; then
-            log_warning "后端健康检查失败，但进程仍在运行，继续..."
-        fi
-    fi
-
-    log_success "后端已启动 (PID ${pid})"
+    # 并行启动模式：不再在此处等待端口监听
+    # 健康检查将移至主流程统一处理
+    log_success "已触发后端启动 (PID ${pid})"
 }
 
 # 启动前端服务（带重启支持）
@@ -592,7 +573,7 @@ start_frontend() {
         log_warning "端口 $frontend_port 已被占用，尝试释放..."
         if ! force_release_port "$frontend_port"; then
             log_error "无法释放端口 $frontend_port，前端启动失败"
-            exit 1
+            return 1
         fi
     fi
 
@@ -604,32 +585,9 @@ start_frontend() {
     register_pid "$pid"
 
     # 保存最后启动的服务 PID 到全局变量
-    LAST_SERVICE_PID=$pid
-
-    # 等待进程启动
-    sleep 5
-
-    # 检查进程是否存活
-    if ! kill -0 "$pid" 2>/dev/null; then
-        log_error "前端启动失败（进程已退出）"
-        log_error "查看日志: logs/frontend.log"
-        tail -n 20 "logs/frontend.log" | while read line; do
-            log_error "  $line"
-        done
-        exit 1
-    fi
-
-    # 健康检查（Windows 环境下跳过）
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
-        log_warning "Windows 环境下跳过 HTTP 健康检查"
-        sleep 3
-    else
-        if ! wait_for_service_health "$service_name" "${VITE_FRONTEND_HOST}" "$frontend_port" "/"; then
-            log_warning "前端健康检查失败，但进程仍在运行，继续..."
-        fi
-    fi
-
-    log_success "前端已启动 (PID ${pid})"
+    # 并行启动模式：不再在此处等待端口监听
+    # 健康检查将移至主流程统一处理
+    log_success "已触发前端启动 (PID ${pid})"
 }
 
 # ---------------------------- 服务监控与自动重启 -------------------------
@@ -741,6 +699,12 @@ prompt_log_view() {
     TAIL_PIDS+=($!)
 }
 
+wait_forever() {
+    log_info "运行在非交互模式 (Daemon/后台)，服务将在后台保持运行..."
+    log_info "如需停止，请使用: kill $(cat .service_pids | tr '\n' ' ')"
+    wait
+}
+
 # -----------------------------------------------------------------------------
 # 主流程
 # -----------------------------------------------------------------------------
@@ -748,6 +712,7 @@ print_banner
 check_dependencies
 load_config
 prepare_workspace
+install_dependencies
 kill_stale_processes
 
 log_info "已加载配置:"
@@ -759,21 +724,116 @@ log_config "仿真 MCP:          ${SIMULATION_MCP_HOST}:${SIMULATION_MCP_PORT}"
 log_config "数据库 MCP:        ${DATABASE_MCP_HOST}:${DATABASE_MCP_PORT}"
 echo ""
 
-log_info "正在启动 MCP 服务..."
-start_mcp_service "Database MCP" "database_call/server.py" "database.log" "${DATABASE_MCP_HOST}" "${DATABASE_MCP_PORT}"
-database_pid=$LAST_SERVICE_PID
+log_info "正在并行启动所有服务..."
 
-start_mcp_service "Paper Search MCP" "paper_search/server.py" "paper_search.log" "${PAPER_SEARCH_MCP_HOST}" "${PAPER_SEARCH_MCP_PORT}"
-paper_search_pid=$LAST_SERVICE_PID
+# 启动 Database MCP
+start_mcp_service "Database MCP" "database_call/server.py" "database.log" "${DATABASE_MCP_HOST}" "${DATABASE_MCP_PORT}" &
+log_info "已触发 Database MCP 启动..."
 
-start_mcp_service "Simulation MCP" "simulation/server.py" "simulation.log" "${SIMULATION_MCP_HOST}" "${SIMULATION_MCP_PORT}"
-simulation_pid=$LAST_SERVICE_PID
+# 启动 Paper Search MCP
+start_mcp_service "Paper Search MCP" "paper_search/server.py" "paper_search.log" "${PAPER_SEARCH_MCP_HOST}" "${PAPER_SEARCH_MCP_PORT}" &
+log_info "已触发 Paper Search MCP 启动..."
 
-start_backend
-backend_pid=$LAST_SERVICE_PID
+# 启动 Simulation MCP
+start_mcp_service "Simulation MCP" "simulation/server.py" "simulation.log" "${SIMULATION_MCP_HOST}" "${SIMULATION_MCP_PORT}" &
+log_info "已触发 Simulation MCP 启动..."
 
-start_frontend
-frontend_pid=$LAST_SERVICE_PID
+# 启动后端
+start_backend &
+log_info "已触发后端服务启动..."
+
+# 启动前端
+sleep 2 # 前端稍微延后一点点，避免瞬间争抢过于激烈
+start_frontend &
+log_info "已触发前端服务启动..."
+
+# 等待所有后台启动任务完成 (wait 仅等待当前 shell 的子进程，即上面的 & 任务)
+# 注意：这里的 wait 是等待启动脚本本身完成，而不是等待服务长期运行
+# 此处的子进程是 start_mcp_service 等函数调用
+wait
+
+# 重新收集 PID（因为它们是在子 Shell/后台函数中启动的，变量无法回传）
+# 我们通过 .service_pids 文件来获取，或者通过端口反查
+# 此时服务应该都已经启动或正在启动中
+sleep 5
+
+# 简单的 PID 收集逻辑 (如果需要精确监控，可能需要优化 PID 传递机制)
+# 由于 start_xxx 函数是在后台运行的，它们无法修改父 Shell 的 PID 变量
+# 但我们在 start_xxx 内部调用了 register_pid 写入了 .service_pids
+# 我们可以直接启动监控，监控逻辑会通过端口/进程名检查
+# 或者我们简单地假设如果端口起了，就是成功了
+
+# 验证服务状态
+log_info "等待所有服务端口就绪..."
+# MCP 服务器使用端口检查（SSE transport 不支持标准 HTTP 健康端点）
+wait_for_port_listening "Database MCP" "${DATABASE_MCP_HOST}" "${DATABASE_MCP_PORT}" || log_warning "Database MCP 尚未就绪"
+wait_for_port_listening "Paper Search MCP" "${PAPER_SEARCH_MCP_HOST}" "${PAPER_SEARCH_MCP_PORT}" || log_warning "Paper Search MCP 尚未就绪" 
+wait_for_port_listening "Simulation MCP" "${SIMULATION_MCP_HOST}" "${SIMULATION_MCP_PORT}" || log_warning "Simulation MCP 尚未就绪"
+# 后端也使用端口检查（可能在 Nginx 反向代理后面，/docs 可能是 /api/docs）
+wait_for_port_listening "Backend HTTP" "${RESEARCHMIND_HTTP_HOST}" "${RESEARCHMIND_HTTP_PORT}" || log_warning "Backend 尚未就绪"
+wait_for_port_listening "Backend WebSocket" "${RESEARCHMIND_WS_HOST}" "${RESEARCHMIND_WS_PORT}" || log_warning "Backend WS 尚未就绪"
+# 前端也使用端口检查（Vite 编译很慢，HTTP 检查可能超时）
+wait_for_port_listening "Frontend (Vite)" "${VITE_FRONTEND_HOST}" "${VITE_FRONTEND_PORT}" || log_warning "Frontend 尚未就绪"
+
+
+
+# 从文件重新读取 PIDs 用于监控 (这需要之前的 start 函数确实写入了文件)
+# 注意：并行启动时，.service_pids 的写入顺序可能是不确定的
+# 下面的监控逻辑需要更健壮一点，或者我们不再依赖精确的 PID 变量
+# 而是依赖 Monitor 函数自己去查找 PID? 
+# 目前 Monitor 函数依赖传入的 PID。
+# 简便起见，我们通过端口反查 PID 来启动监控
+get_pid_by_port() {
+    local port=$1
+    local retry=0
+    local max_retry=5
+    local pid=""
+    
+    while [ $retry -lt $max_retry ]; do
+        if command -v lsof > /dev/null 2>&1; then
+            pid=$(lsof -ti:$port 2>/dev/null | head -1)
+        elif command -v ss > /dev/null 2>&1; then
+            # 备用方案：使用 ss 和 /proc
+            pid=$(ss -tlnp | grep ":$port " | grep -oP '(?<=pid=)[0-9]+' | head -1)
+        fi
+        
+        if [ -n "$pid" ]; then
+            echo "$pid"
+            return 0
+        fi
+        
+        retry=$((retry + 1))
+        sleep 1
+    done
+    
+    # 如果还是获取不到，尝试从 .service_pids 文件读取
+    if [ -f .service_pids ]; then
+        # 返回最后一个非空的 PID（不太可靠，但总比没有好）
+        pid=$(tail -1 .service_pids 2>/dev/null)
+        if [ -n "$pid" ]; then
+            echo "$pid"
+            return 0
+        fi
+    fi
+    
+    echo ""
+    return 1
+}
+
+log_info "正在收集服务 PID..."
+database_pid=$(get_pid_by_port "${DATABASE_MCP_PORT}")
+paper_search_pid=$(get_pid_by_port "${PAPER_SEARCH_MCP_PORT}")
+simulation_pid=$(get_pid_by_port "${SIMULATION_MCP_PORT}")
+backend_pid=$(get_pid_by_port "${RESEARCHMIND_HTTP_PORT}")
+frontend_pid=$(get_pid_by_port "${VITE_FRONTEND_PORT}")
+
+# 调试输出
+log_info "收集到的 PID:"
+log_info "  Database MCP:     ${database_pid:-未获取到}"
+log_info "  Paper Search MCP: ${paper_search_pid:-未获取到}"
+log_info "  Simulation MCP:   ${simulation_pid:-未获取到}"
+log_info "  Backend HTTP:     ${backend_pid:-未获取到}"
+log_info "  Frontend:         ${frontend_pid:-未获取到}"
 
 print_summary
 
@@ -782,17 +842,46 @@ log_info "启动日志已保存到: $STARTUP_LOG"
 log_info "重启日志将保存到: $RESTART_LOG"
 echo ""
 
-# 启动后台监控进程
+# 启动后台监控进程（仅监控成功获取到 PID 的服务）
 log_info "正在启动服务监控..."
-monitor_service "Database MCP" "$database_pid" "start_mcp_service 'Database MCP' 'database_call/server.py' 'database.log' '${DATABASE_MCP_HOST}' '${DATABASE_MCP_PORT}' 'true'" &
-monitor_service "Paper Search MCP" "$paper_search_pid" "start_mcp_service 'Paper Search MCP' 'paper_search/server.py' 'paper_search.log' '${PAPER_SEARCH_MCP_HOST}' '${PAPER_SEARCH_MCP_PORT}' 'true'" &
-monitor_service "Simulation MCP" "$simulation_pid" "start_mcp_service 'Simulation MCP' 'simulation/server.py' 'simulation.log' '${SIMULATION_MCP_HOST}' '${SIMULATION_MCP_PORT}' 'true'" &
-monitor_service "Backend" "$backend_pid" "start_backend" &
-monitor_service "Frontend" "$frontend_pid" "start_frontend" &
+if [ -n "$database_pid" ]; then
+    monitor_service "Database MCP" "$database_pid" "start_mcp_service 'Database MCP' 'database_call/server.py' 'database.log' '${DATABASE_MCP_HOST}' '${DATABASE_MCP_PORT}' 'true'" &
+else
+    log_warning "Database MCP PID 未获取到，跳过监控"
+fi
+
+if [ -n "$paper_search_pid" ]; then
+    monitor_service "Paper Search MCP" "$paper_search_pid" "start_mcp_service 'Paper Search MCP' 'paper_search/server.py' 'paper_search.log' '${PAPER_SEARCH_MCP_HOST}' '${PAPER_SEARCH_MCP_PORT}' 'true'" &
+else
+    log_warning "Paper Search MCP PID 未获取到，跳过监控"
+fi
+
+if [ -n "$simulation_pid" ]; then
+    monitor_service "Simulation MCP" "$simulation_pid" "start_mcp_service 'Simulation MCP' 'simulation/server.py' 'simulation.log' '${SIMULATION_MCP_HOST}' '${SIMULATION_MCP_PORT}' 'true'" &
+else
+    log_warning "Simulation MCP PID 未获取到，跳过监控"
+fi
+
+if [ -n "$backend_pid" ]; then
+    monitor_service "Backend" "$backend_pid" "start_backend" &
+else
+    log_warning "Backend PID 未获取到，跳过监控"
+fi
+
+if [ -n "$frontend_pid" ]; then
+    monitor_service "Frontend" "$frontend_pid" "start_frontend" &
+else
+    log_warning "Frontend PID 未获取到，跳过监控"
+fi
+
 log_success "服务监控已启动（自动重启已启用）"
 echo ""
 
-prompt_log_view
+if [ -t 0 ]; then
+    prompt_log_view
+else
+    wait_forever
+fi
 
 # 等待任何进程退出（包括 tail 进程）
 # 这允许 Ctrl+C 触发清理陷阱

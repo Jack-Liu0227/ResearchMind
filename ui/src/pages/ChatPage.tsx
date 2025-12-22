@@ -38,7 +38,8 @@ const ChatPage: React.FC = () => {
     updateBillingData,
     setUserBillingStats,
     setGlobalBillingStats,
-    setPapersData
+    setPapersData,
+    messages
   } = useAppStore()
 
   const pendingFileMetadataRef = useRef<any[]>([])
@@ -237,7 +238,7 @@ const ChatPage: React.FC = () => {
         console.log('🔌 WebSocket 已经连接，跳过重复连接')
         return
       }
-      
+
       try {
         console.log('🔌 正在连接 WebSocket...')
         await wsService.connect()
@@ -263,49 +264,49 @@ const ChatPage: React.FC = () => {
         // 保持 loading 状态，等待 complete 状态才关闭（表示还在处理中）
 
         // 如果消息有内容，添加到消息列表
-      if (message.data.content && message.data.content.trim()) {
-        const newMessage = {
-          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          content: message.data.content,
-          role: 'assistant' as const,
+        if (message.data.content && message.data.content.trim()) {
+          const newMessage = {
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            content: message.data.content,
+            role: 'assistant' as const,
             timestamp: new Date(message.data.timestamp || Date.now()),
             agentId: message.data.agentId,
             agentName: message.data.agentName,
             type: (message.data.type || 'text') as 'text' | 'structure' | 'analysis' | 'error',
             metadata: message.data.metadata,
           }
-        addMessage(newMessage)
+          addMessage(newMessage)
 
-        // 🆕 更新 loading 消息，提示用户正在查看实时输出
-        if (isLoading) {
-          setLoadingMessage('正在继续处理...')
-        }
-
-        if (pendingFileMetadataRef.current.length > 0) {
-          console.log('📄 [pending metadata] 发现', pendingFileMetadataRef.current.length, '个待处理的文件元数据')
-          let mergedMetadata = { ...(newMessage.metadata || {}) }
-          const bufferedFiles: SessionFile[] = []
-          while (pendingFileMetadataRef.current.length > 0) {
-            const pendingMetadata = pendingFileMetadataRef.current.shift()
-            if (!pendingMetadata) {
-              continue
-            }
-            console.log('📄 [pending metadata] 处理元数据:', pendingMetadata)
-            mergedMetadata = {
-              ...mergedMetadata,
-              ...pendingMetadata
-            }
-            bufferedFiles.push(...createSessionFilesFromMetadata(pendingMetadata, newMessage.id))
+          // 🆕 更新 loading 消息，提示用户正在查看实时输出
+          if (isLoading) {
+            setLoadingMessage('正在继续处理...')
           }
-          console.log('📄 [pending metadata] 总共创建了', bufferedFiles.length, '个文件')
-          updateMessage(newMessage.id, {
-            metadata: mergedMetadata
-          })
-          bufferedFiles.forEach((file) => {
-            console.log('📄 [pending metadata] 添加文件到右侧面板:', file.name, file.id)
-            addToCurrentSessionFiles(file)
-          })
-        }
+
+          if (pendingFileMetadataRef.current.length > 0) {
+            console.log('📄 [pending metadata] 发现', pendingFileMetadataRef.current.length, '个待处理的文件元数据')
+            let mergedMetadata = { ...(newMessage.metadata || {}) }
+            const bufferedFiles: SessionFile[] = []
+            while (pendingFileMetadataRef.current.length > 0) {
+              const pendingMetadata = pendingFileMetadataRef.current.shift()
+              if (!pendingMetadata) {
+                continue
+              }
+              console.log('📄 [pending metadata] 处理元数据:', pendingMetadata)
+              mergedMetadata = {
+                ...mergedMetadata,
+                ...pendingMetadata
+              }
+              bufferedFiles.push(...createSessionFilesFromMetadata(pendingMetadata, newMessage.id))
+            }
+            console.log('📄 [pending metadata] 总共创建了', bufferedFiles.length, '个文件')
+            updateMessage(newMessage.id, {
+              metadata: mergedMetadata
+            })
+            bufferedFiles.forEach((file) => {
+              console.log('📄 [pending metadata] 添加文件到右侧面板:', file.name, file.id)
+              addToCurrentSessionFiles(file)
+            })
+          }
 
           // 🆕 收到内容后，保持loading状态，等待complete状态
           // 这样用户可以看到实时输出，同时知道处理还未完成
@@ -464,7 +465,6 @@ const ChatPage: React.FC = () => {
             id: 'agent-processing-toast',
             duration: 6000, // 显示6秒后消失
           })
-          setLoadingMessage(detailedMsg)
         } else if (message.data.status === 'thinking') {
           setIsLoading(true)
           const thinkingMsg = message.data.message || '智能体正在思考...'
@@ -640,8 +640,8 @@ const ChatPage: React.FC = () => {
         const storeState = useAppStore.getState()
         const existingToolMessage = storeState.messages.find(
           m => m.type === 'tool_execution' &&
-               m.toolExecution?.toolName === toolExecutionData.toolName &&
-               m.toolExecution?.status === 'pending'
+            m.toolExecution?.toolName === toolExecutionData.toolName &&
+            m.toolExecution?.status === 'pending'
         )
 
         if (existingToolMessage && toolExecutionData.status !== 'pending') {
@@ -665,8 +665,8 @@ const ChatPage: React.FC = () => {
 
             // 🆕 如果是 search_papers 工具，设置文献数据到 store
             if (toolExecutionData.toolName === 'search_papers' &&
-                toolExecutionData.output.csv_file_path &&
-                toolExecutionData.output.total_papers_in_csv) {
+              toolExecutionData.output.csv_file_path &&
+              toolExecutionData.output.total_papers_in_csv) {
               const sessionId = toolExecutionData.sessionId || currentSession?.id || 'default'
 
               // 🔧 修复：从 csv_file_path 提取相对路径（相对于 session_data/）
@@ -732,8 +732,8 @@ const ChatPage: React.FC = () => {
 
             // 🆕 如果是 search_papers 工具，设置文献数据到 store
             if (toolExecutionData.toolName === 'search_papers' &&
-                toolExecutionData.output.csv_file_path &&
-                toolExecutionData.output.total_papers_in_csv) {
+              toolExecutionData.output.csv_file_path &&
+              toolExecutionData.output.total_papers_in_csv) {
               const sessionId = toolExecutionData.sessionId || currentSession?.id || 'default'
               setPapersData(
                 toolExecutionData.output.csv_file_path,
@@ -944,10 +944,7 @@ const ChatPage: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col">
-      {/* 智能体选择器 */}
-      <div className="border-b border-gray-200 bg-white">
-        <AgentSelector />
-      </div>
+      {/* 智能体选择器 - 已移除，功能集成至顶部导航栏 */}
 
       {/* 主内容区域 */}
       <div className="flex-1 min-h-0">

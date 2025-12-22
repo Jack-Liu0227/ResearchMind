@@ -35,7 +35,7 @@ const PricingPage: React.FC = () => {
     try {
       const response = await fetch('/api/billing/pricing/config')
       const data = await response.json()
-      
+
       if (data.success) {
         setConfig(data)
       } else {
@@ -101,7 +101,7 @@ const PricingPage: React.FC = () => {
   }
 
   return (
-    <div className="bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="bg-gray-50 py-12 px-4 sm:px-6 lg:px-8 h-full overflow-y-auto">
       <div className="max-w-7xl mx-auto pb-12">
         {/* 返回按钮 */}
         <div className="mb-6">

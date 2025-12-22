@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Send, Paperclip, Mic, Square, X, Copy } from 'lucide-react'
+import { Send, Paperclip, Mic, Square, X, Copy, Bot } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import MessageList from './MessageList'
@@ -27,10 +27,13 @@ const ChatInterface: React.FC = () => {
     setIsLoading,
     loadingMessage,
     setLoadingMessage,
+    agents,
+    setCurrentAgent
   } = useAppStore()
 
   const [inputValue, setInputValue] = useState('')
   const [isRecording, setIsRecording] = useState(false)
+  const [isAgentMenuOpen, setIsAgentMenuOpen] = useState(false) // Input box agent switcher
   const [uploadedFiles, setUploadedFiles] = useState<File[] | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -499,136 +502,181 @@ const ChatInterface: React.FC = () => {
         <MessageList messages={messages} onRegenerate={handleRegenerate} />
       </div>
 
-      {/* 输入区域 */}
-      <div className="border-t border-gray-200 bg-white p-4">
-        <div className="max-w-4xl mx-auto">
-          {/* 文件上传控件 */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={handleFileChange}
-            accept=".txt,.pdf,.doc,.docx,.cif,.xyz,.pdb"
-            multiple
-          />
+      {/* 输入区域 (Floating Glass Style) */}
+      <div className="flex-shrink-0 p-2 sm:p-5 bg-transparent z-10 transition-all duration-300 ease-in-out">
+        <div className="max-w-4xl mx-auto relative group">
 
-          {/* 已上传文件显示 */}
-          {uploadedFiles && uploadedFiles.length > 0 && (
-            <div className="mb-2 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-              <div className="flex items-center space-x-2">
-                <Paperclip className="w-4 h-4 text-blue-600" />
-                {uploadedFiles.length === 1 ? (
-                  <>
-                    <span className="text-sm text-blue-900">{uploadedFiles[0].name}</span>
-                    <span className="text-xs text-blue-600">({(uploadedFiles[0].size / 1024).toFixed(1)} KB)</span>
-                  </>
+          {/* 玻璃拟态容器 */}
+          <div className="glass-panel rounded-2xl p-1.5 sm:p-3 shadow-2xl backdrop-blur-xl border border-white/40 bg-white/60 transition-all hover:bg-white/70 hover:shadow-primary-500/10">
+
+            {/* 文件上传控件 */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFileChange}
+              accept=".txt,.pdf,.doc,.docx,.cif,.xyz,.pdb"
+              multiple
+            />
+
+            {/* 已上传文件显示 */}
+            {uploadedFiles && uploadedFiles.length > 0 && (
+              <div className="mb-2 flex items-center justify-between bg-primary-50/50 border border-primary-100/50 rounded-xl px-2 py-1.5 animate-fade-in">
+                <div className="flex items-center space-x-2">
+                  <div className="p-1.5 bg-primary-100 text-primary-600 rounded-lg">
+                    <Paperclip className="w-4 h-4" />
+                  </div>
+                  {uploadedFiles.length === 1 ? (
+                    <>
+                      <span className="text-sm font-medium text-primary-900 truncate max-w-[150px] sm:max-w-xs">{uploadedFiles[0].name}</span>
+                      <span className="text-xs text-primary-500">({(uploadedFiles[0].size / 1024).toFixed(1)} KB)</span>
+                    </>
+                  ) : (
+                    <span className="text-sm font-medium text-primary-900">{uploadedFiles.length} 个文件</span>
+                  )}
+                </div>
+                <button
+                  onClick={handleRemoveFile}
+                  className="p-1.5 text-primary-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                  title="移除文件"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* 输入框主布局 */}
+            <div className="relative flex items-end gap-2">
+
+              {/* 左侧功能区：智能体切换 & 上传 */}
+              <div className="flex items-center gap-1">
+                {/* 智能体切换按钮 */}
+                <div className="relative">
+                  <button
+                    onClick={() => setIsAgentMenuOpen(!isAgentMenuOpen)}
+                    className="flex-shrink-0 p-2 text-gray-400 hover:text-primary-600 hover:bg-white/50 rounded-xl transition-all active:scale-95 group/agent-btn"
+                    title={currentAgent?.name || '切换智能体'}
+                  >
+                    <Bot className={`w-5 h-5 ${currentAgent ? 'text-primary-600' : ''}`} />
+                  </button>
+
+                  {/* Agent Selection Popup (Upwards) */}
+                  {isAgentMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setIsAgentMenuOpen(false)} />
+                      <div className="absolute bottom-full left-0 mb-3 w-64 bg-white/90 backdrop-blur-xl border border-white/40 rounded-xl shadow-2xl z-40 overflow-hidden animate-slide-up origin-bottom-left ring-1 ring-black/5">
+                        <div className="p-1 max-h-[50vh] overflow-y-auto custom-scrollbar">
+                          <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">切换会话助手</div>
+                          {agents.map((agent) => (
+                            <button
+                              key={agent.id}
+                              onClick={() => {
+                                setCurrentAgent(agent)
+                                setIsAgentMenuOpen(false)
+                                if (!currentSession || currentSession.agentId !== agent.id) {
+                                  // Optional: Prompt to start new session? 
+                                  // For now just switching context for next message is fine.
+                                }
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-left ${currentAgent?.id === agent.id
+                                  ? 'bg-primary-50 text-primary-900 border border-primary-100'
+                                  : 'hover:bg-black/5 text-gray-700 border border-transparent'
+                                }`}
+                            >
+                              <Bot className={`w-4 h-4 ${currentAgent?.id === agent.id ? 'text-primary-600' : 'text-gray-400'}`} />
+                              <span className="font-medium text-sm truncate">{agent.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="w-px h-6 bg-gray-200/50 mx-1"></div>
+
+                <button
+                  onClick={handleFileUpload}
+                  className="flex-shrink-0 p-2 text-gray-400 hover:text-primary-600 hover:bg-white/50 rounded-xl transition-all active:scale-95"
+                  title="上传文件"
+                >
+                  <Paperclip className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 输入框 */}
+              <div className="flex-1 relative">
+                <textarea
+                  ref={textareaRef}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder={
+                    currentAgent
+                      ? `与 ${currentAgent.name} 对话...`
+                      : '请先选择智能体...'
+                  }
+                  className="w-full resize-none bg-transparent border-0 rounded-lg px-2 py-2 focus:outline-none focus:ring-0 text-gray-800 placeholder-gray-400 max-h-32 scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent text-sm sm:text-base leading-relaxed"
+                  rows={1}
+                  disabled={!currentAgent || !connected}
+                  style={{ minHeight: '44px' }}
+                />
+              </div>
+
+              {/* 右侧功能区：语音 & 发送 */}
+              <div className="flex items-center gap-1">
+                {/* 语音按钮 (仅在非录音或空输入时显示，保持简洁) */}
+                {!inputValue && (
+                  <button
+                    onClick={toggleRecording}
+                    className={`p-2.5 rounded-xl transition-all active:scale-95 ${isRecording
+                      ? 'bg-red-100 text-red-600 animate-pulse'
+                      : 'text-gray-400 hover:text-gray-600 hover:bg-white/50'
+                      }`}
+                    title={isRecording ? '停止录音' : '语音输入'}
+                  >
+                    {isRecording ? <Square className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                  </button>
+                )}
+
+                {/* 发送按钮 */}
+                {isLoading ? (
+                  <button
+                    onClick={handleStopResponse}
+                    className="p-2.5 bg-red-500 text-white rounded-xl shadow-lg shadow-red-500/30 hover:bg-red-600 transition-all active:scale-95"
+                    title="停止响应"
+                  >
+                    <Square className="w-5 h-5" />
+                  </button>
                 ) : (
-                  <span className="text-sm text-blue-900">{uploadedFiles.length} 个文件</span>
+                  <button
+                    onClick={hasFiles ? handleSendWithFile : handleSendMessage}
+                    disabled={(!inputValue.trim() && !hasFiles) || !currentAgent || !connected}
+                    className={`p-2.5 rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center ${(!inputValue.trim() && !hasFiles) || !currentAgent || !connected
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed hidden sm:flex'
+                      : 'bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-primary-500/30 hover:shadow-primary-500/40 hover:-translate-y-0.5'
+                      }`}
+                    title="发送"
+                  >
+                    <Send className="w-5 h-5 ml-0.5" />
+                  </button>
                 )}
               </div>
-              <button
-                onClick={handleRemoveFile}
-                className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
-                title="移除文件"
-              >
-                <X className="w-4 h-4" />
-              </button>
             </div>
-          )}
-
-          {/* 输入框容器 */}
-          <div className="relative flex items-end space-x-3">
-            {/* 附件按钮 */}
-            <button
-              onClick={handleFileUpload}
-              className="flex-shrink-0 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              title="上传文件"
-            >
-              <Paperclip className="w-5 h-5" />
-            </button>
-
-            {/* 输入框 */}
-            <div className="flex-1 relative">
-              <textarea
-                ref={textareaRef}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder={
-                  currentAgent
-                    ? `向 ${currentAgent.name} 发送消息...`
-                    : '请先选择智能体...'
-                }
-                className="w-full resize-none border border-gray-300 rounded-lg px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent max-h-32 scrollbar-thin"
-                rows={1}
-                disabled={!currentAgent || !connected}
-              />
-
-              {/* 发送/停止按钮 */}
-              {isLoading ? (
-                <button
-                  onClick={handleStopResponse}
-                  className="absolute right-2 bottom-2 p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                  title="停止响应"
-                >
-                  <Square className="w-4 h-4" />
-                </button>
-              ) : (
-                <button
-                  onClick={hasFiles ? handleSendWithFile : handleSendMessage}
-                  disabled={(!inputValue.trim() && !hasFiles) || !currentAgent || !connected}
-                  className="absolute right-2 bottom-2 p-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  title={hasFiles ? '发送消息和文件 (Enter)' : '发送消息 (Enter)'}
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-
-            {/* 复制输入内容 */}
-            <button
-              onClick={handleCopyInput}
-              className="flex-shrink-0 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              title="复制当前输入内容"
-            >
-              <Copy className="w-5 h-5" />
-            </button>
-
-            {/* 语音按钮 */}
-            <button
-              onClick={toggleRecording}
-              className={`flex-shrink-0 p-2 rounded-lg transition-colors ${
-                isRecording
-                  ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
-              title={isRecording ? '停止录音' : '开始录音'}
-            >
-              {isRecording ? (
-                <Square className="w-5 h-5" />
-              ) : (
-                <Mic className="w-5 h-5" />
-              )}
-            </button>
           </div>
 
-          {/* 提示信息 */}
-          <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-            <div className="flex items-center space-x-4">
-              <span>按 Enter 发送，Shift + Enter 换行</span>
-              {!connected && (
-                <span className="text-red-500">未连接到服务器</span>
-              )}
-            </div>
+          {/* 底部提示信息 */}
+          <div className="flex items-center justify-between mt-2 px-2 text-xs text-gray-400 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-500">
             <div className="flex items-center space-x-2">
-              {currentAgent && (
-                <span className="text-primary-600">当前: {currentAgent.name}</span>
-              )}
-              {isLoading && (
-                <span className="text-gray-400">{loadingMessage}</span>
-              )}
+              <span>ResearchMind AI</span>
+              <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+              <span>v2.0</span>
+            </div>
+            <div>
+              {!connected && <span className="text-red-500 flex items-center gap-1"><span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>离线</span>}
             </div>
           </div>
+
         </div>
       </div>
     </div>

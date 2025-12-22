@@ -21,8 +21,8 @@ const StructureList: React.FC = () => {
   } = useAppStore()
   const [isExpanded, setIsExpanded] = useState(true)
 
-  // 只显示最新的5个结构
-  const displayStructures = currentSessionStructures.slice(-MAX_DISPLAY_STRUCTURES)
+  // 只显示最新的5个结构，并按时间倒序排列（最新的在上方）
+  const displayStructures = currentSessionStructures.slice(-MAX_DISPLAY_STRUCTURES).reverse()
   const totalCount = currentSessionStructures.length
   const hiddenCount = Math.max(0, totalCount - MAX_DISPLAY_STRUCTURES)
 
@@ -150,25 +150,22 @@ const StructureListItem: React.FC<StructureListItemProps> = ({
 
   return (
     <div
-      className={`w-full px-4 py-3 hover:bg-blue-50 transition-all duration-200 relative group cursor-pointer ${
-        isSelected ? 'bg-blue-50 border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'
-      }`}
+      className={`w-full px-4 py-3 hover:bg-blue-50 transition-all duration-200 relative group cursor-pointer ${isSelected ? 'bg-blue-50 border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'
+        }`}
       onClick={onClick}
     >
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           {/* 序号和化学式 */}
           <div className="flex items-center space-x-2.5 mb-2">
-            <span className={`flex-shrink-0 w-7 h-7 flex items-center justify-center text-xs font-semibold rounded-full transition-colors ${
-              isSelected
+            <span className={`flex-shrink-0 w-7 h-7 flex items-center justify-center text-xs font-semibold rounded-full transition-colors ${isSelected
                 ? 'bg-blue-500 text-white'
                 : 'bg-gray-200 text-gray-700 group-hover:bg-blue-200 group-hover:text-blue-700'
-            }`}>
+              }`}>
               {index + 1}
             </span>
-            <span className={`font-semibold text-base truncate transition-colors ${
-              isSelected ? 'text-blue-700' : 'text-gray-900'
-            }`}>
+            <span className={`font-semibold text-base truncate transition-colors ${isSelected ? 'text-blue-700' : 'text-gray-900'
+              }`}>
               {structure.formula}
             </span>
           </div>
@@ -179,16 +176,15 @@ const StructureListItem: React.FC<StructureListItemProps> = ({
             {structure.source?.database && (
               <div className="flex items-center space-x-1.5">
                 <span className="font-medium text-gray-500">来源:</span>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold shadow-sm ${
-                  structure.source.database === 'Upload' ? 'bg-blue-100 text-blue-700' :
-                  structure.source.database === 'Relaxed' ? 'bg-green-100 text-green-700' :
-                  structure.source.database === 'Generated' ? 'bg-purple-100 text-purple-700' :
-                  structure.source.database === 'MP' ? 'bg-orange-100 text-orange-700' :
-                  structure.source.database === 'OQMD' ? 'bg-pink-100 text-pink-700' :
-                  structure.source.database === 'COD' ? 'bg-indigo-100 text-indigo-700' :
-                  structure.source.database === 'AFLOW' ? 'bg-teal-100 text-teal-700' :
-                  'bg-gray-100 text-gray-700'
-                }`}>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold shadow-sm ${structure.source.database === 'Upload' ? 'bg-blue-100 text-blue-700' :
+                    structure.source.database === 'Relaxed' ? 'bg-green-100 text-green-700' :
+                      structure.source.database === 'Generated' ? 'bg-purple-100 text-purple-700' :
+                        structure.source.database === 'MP' ? 'bg-orange-100 text-orange-700' :
+                          structure.source.database === 'OQMD' ? 'bg-pink-100 text-pink-700' :
+                            structure.source.database === 'COD' ? 'bg-indigo-100 text-indigo-700' :
+                              structure.source.database === 'AFLOW' ? 'bg-teal-100 text-teal-700' :
+                                'bg-gray-100 text-gray-700'
+                  }`}>
                   {structure.source.database}
                 </span>
               </div>

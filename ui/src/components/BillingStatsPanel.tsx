@@ -15,6 +15,7 @@
  */
 
 import React, { useState, useEffect } from 'react'
+import ReactDOM from 'react-dom'
 import { BillingStats } from '../utils/apiClient'
 import { useAppStore } from '../store/useAppStore'
 import { wsService } from '../services/websocket'
@@ -38,7 +39,7 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
     billingData,
     userBillingStats,
     // 🔧 移除 globalBillingStats
-    user
+    // user
   } = useAppStore()
   const [conversationStats, setConversationStats] = useState<BillingStats | null>(null)
   const [loading, setLoading] = useState(false)
@@ -61,10 +62,10 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
       wsService.requestConversationStats(currentSession.id)
 
       // 如果用户已登录，请求用户统计
-      if (user?.id) {
-        console.log(`📊 [BillingStatsPanel] 请求用户 ${user.id} 的统计...`)
-        wsService.requestUserStats(user.id.toString())
-      }
+      // if (user?.id) {
+      //   console.log(`📊 [BillingStatsPanel] 请求用户 ${user.id} 的统计...`)
+      //   wsService.requestUserStats(user.id.toString())
+      // }
     } else {
       setError('请先创建或选择一个会话')
       setLoading(false)
@@ -76,7 +77,7 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
     }, 3000)
 
     return () => clearTimeout(timeout)
-  }, [isOpen, currentSession?.id, user?.id])
+  }, [isOpen, currentSession?.id])
 
   // 🔧 监听 WebSocket 消息更新
   useEffect(() => {
@@ -88,7 +89,7 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
 
       const newStats = {
         conversation_id: currentSession.id,
-        user_id: user?.id?.toString() || 'unknown',
+        user_id: 'unknown',
         total_tokens: billingData.session_total_tokens || 0,  // 🔧 添加默认值
         total_photons: billingData.session_total_photons || 0,  // 🔧 添加默认值
         request_count: billingData.requests_count || 0,  // 🔧 添加默认值
@@ -101,11 +102,11 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
       console.log('📊 [BillingStatsPanel] 设置 conversationStats:', newStats)
       setConversationStats(newStats)
     }
-  }, [billingData, currentSession?.id, user?.id])
+  }, [billingData, currentSession?.id])
 
   if (!isOpen) return null
 
-  return (
+  return ReactDOM.createPortal(
     <div className={`billing-stats-panel ${className}`}>
       {/* 遮罩层 */}
       <div className="billing-stats-overlay" onClick={onClose} />
@@ -800,9 +801,9 @@ export const BillingStatsPanel: React.FC<BillingStatsPanelProps> = ({
           color: #dc2626;
         }
       `}</style>
-    </div>
+    </div>,
+    document.body
   )
 }
 
 export default BillingStatsPanel
-

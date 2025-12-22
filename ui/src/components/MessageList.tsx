@@ -23,10 +23,8 @@ import { ToolExecutionCard } from './ToolExecutionCard'
  * 默认展开所有工具调用，显示输出结果
  */
 const ToolCallsDisplay: React.FC<{ toolCalls: any[] }> = ({ toolCalls }) => {
-  // 默认展开所有工具调用
-  const [expandedCalls, setExpandedCalls] = useState<Set<number>>(
-    new Set(toolCalls.map((_, index) => index))
-  )
+  // 默认折叠所有工具调用，仅当用户点击时展开
+  const [expandedCalls, setExpandedCalls] = useState<Set<number>>(new Set())
 
   const toggleCall = (index: number) => {
     const newExpanded = new Set(expandedCalls)
@@ -45,8 +43,9 @@ const ToolCallsDisplay: React.FC<{ toolCalls: any[] }> = ({ toolCalls }) => {
       <div className="text-xs font-semibold text-gray-600 mb-2">🔧 工具调用记录</div>
       {toolCalls.map((call, index) => {
         const isExpanded = expandedCalls.has(index)
+
         return (
-          <div key={index} className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+          <div key={index} className="border border-black/5 rounded-lg overflow-hidden bg-white/40 backdrop-blur-sm">
             {/* 工具调用头部 */}
             <button
               onClick={() => toggleCall(index)}
@@ -60,11 +59,10 @@ const ToolCallsDisplay: React.FC<{ toolCalls: any[] }> = ({ toolCalls }) => {
                 )}
                 <span className="text-sm font-medium text-gray-700">{call.name}</span>
                 {call.status && (
-                  <span className={`text-xs px-2 py-0.5 rounded ${
-                    call.status === 'success' ? 'bg-green-100 text-green-700' :
+                  <span className={`text-xs px-2 py-0.5 rounded ${call.status === 'success' ? 'bg-green-100 text-green-700' :
                     call.status === 'error' ? 'bg-red-100 text-red-700' :
-                    'bg-yellow-100 text-yellow-700'
-                  }`}>
+                      'bg-yellow-100 text-yellow-700'
+                    }`}>
                     {call.status}
                   </span>
                 )}
@@ -76,7 +74,7 @@ const ToolCallsDisplay: React.FC<{ toolCalls: any[] }> = ({ toolCalls }) => {
 
             {/* 工具调用详情 */}
             {isExpanded && (
-              <div className="px-3 py-2 border-t border-gray-200 bg-white">
+              <div className="px-3 py-2 border-t border-black/5 bg-white/30">
                 {/* 输入参数 */}
                 {call.input && Object.keys(call.input).length > 0 && (
                   <div className="mb-3">
@@ -269,8 +267,8 @@ function extractFileLinks(content: string, metadata?: any): FileLink[] {
 /**
  * 从文本中提取图片数据（声子谱等计算结果图片）
  */
-function extractImageData(text: string): Array<{path: string, base64: string, name: string}> {
-  const imageData: Array<{path: string, base64: string, name: string}> = []
+function extractImageData(text: string): Array<{ path: string, base64: string, name: string }> {
+  const imageData: Array<{ path: string, base64: string, name: string }> = []
 
   // 方法1: 查找日志中的图片路径和 base64 数据
   const lines = text.split('\n')
@@ -286,7 +284,7 @@ function extractImageData(text: string): Array<{path: string, base64: string, na
       /generated plot[：:]\s*([^\s]+\.png)/i,
       /phonon.*plot.*[：:]\s*([^\s]+\.png)/i
     ]
-    
+
     let imagePath = ''
     for (const pattern of pathPatterns) {
       const match = line.match(pattern)
@@ -295,7 +293,7 @@ function extractImageData(text: string): Array<{path: string, base64: string, na
         break
       }
     }
-    
+
     if (imagePath) {
       const fileName = imagePath.split(/[/\\]/).pop() || `图片${i + 1}`
 
@@ -586,15 +584,14 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
       <div className={`flex max-w-[80%] ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
         {/* 头像 */}
         <div className={`flex-shrink-0 ${isUser ? 'ml-3' : 'mr-3'}`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-            isUser 
-              ? 'bg-primary-600 text-white' 
-              : 'bg-gray-100 text-gray-600'
-          }`}>
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center shadow-lg transform transition-transform hover:scale-105 ${isUser
+            ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white ring-2 ring-white/20'
+            : 'bg-gradient-to-br from-white to-gray-100 text-primary-600 border border-white/50'
+            }`}>
             {isUser ? (
-              <User className="w-4 h-4" />
+              <User className="w-5 h-5" />
             ) : (
-              <Bot className="w-4 h-4" />
+              <Bot className="w-5 h-5" />
             )}
           </div>
         </div>
@@ -602,27 +599,25 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
         {/* 消息内容 */}
         <div className={`flex-1 ${isUser ? 'text-right' : 'text-left'}`}>
           {/* 消息头部信息 */}
-          <div className={`flex items-center mb-1 text-xs text-gray-500 ${
-            isUser ? 'justify-end' : 'justify-start'
-          }`}>
+          <div className={`flex items-center mb-1 text-xs text-gray-500 ${isUser ? 'justify-end' : 'justify-start'
+            }`}>
             <span>
               {isUser ? '你' : (message.agentName || '智能体')}
             </span>
             <span className="mx-1">•</span>
             <span>
-              {formatDistanceToNow(ensureValidTimestamp(message.timestamp), { 
-                addSuffix: true, 
-                locale: zhCN 
+              {formatDistanceToNow(ensureValidTimestamp(message.timestamp), {
+                addSuffix: true,
+                locale: zhCN
               })}
             </span>
           </div>
 
           {/* 消息气泡 */}
-          <div className={`relative rounded-lg px-4 py-3 ${
-            isUser 
-              ? 'bg-primary-600 text-white' 
-              : 'bg-white border border-gray-200 shadow-sm'
-          }`}>
+          <div className={`relative rounded-2xl px-5 py-4 shadow-sm transition-all ${isUser
+            ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-primary-500/20 rounded-tr-sm'
+            : 'bg-white/80 backdrop-blur-md border border-slate-200/50 text-slate-800 shadow-sm rounded-tl-sm'
+            }`}>
             {/* 消息内容 */}
             <div className="prose prose-sm max-w-none">
               {isUser ? (
@@ -703,7 +698,7 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
                       let displayName = image.name.replace(/\.(png|jpg|jpeg)$/i, '')
 
                       return (
-                        <div key={index} className="bg-white border border-gray-200 rounded-lg p-3">
+                        <div key={index} className="bg-white/50 backdrop-blur-sm border border-white/40 rounded-lg p-3 shadow-sm">
                           <div className="text-sm font-medium text-gray-700 mb-2">
                             {displayName}
                           </div>
@@ -712,10 +707,10 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
                               (image as any).url           // 优先使用完整URL（已通过 resolveFileUrl 处理）
                                 ? resolveFileUrl((image as any).url)
                                 : image.base64              // base64格式
-                                ? `data:image/png;base64,${image.base64}`
-                                : image.path                // 路径格式
-                                ? resolveFileUrl(`/images/${image.path}`)
-                                : ''
+                                  ? `data:image/png;base64,${image.base64}`
+                                  : image.path                // 路径格式
+                                    ? resolveFileUrl(`/images/${image.path}`)
+                                    : ''
                             }
                             alt={displayName}
                             className="h-auto rounded border"
@@ -737,8 +732,8 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
                                   const srcUrl = (image as any).url
                                     ? resolveFileUrl((image as any).url)
                                     : image.path
-                                    ? resolveFileUrl(`/images/${image.path}`)
-                                    : ''
+                                      ? resolveFileUrl(`/images/${image.path}`)
+                                      : ''
                                   if (!srcUrl && !image.base64) {
                                     toast.error('没有可下载的图片')
                                     return
@@ -780,8 +775,8 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
                                   const kind = t.includes('phonon')
                                     ? 'phonon'
                                     : t.includes('generated') || t.includes('structure')
-                                    ? 'generated_structures'
-                                    : 'images'
+                                      ? 'generated_structures'
+                                      : 'images'
                                   return resolveFileUrl(`/images/${kind}/${filename}`)
                                 }
                                 const srcUrl = buildUrl()
@@ -889,56 +884,63 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
             console.log('💎 [MessageBillingBadge] 消息:', message.id, '是否显示:', shouldShow, 'billing:', message.billing)
             return shouldShow ? (
               <MessageBillingBadge
-                tokens={message.billing.tokens}
-                photons={message.billing.photons}
-                modelName={message.billing.model_name}
+                tokens={message.billing?.tokens}
+                photons={message.billing?.photons}
+                modelName={message.billing?.model_name}
                 compact={true}
               />
             ) : null
           })()}
 
           {/* 操作按钮 */}
-          {!isUser && (
-            <div className="flex items-center mt-2 space-x-2">
+          <div className={`flex items-center mt-2 space-x-2 ${isUser ? 'justify-end' : ''}`}>
+            {/* 复制按钮 - 双方都显示 */}
+            <button
+              onClick={handleCopy}
+              className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+              title="复制消息"
+            >
+              <Copy className="w-3 h-3" />
+            </button>
+
+            {/* 表格下载 - 仅当有表格时显示 */}
+            {hasTable && (
               <button
-                onClick={handleCopy}
-                className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                title="复制"
-              >
-                <Copy className="w-3 h-3" />
-              </button>
-              {hasTable && (
-                <button
-                  onClick={handleDownloadTable}
-                  className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                  title="下载表格"
-                >
-                  <Download className="w-3 h-3" />
-                </button>
-              )}
-              <button
-                onClick={handleLike}
-                className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
-                title="有用"
-              >
-                <ThumbsUp className="w-3 h-3" />
-              </button>
-              <button
-                onClick={handleDislike}
-                className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                title="无用"
-              >
-                <ThumbsDown className="w-3 h-3" />
-              </button>
-              <button
-                onClick={handleRegenerate}
+                onClick={handleDownloadTable}
                 className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                title="重新生成"
+                title="下载表格"
               >
-                <RotateCcw className="w-3 h-3" />
+                <Download className="w-3 h-3" />
               </button>
-            </div>
-          )}
+            )}
+
+            {/* 仅智能体消息显示的按钮 */}
+            {!isUser && (
+              <>
+                <button
+                  onClick={handleLike}
+                  className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                  title="有用"
+                >
+                  <ThumbsUp className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={handleDislike}
+                  className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                  title="无用"
+                >
+                  <ThumbsDown className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={handleRegenerate}
+                  className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                  title="重新生成"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -946,9 +948,9 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
 }, (prevProps, nextProps) => {
   // 🔧 优化：自定义比较函数，防止不必要的重新渲染
   return prevProps.message.id === nextProps.message.id &&
-         prevProps.message.content === nextProps.message.content &&
-         prevProps.message.role === nextProps.message.role &&
-         prevProps.onRegenerate === nextProps.onRegenerate
+    prevProps.message.content === nextProps.message.content &&
+    prevProps.message.role === nextProps.message.role &&
+    prevProps.onRegenerate === nextProps.onRegenerate
 })
 
 interface LoadingMessageProps {
