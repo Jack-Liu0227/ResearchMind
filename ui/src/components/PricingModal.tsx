@@ -108,18 +108,12 @@ const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose }) => {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-[100] overflow-y-auto">
-      {/* 背景遮罩 */}
-      <div
-        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
-        onClick={handleClose}
-      />
-
-      {/* 弹窗内容 */}
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-[300] overflow-y-auto bg-black bg-opacity-50">
+      <div className="flex min-h-full items-center justify-center p-4">
+        {/* 弹窗内容 */}
+        <div className="relative bg-white rounded-lg shadow-xl max-w-6xl w-full flex flex-col z-10 max-h-[85vh]">
           {/* 头部 */}
-          <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+          <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-lg">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">ResearchMind 收费标准</h2>
               <p className="text-sm text-gray-600 mt-1">透明、公平、按需付费</p>
@@ -133,8 +127,8 @@ const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose }) => {
             </button>
           </div>
 
-          {/* 内容区域 - 可滚动，自适应高度 */}
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+          {/* 内容区域 - 可滚动 */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <div className="text-gray-600">加载中...</div>

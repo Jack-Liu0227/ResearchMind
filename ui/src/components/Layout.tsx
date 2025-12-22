@@ -99,34 +99,31 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, [isResizingSidebar, isResizingRightPanel, sidebarWidth, rightPanelWidth])
 
   return (
-    <div className="relative w-full h-[100dvh] bg-transparent overflow-hidden">
-      {/* 顶部导航栏 - 固定在顶部，层级最高 */}
-      <div className="fixed top-0 left-0 right-0 h-14 z-[100]">
+    <div className="fixed inset-0 w-full h-[100dvh] bg-transparent overflow-hidden">
+      {/* 顶部导航栏 - Absolute positioning inside fixed container */}
+      <div className="absolute top-0 left-0 right-0 h-14 z-[200]">
         <Navbar />
       </div>
 
-      {/* 主要内容区域 - 绝对定位，top-14 物理避让导航栏 */}
-      <div className={`absolute inset-0 top-14 flex overflow-hidden ${!isMobile ? 'p-4 gap-4' : ''}`}>
+      {/* 主要内容区域 - Absolute positioning to fill remaining space */}
+      <div className="absolute inset-0 top-14 w-full flex overflow-hidden">
         {/* 左侧边栏 - 对话历史 */}
         {/* Desktop Sidebar */}
         {!isMobile && sidebarOpen && (
           <div
-            className="glass-panel rounded-2xl flex-shrink-0 relative overflow-hidden"
+            className="glass-panel border-r border-white/20 flex-shrink-0 relative overflow-hidden"
             style={{ width: sidebarWidth }}
           >
             <Sidebar />
-            {/* 拖拽条 - 增加点击区域宽度，居中显示视觉线 */}
+            {/* 拖拽条 */}
             <div
-              className="absolute right-0 top-0 w-3 h-full cursor-col-resize bg-transparent z-20 group flex justify-center"
-              style={{ transform: 'translateX(50%)' }} // 让点击区域跨越边缘
+              className="absolute right-0 top-0 w-1 h-full cursor-col-resize bg-transparent z-20 group flex justify-center hover:bg-primary-400/50 transition-colors"
               onMouseDown={(e) => {
                 e.preventDefault()
                 setIsResizingSidebar(true)
               }}
               title="拖拽调整宽度"
-            >
-              <div className="w-1 h-full bg-primary-400/0 group-hover:bg-primary-400/50 transition-colors rounded-full" />
-            </div>
+            />
           </div>
         )}
 
@@ -171,7 +168,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         )}
 
         {/* 中间主要内容区域 */}
-        <div className={`flex-1 flex flex-col min-w-0 overflow-hidden relative transition-all ${!isMobile ? 'glass-panel rounded-2xl shadow-xl' : 'bg-transparent'}`}>
+        <div className={`flex-1 flex flex-col min-w-0 overflow-hidden relative transition-all ${!isMobile ? 'glass-panel shadow-none' : 'bg-transparent'}`}>
           {children}
         </div>
 
@@ -179,21 +176,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         {/* Desktop RightPanel */}
         {!isMobile && rightPanelOpen && (
           <div
-            className="glass-panel rounded-2xl flex-shrink-0 relative h-full overflow-hidden"
+            className="glass-panel border-l border-white/20 flex-shrink-0 relative h-full overflow-hidden"
             style={{ width: rightPanelWidth }}
           >
-            {/* 拖拽条 - 增加点击区域宽度，居中显示视觉线 */}
+            {/* 拖拽条 */}
             <div
-              className="absolute left-0 top-0 w-3 h-full cursor-col-resize bg-transparent z-20 group flex justify-center"
-              style={{ transform: 'translateX(-50%)' }} // 让点击区域跨越边缘
+              className="absolute left-0 top-0 w-1 h-full cursor-col-resize bg-transparent z-20 group flex justify-center hover:bg-primary-400/50 transition-colors"
               onMouseDown={(e) => {
                 e.preventDefault()
                 setIsResizingRightPanel(true)
               }}
               title="拖拽调整宽度"
-            >
-              <div className="w-1 h-full bg-primary-400/0 group-hover:bg-primary-400/50 transition-colors rounded-full" />
-            </div>
+            />
             <RightPanel
               isVisible={true}
               onToggle={() => setRightPanelOpen(false)}
@@ -203,7 +197,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         {/* Mobile RightPanel (Drawer) */}
         {isMobile && rightPanelOpen && (
-          <div className="fixed inset-0 z-[110] flex justify-end">
+          <div className="fixed inset-0 z-[250] flex justify-end">
             {/* Backdrop */}
             <div
               className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"

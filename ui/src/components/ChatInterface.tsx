@@ -498,7 +498,7 @@ const ChatInterface: React.FC = () => {
   return (
     <div className="h-full flex flex-col">
       {/* 消息列表 */}
-      <div className="flex-1 overflow-hidden pt-[88px] md:pt-0">
+      <div className="flex-1 overflow-hidden">
         <MessageList messages={messages} onRegenerate={handleRegenerate} />
       </div>
 
