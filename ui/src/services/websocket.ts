@@ -68,7 +68,7 @@ class WebSocketService {
     console.log('🔧 WebSocketService constructor - url param:', url)
     console.log('🔧 WebSocketService constructor - API_CONFIG.WS_URL:', API_CONFIG.WS_URL)
     console.log('🔧 WebSocketService constructor - final this.url:', this.url)
-    
+
     // 从localStorage恢复client_id，如果不存在则创建新的
     const storedClientId = localStorage.getItem('researchmind_client_id')
     if (storedClientId) {
@@ -87,7 +87,7 @@ class WebSocketService {
       console.log('🔌 WebSocket 已连接，跳过重复连接')
       return Promise.resolve()
     }
-    
+
     if (this.isConnecting) {
       console.log('🔌 WebSocket 正在连接中，跳过重复连接')
       return Promise.resolve()
@@ -96,14 +96,14 @@ class WebSocketService {
     return new Promise((resolve, reject) => {
       try {
         this.isConnecting = true
-        
+
         // 构建WebSocket URL，确保格式正确
         let wsUrl = normalizeWebSocketUrl(this.url)
         if (!wsUrl.endsWith('/ws')) {
           wsUrl = wsUrl.endsWith('/') ? `${wsUrl}ws` : `${wsUrl}/ws`
         }
         wsUrl = `${wsUrl}/${this.clientId}`
-        
+
         console.log(`🔌 连接 WebSocket: ${wsUrl}`)
         this.ws = new WebSocket(wsUrl)
 
@@ -196,7 +196,7 @@ class WebSocketService {
         this.heartbeatTimeout = window.setTimeout(() => {
           console.warn('💔 心跳超时，连接可能已断开')
           // 主动关闭连接，触发重连
-          this.ws?.close(1006, 'Heartbeat timeout')
+          this.ws?.close(4000, 'Heartbeat timeout')
         }, this.HEARTBEAT_TIMEOUT)
       }
     }, this.HEARTBEAT_INTERVAL)
@@ -443,19 +443,19 @@ class WebSocketService {
       console.log('🚫 Skipping reconnect - already connected or connecting')
       return
     }
-    
+
     this.reconnectAttempts++
     const delay = this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1)
-    
+
     console.log(`🔄 Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
-    
+
     setTimeout(() => {
       // 再次检查状态，避免重复连接
       if (this.isConnected || this.isConnecting) {
         console.log('🚫 Skipping delayed reconnect - already connected or connecting')
         return
       }
-      
+
       this.connect().catch(error => {
         console.error('❌ Reconnection failed:', error)
         if (this.reconnectAttempts < this.maxReconnectAttempts) {

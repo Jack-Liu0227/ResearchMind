@@ -153,7 +153,7 @@ const resolveApiPath = (envUrl?: string): string => {
 
 const resolveWsUrl = (envUrl?: string): string => {
   console.log('🔧 resolveWsUrl called with:', envUrl)
-  
+
   if (!envUrl) {
     const defaultUrl = buildDefaultWsUrl()
     console.log('🔧 Using default WS URL:', defaultUrl)
@@ -172,7 +172,7 @@ const resolveWsUrl = (envUrl?: string): string => {
       // 本地开发：强制使用ws协议和nginx代理端口
       const proxyPort = trimEnv(import.meta.env.VITE_PROXY_PORT) || '50001'
       const directPort = trimEnv(import.meta.env.VITE_WS_PORT) || '50003'
-      
+
       // 优先使用代理端口（nginx），如果没有则使用直连端口
       const port = proxyPort !== '50001' ? proxyPort : (directPort !== '50003' ? directPort : '50001')
       const result = `ws://localhost:${port}${envUrl}`
@@ -187,8 +187,11 @@ const resolveWsUrl = (envUrl?: string): string => {
       return `${protocol}//${hostname}:${wsPort}${envUrl}`
     }
 
-    // 如果没有指定端口，使用当前访问的端口（通过 Nginx 反向代理）
-    // 这样可以支持任意端口的 Nginx 反向代理配置
+    // If no port specified, use the current window host (includes port)
+    // This supports accessing via Vite dev server port (e.g. 50010) or Nginx port
+    if (typeof window !== 'undefined') {
+      return `${protocol}//${window.location.host}${envUrl}`
+    }
     return `${protocol}//${hostname}${envUrl}`
   }
 

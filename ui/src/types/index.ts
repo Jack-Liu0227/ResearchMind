@@ -216,7 +216,7 @@ export interface Citation {
 
 // WebSocket消息类型
 export interface WebSocketMessage {
-  type: 'message' | 'status' | 'error' | 'structure' | 'structure_data' | 'image_data' | 'phonon_data' | 'analysis' | 'connection' | 'agents_list' | 'agent_selected' | 'pong' | 'session_cleared' | 'agent_selected' | 'feedback_request' | 'chat_with_attachments'
+  type: 'message' | 'status' | 'error' | 'structure' | 'structure_data' | 'image_data' | 'phonon_data' | 'analysis' | 'connection' | 'agents_list' | 'agent_selected' | 'pong' | 'session_cleared' | 'agent_selected' | 'feedback_request' | 'chat_with_attachments' | 'ping' | 'auth'
   data: any
   sessionId?: string
   agentId?: string
