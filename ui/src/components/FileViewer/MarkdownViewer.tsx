@@ -198,7 +198,11 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
       if (success) {
         toast.success('链接已复制到剪贴板')
       } else {
-        toast.error('复制失败，请手动复制链接')
+        // 最终兜底：显示可复制提示框
+        const manual = window.prompt('复制此链接', resolvedUrl)
+        if (manual !== null) {
+          toast('请手动复制链接', { icon: 'ℹ️' })
+        }
       }
     } catch (error) {
       console.error('复制链接失败:', error)

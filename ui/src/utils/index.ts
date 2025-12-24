@@ -13,11 +13,11 @@ export function cn(...inputs: ClassValue[]) {
  */
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 Bytes'
-  
+
   const k = 1024
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
-  
+
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
@@ -53,7 +53,7 @@ export function throttle<T extends (...args: any[]) => any>(
   limit: number
 ): (...args: Parameters<T>) => void {
   let inThrottle: boolean
-  
+
   return (...args: Parameters<T>) => {
     if (!inThrottle) {
       func(...args)
@@ -132,32 +132,40 @@ export function isMobile(): boolean {
  * 复制文本到剪贴板
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    const value = String(text || '')
-    if (!value.trim()) return false
+  const value = String(text || '')
+  if (!value.trim()) return false
 
-    // 优先使用现代剪贴板 API（需用户手势与安全上下文）
+  // 尝试使用现代 Clipboard API
+  try {
     if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
       await navigator.clipboard.writeText(value)
       return true
     }
+  } catch (err) {
+    console.warn('Clipboard API failed, trying fallback...', err)
+  }
 
-    // 兼容降级方案：使用隐藏 textarea + execCommand('copy')
+  // 降级方案：使用 execCommand
+  try {
     const textArea = document.createElement('textarea')
     textArea.value = value
-    // 隐藏但可选择
+    // 隐藏但保持可交互
     textArea.setAttribute('readonly', '')
     textArea.style.position = 'fixed'
     textArea.style.top = '0'
     textArea.style.left = '-9999px'
     textArea.style.opacity = '0'
     document.body.appendChild(textArea)
+
+    // 必须聚焦才能复制
     textArea.focus()
     textArea.select()
+
     const ok = document.execCommand('copy')
     document.body.removeChild(textArea)
     return !!ok
-  } catch {
+  } catch (err) {
+    console.error('Copy fallback failed:', err)
     return false
   }
 }
@@ -166,10 +174,10 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  * 下载文件
  */
 export function downloadFile(data: Blob | string, filename: string, type?: string): void {
-  const blob = typeof data === 'string' 
+  const blob = typeof data === 'string'
     ? new Blob([data], { type: type || 'text/plain' })
     : data
-    
+
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -197,7 +205,7 @@ export function parseErrorMessage(error: any): string {
 export function formatTimeAgo(date: Date): string {
   const now = new Date()
   const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000)
-  
+
   if (diffInSeconds < 60) return '刚刚'
   if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}分钟前`
   if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}小时前`
@@ -213,14 +221,14 @@ export function ensureValidTimestamp(timestamp: any): Date {
   if (timestamp instanceof Date && !isNaN(timestamp.getTime())) {
     return timestamp
   }
-  
+
   if (typeof timestamp === 'string' || typeof timestamp === 'number') {
     const date = new Date(timestamp)
     if (!isNaN(date.getTime())) {
       return date
     }
   }
-  
+
   // 如果无法解析，返回当前时间
   return new Date()
 }
