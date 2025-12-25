@@ -383,8 +383,67 @@ const StructuresTab: React.FC<StructuresTabProps> = ({
   currentStructure,
   onFullscreen
 }) => {
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const viewerContainerRef = React.useRef<HTMLDivElement>(null);
+  // 🆕 Resizable state
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const viewerContainerRef = React.useRef<HTMLDivElement>(null)
+  const [listHeightPercent, setListHeightPercent] = useState(40) // Default 40%
+  const [isResizing, setIsResizing] = useState(false)
+  const resizeRef = React.useRef<HTMLDivElement>(null)
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+  }
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setIsResizing(true)
+  }
+
+  React.useEffect(() => {
+    const handleMove = (clientY: number) => {
+      if (!isResizing || !containerRef.current) return
+
+      const containerRect = containerRef.current.getBoundingClientRect()
+      const offsetTop = containerRect.top
+      const totalHeight = containerRect.height
+
+      // Calculate new height percentage
+      let newHeight = clientY - offsetTop
+      let newPercent = (newHeight / totalHeight) * 100
+
+      // Constraints (min 20%, max 80%)
+      if (newPercent < 20) newPercent = 20
+      if (newPercent > 80) newPercent = 80
+
+      setListHeightPercent(newPercent)
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      handleMove(e.clientY)
+    }
+
+    const handleTouchMove = (e: TouchEvent) => {
+      handleMove(e.touches[0].clientY)
+    }
+
+    const handleEnd = () => {
+      setIsResizing(false)
+    }
+
+    if (isResizing) {
+      window.addEventListener('mousemove', handleMouseMove)
+      window.addEventListener('mouseup', handleEnd)
+      window.addEventListener('touchmove', handleTouchMove)
+      window.addEventListener('touchend', handleEnd)
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleEnd)
+      window.removeEventListener('touchmove', handleTouchMove)
+      window.removeEventListener('touchend', handleEnd)
+    }
+  }, [isResizing])
 
   React.useEffect(() => {
     if (containerRef.current) {
@@ -406,9 +465,13 @@ const StructuresTab: React.FC<StructuresTabProps> = ({
   }, [currentStructure]);
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', padding: '1rem', gap: '0.75rem' }}>
-      <div style={{ flexShrink: 0, maxHeight: '40%' }} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 bg-gray-100 border-b border-gray-200">
+    <div ref={containerRef} className="w-full h-full flex flex-col p-4 relative overflow-hidden">
+      {/* 结构列表区域 */}
+      <div
+        style={{ height: `${listHeightPercent}%` }}
+        className="flex-shrink-0 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-0"
+      >
+        <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-gray-100 border-b border-gray-200">
           <div className="flex items-center space-x-2">
             <h3 className="text-sm font-semibold text-gray-800">结构列表</h3>
             <span className="text-xs text-gray-500">({structures.length} 个)</span>
@@ -422,13 +485,34 @@ const StructuresTab: React.FC<StructuresTabProps> = ({
             </button>
           )}
         </div>
-        <StructureList />
+        <div className="flex-1 overflow-hidden relative">
+          <div className="absolute inset-0">
+            <StructureList />
+          </div>
+        </div>
       </div>
 
-      <div ref={viewerContainerRef} style={{ flex: 1, minHeight: '300px', display: 'flex', flexDirection: 'column' }} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+      {/* 拖拽手柄 */}
+      <div
+        ref={resizeRef}
+        className="flex-shrink-0 h-5 -my-2 flex items-center justify-center cursor-row-resize z-10 touch-none active:scale-y-110 transition-transform"
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+      >
+        <div className={`w-16 h-1 rounded-full transition-colors duration-200 ${isResizing ? 'bg-blue-500 shadow-lg' : 'bg-gray-300 hover:bg-gray-400'}`} />
+      </div>
+
+      {/* 3D 视图区域 */}
+      <div
+        ref={viewerContainerRef}
+        style={{ height: `${100 - listHeightPercent}%` }}
+        className="flex-shrink-0 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-0 pt-2"
+      >
         {currentStructure ? (
-          <div style={{ width: '100%', height: '100%', flex: 1 }}>
-            <StructureViewerThreeJS structure={currentStructure} />
+          <div className="w-full h-full flex-1 relative">
+            <div className="absolute inset-0">
+              <StructureViewerThreeJS structure={currentStructure} />
+            </div>
           </div>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-center text-gray-500 py-12">

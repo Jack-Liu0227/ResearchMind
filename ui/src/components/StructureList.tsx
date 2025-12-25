@@ -361,9 +361,9 @@ temperature=300.0`
           <div className="flex items-center space-x-2">
             <button
               onClick={() => setShowActions(!showActions)}
-              className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors whitespace-nowrap"
             >
-              {showActions ? '收起操作' : '批量计算'}
+              {showActions ? '收起' : '批量计算'}
             </button>
             <button
               onClick={handleBatchDelete}
@@ -383,46 +383,64 @@ temperature=300.0`
         </div>
       )}
 
-      {/* 🆕 计算操作面板 */}
+      {/* 🆕 计算操作面板 - 手机端固定在底部，PC端正常显示 */}
       {showActions && selectedCount > 0 && (
-        <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200 space-y-2">
-          <p className="text-xs text-gray-600 mb-2">对选中的 {selectedCount} 个结构执行计算：</p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={handleRelaxation}
-              className="flex items-center space-x-1.5 px-3 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors shadow-sm"
-            >
-              <Zap className="w-3.5 h-3.5" />
-              <span>结构弛豫</span>
-            </button>
-            <button
-              onClick={handleEnergyCalculation}
-              className="flex items-center space-x-1.5 px-3 py-2 bg-teal-600 text-white text-xs font-medium rounded-lg hover:bg-teal-700 transition-colors shadow-sm"
-            >
-              <Battery className="w-3.5 h-3.5" />
-              <span>静态能量</span>
-            </button>
-            <button
-              onClick={handlePhononCalculation}
-              className="flex items-center space-x-1.5 px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
-            >
-              <Activity className="w-3.5 h-3.5" />
-              <span>声子计算</span>
-            </button>
-            <button
-              onClick={handleKappaCalculation}
-              className="flex items-center space-x-1.5 px-3 py-2 bg-orange-600 text-white text-xs font-medium rounded-lg hover:bg-orange-700 transition-colors shadow-sm"
-            >
-              <Flame className="w-3.5 h-3.5" />
-              <span>热导率</span>
-            </button>
+        <>
+          {/* 移动端遮罩层 */}
+          <div
+            className="md:hidden fixed inset-0 bg-black/20 z-40"
+            onClick={() => setShowActions(false)}
+          />
+          <div className="md:static fixed bottom-0 left-0 right-0 z-[100] bg-white md:bg-gradient-to-r md:from-blue-50 md:to-indigo-50 border-t md:border-b md:border-t-0 border-blue-200 px-4 py-4 md:py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] md:shadow-none space-y-3 md:space-y-2 animate-in slide-in-from-bottom duration-200">
+            <div className="flex items-center justify-between md:block">
+              <p className="text-sm font-medium text-gray-700 md:text-gray-600 md:text-xs md:font-normal">
+                对选中的 {selectedCount} 个结构执行计算：
+              </p>
+              <button
+                onClick={() => setShowActions(false)}
+                className="md:hidden text-gray-500 hover:text-gray-700 whitespace-nowrap"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:gap-2">
+              <button
+                onClick={handleRelaxation}
+                className="flex items-center justify-center space-x-1.5 px-3 py-2.5 md:py-2 bg-green-600 text-white text-sm md:text-xs font-medium rounded-lg hover:bg-green-700 transition-colors shadow-sm active:scale-95 whitespace-nowrap"
+              >
+                <Zap className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                <span>结构弛豫</span>
+              </button>
+              <button
+                onClick={handleEnergyCalculation}
+                className="flex items-center justify-center space-x-1.5 px-3 py-2.5 md:py-2 bg-teal-600 text-white text-sm md:text-xs font-medium rounded-lg hover:bg-teal-700 transition-colors shadow-sm active:scale-95"
+              >
+                <Battery className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                <span>静态能量</span>
+              </button>
+              <button
+                onClick={handlePhononCalculation}
+                className="flex items-center justify-center space-x-1.5 px-3 py-2.5 md:py-2 bg-purple-600 text-white text-sm md:text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm active:scale-95"
+              >
+                <Activity className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                <span>声子计算</span>
+              </button>
+              <button
+                onClick={handleKappaCalculation}
+                className="flex items-center justify-center space-x-1.5 px-3 py-2.5 md:py-2 bg-orange-600 text-white text-sm md:text-xs font-medium rounded-lg hover:bg-orange-700 transition-colors shadow-sm active:scale-95"
+              >
+                <Flame className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                <span>热导率</span>
+              </button>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* 结构列表 */}
       {isExpanded && (
-        <div className="flex-1 overflow-y-auto">
+        <div className={`flex-1 overflow-y-auto ${showActions ? 'pb-48 md:pb-0' : ''}`}>
           <div className="divide-y divide-gray-100">
             {displayStructures.map((structure, index) => (
               <StructureListItem

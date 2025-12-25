@@ -108,7 +108,7 @@ const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose }) => {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-[300] overflow-y-auto bg-black bg-opacity-50">
+    <div className="fixed inset-0 z-[9999] overflow-y-auto bg-black bg-opacity-50 pb-12">
       <div className="flex min-h-full items-center justify-center p-4">
         {/* 弹窗内容 */}
         <div className="relative bg-white rounded-lg shadow-xl max-w-6xl w-full flex flex-col z-10 max-h-[85vh]">
@@ -325,7 +325,10 @@ const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose }) => {
               </button>
             </div>
           </div>
+
         </div>
+        {/* Safe area spacer for mobile */}
+        <div className="h-12 bg-gray-50 rounded-b-lg md:hidden"></div>
       </div>
     </div>
   )
