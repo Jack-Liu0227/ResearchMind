@@ -40,6 +40,7 @@ class SessionManager:
     STRUCTURES_DIR = BASE_DATA_DIR / "structures"
     IMAGES_DIR = BASE_DATA_DIR / "images"
     METADATA_DIR = BASE_DATA_DIR / "metadata"
+    HISTORY_DIR = BASE_DATA_DIR / "history"  # 🆕 聊天历史记录
 
     # Session registry
     _sessions: Dict[str, Dict[str, Any]] = {}
@@ -69,7 +70,7 @@ class SessionManager:
                     cls.BASE_DATA_DIR.mkdir(exist_ok=True)
                 
                 # Create subdirectories
-                for directory in [cls.STRUCTURES_DIR, cls.IMAGES_DIR, cls.METADATA_DIR]:
+                for directory in [cls.STRUCTURES_DIR, cls.IMAGES_DIR, cls.METADATA_DIR, cls.HISTORY_DIR]:
                     if not directory.exists():
                         directory.mkdir(parents=True, exist_ok=True)
                 
@@ -238,6 +239,7 @@ class SessionManager:
             session_structures_dir = cls.STRUCTURES_DIR / session_id
             session_images_dir = cls.IMAGES_DIR / session_id
             session_metadata_file = cls.METADATA_DIR / f"{session_id}.json"
+            session_history_file = cls.HISTORY_DIR / f"{session_id}.json"  # 🆕
 
             try:
                 if session_structures_dir.exists():
@@ -246,6 +248,8 @@ class SessionManager:
                     shutil.rmtree(session_images_dir)
                 if session_metadata_file.exists():
                     session_metadata_file.unlink()
+                if session_history_file.exists():  # 🆕
+                    session_history_file.unlink()
             except Exception as e:
                 logger.error(f"Failed to delete session files: {e}")
 
@@ -368,6 +372,63 @@ class SessionManager:
             return len(expired_sessions)
 
 
+
+
+    @classmethod
+    def save_history(cls, session_id: str, history: List[Any]):
+        """
+        Save session history to disk
+        
+        Args:
+            session_id: Session ID
+            history: List of message objects (Google ADK types)
+        """
+        try:
+            # Convert ADK message objects to serializable dicts
+            serialized_history = []
+            for msg in history:
+                if hasattr(msg, 'to_dict'):
+                    serialized_history.append(msg.to_dict())
+                elif hasattr(msg, '__dict__'):
+                    # Fallback for simple objects
+                    data = msg.__dict__.copy()
+                    # Remove non-serializable fields if any
+                    if '_client' in data: del data['_client']
+                    serialized_history.append(data)
+                else:
+                    logger.warning(f"⚠️ Cannot serialize message object: {type(msg)}")
+            
+            history_file = cls.HISTORY_DIR / f"{session_id}.json"
+            with open(history_file, 'w', encoding='utf-8') as f:
+                json.dump(serialized_history, f, indent=2, ensure_ascii=False)
+                
+            logger.debug(f"💾 Saved history for session {session_id} ({len(history)} messages)")
+        except Exception as e:
+            logger.error(f"❌ Failed to save session history: {e}")
+
+    @classmethod
+    def load_history(cls, session_id: str) -> List[Dict[str, Any]]:
+        """
+        Load session history from disk
+        
+        Args:
+            session_id: Session ID
+            
+        Returns:
+            List of message dicts (needs to be converted back to ADK types by caller)
+        """
+        history_file = cls.HISTORY_DIR / f"{session_id}.json"
+        if not history_file.exists():
+            return []
+            
+        try:
+            with open(history_file, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+            logger.info(f"📖 Loaded history for session {session_id} ({len(history)} messages)")
+            return history
+        except Exception as e:
+            logger.error(f"❌ Failed to load session history: {e}")
+            return []
 
 
 # Initialize on module import

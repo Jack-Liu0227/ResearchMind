@@ -417,7 +417,10 @@ export const useAppStore = create<AppState>()(
           const nextSessions = sessions.map((s) =>
             s.id === currentSession.id ? { ...s, structures } : s
           )
-          set({ sessions: nextSessions })
+          set({ 
+            sessions: nextSessions,
+            currentSession: { ...currentSession, structures }
+          })
         }
       },
 
@@ -502,7 +505,10 @@ export const useAppStore = create<AppState>()(
           const nextSessions = sessions.map((s) =>
             s.id === currentSession.id ? { ...s, phononImages: limited } : s
           )
-          set({ sessions: nextSessions })
+          set({ 
+            sessions: nextSessions,
+            currentSession: { ...currentSession, phononImages: limited }
+          })
         }
       },
 
@@ -753,11 +759,8 @@ export const useAppStore = create<AppState>()(
             ...img,
             base64: undefined, // 不保存 base64 数据
           })),
-          structures: session.structures?.map(struct => ({
-            ...struct,
-            // 保留结构元数据，但移除大型 CIF 内容
-            cifContent: undefined,
-          })),
+          // 🔧 修复：保留完整的结构数据，包括 CIF 内容
+          structures: session.structures,
         }))
 
         return {
@@ -778,10 +781,8 @@ export const useAppStore = create<AppState>()(
               ...img,
               base64: undefined,
             })),
-            structures: state.currentSession.structures?.map(struct => ({
-              ...struct,
-              cifContent: undefined,
-            })),
+            // 🔧 修复：保留完整的结构数据
+            structures: state.currentSession.structures,
           } : null,
           messages: state.messages.map(msg => ({
             ...msg,
@@ -794,25 +795,17 @@ export const useAppStore = create<AppState>()(
             } : undefined,
           })),
           settings: state.settings,
-          // 不保存当前结构和图片的详细数据（这些可以从服务器重新获取）
-          currentStructure: state.currentStructure ? {
-            id: state.currentStructure.id,
-            formula: state.currentStructure.formula,
-          } : null,
-          currentSessionStructures: state.currentSessionStructures.map(struct => ({
-            id: struct.id,
-            formula: struct.formula,
-          })),
-          currentSessionFiles: state.currentSessionFiles.map(file => ({
-            name: file.name,
-            path: file.path,
-            type: file.type,
-          })),
+          // 🔧 修复：保留完整的当前结构数据
+          currentStructure: state.currentStructure,
+          // 🔧 修复：保留完整的会话结构列表
+          currentSessionStructures: state.currentSessionStructures,
+          // 🔧 修复：保留完整的会话文件列表
+          currentSessionFiles: state.currentSessionFiles,
           phononImages: [], // 不保存全局图片列表
+          // 🔧 修复：保留完整的会话声子图片列表（除 base64 外）
           currentSessionPhononImages: state.currentSessionPhononImages.map(img => ({
-            name: img.name,
-            url: img.url,
-            type: img.type,
+            ...img,
+            base64: undefined,
           })),
           showPhononVisualization: state.showPhononVisualization,
           phononDisplayMode: state.phononDisplayMode,

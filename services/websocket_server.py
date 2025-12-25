@@ -76,11 +76,12 @@ class WebSocketServer:
             server_config.WEBSOCKET_HOST,
             server_config.WEBSOCKET_PORT,
             max_size=50 * 1024 * 1024,  # 50MB - 支持大文件上传（base64 编码后会增大约 33%）
-            ping_interval=20,  # 每 20 秒发送 ping
-            ping_timeout=60,  # 60 秒内未收到 pong 则断开
+            ping_interval=25,  # 每 25 秒发送 ping (保持连接活跃)
+            ping_timeout=300,  # 300 秒 (5分钟) 内未收到 pong 才断开，大幅容忍网络延迟或客户端卡顿
         ):
             logger.info("✅ Server started, waiting for connections...")
             logger.info(f"📦 Max message size: 50MB (supports ~37MB original files after base64 encoding)")
+            logger.info(f"💓 Heartbeat: ping every 25s, timeout 300s")
             import asyncio
             await asyncio.Future()  # Keep server running
     

@@ -4,7 +4,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CrystalStructure } from '../types';
 import {
   convertToConventionalCell as localConvertToConventionalCell,
-  fractionalToCartesian
+  fractionalToCartesian,
+  cartesianToFractional
 } from '../utils/cifParser';
 // import { convertToConventionalCell as apiConvertToConventionalCell, checkAPIHealth } from '../utils/apiClient';
 
@@ -161,7 +162,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
   const atomGroupRef = useRef<THREE.Group | null>(null);
   const autoRotateRef = useRef<boolean>(false);
 
-  const [cellType, setCellType] = useState<CellType>('primitive');
+  const [cellType, setCellType] = useState<CellType>('conventional'); // Default to conventional for better visualization
   const [showUnitCell, setShowUnitCell] = useState(true);
   const [showBonds, setShowBonds] = useState(true);
   const [showAxisLabels] = useState(true);
@@ -171,93 +172,169 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
   const [autoRotate, setAutoRotate] = useState(false);
   const [panMode, setPanMode] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [fillBoundaries, setFillBoundaries] = useState(true); // New state for boundary completion
+  const [showLabels, setShowLabels] = useState(false); // Toggle for atom labels
 
-  // 使用 ref 而不是 state 来跟踪初始化状态，避免触发重新渲染
-  const isInitializedRef = useRef(false);
+  const getUniqueElements = (atoms: any[]) => {
+    const elements = new Set<string>();
+    atoms.forEach(atom => elements.add(atom.element));
+    return Array.from(elements).sort();
+  };
 
-  // 检查原子数是否超过限制
-  const MAX_ATOMS = 50;
+  const uniqueElements = getUniqueElements(displayStructure?.atoms || []);
+
+  // Check limits
+  const MAX_ATOMS = 2000;
   const atomCount = Array.isArray(structure?.atoms) ? structure.atoms.length : 0;
   const isTooLarge = atomCount > MAX_ATOMS;
 
-  // StructureViewerThreeJS 组件初始化
+  // Use ref to track initialization to avoid re-renders
+  const isInitializedRef = useRef(false);
 
-  // 晶胞类型切换
+  // Switch cell type and process structure
   useEffect(() => {
-    console.log('🔄 晶胞类型切换 - cellType:', cellType, 'hasCellTypes:', !!structure.cellTypes);
+    let latticeParams: any = null;
+    let baseAtomsFrac: { element: string, position: [number, number, number] }[] = [];
+    let currentCellStructure: CrystalStructure | null = null;
 
-    if (!structure.cellTypes) {
-      // 如果没有cellTypes数据,使用旧的转换逻辑
-      console.log('⚠️ 没有cellTypes数据，使用旧的转换逻辑');
-      if (cellType === 'primitive') {
-        setDisplayStructure(structure);
-      } else {
-        // 优先使用 API 返回的惯胞数据
+    // 0. Set boundary preference based on cellType
+    const shouldFillBoundaries = (cellType === 'conventional');
+    if (fillBoundaries !== shouldFillBoundaries) {
+      setFillBoundaries(shouldFillBoundaries);
+    }
+
+    // 1. Try to get data from pre-calculated cellTypes response
+    if (structure.cellTypes && structure.cellTypes[cellType]) {
+      const cellData = structure.cellTypes[cellType];
+      if (cellData && cellData.latticeParameters && Array.isArray(cellData.atoms)) {
+        latticeParams = cellData.latticeParameters;
+        baseAtomsFrac = cellData.atoms.map((a: any) => ({
+          element: a.element,
+          position: a.position as [number, number, number]
+        }));
+        currentCellStructure = {
+          ...structure,
+          latticeParameters: cellData.latticeParameters,
+          properties: { ...structure.properties, volume: cellData.volume, numAtoms: cellData.numAtoms },
+          currentCellType: cellType
+        };
+        console.log(`✅ 使用预计算的 ${cellType} 胞数据`);
+      }
+    }
+
+    // 2. Fallback if not found in cellTypes
+    if (!currentCellStructure) {
+      console.log(`🔧 ${cellType} 胞数据未预计算，尝试回退逻辑`);
+      if (cellType === 'conventional') {
+        // Try metadata first
         if (structure.metadata?.conventionalStructure && Array.isArray(structure.metadata.conventionalStructure.atoms)) {
+          currentCellStructure = structure.metadata.conventionalStructure;
           console.log('✅ 使用metadata中的惯胞数据');
-          setDisplayStructure(structure.metadata.conventionalStructure);
-        } else {
-          // 回退到本地转换
+        }
+        // Try local conversion
+        else if (structure.latticeParameters) {
           console.log('🔧 使用本地转换生成惯胞');
+          currentCellStructure = localConvertToConventionalCell(structure);
+        } else {
+          console.error('❌ structure 缺少 latticeParameters，无法转换为惯胞，使用原始结构');
+        }
+      }
 
-          // 检查 structure 是否有 latticeParameters
-          if (!structure.latticeParameters) {
-            console.error('❌ structure 缺少 latticeParameters，无法转换为惯胞，使用原始结构');
-            setDisplayStructure(structure);
-          } else {
-            const converted = localConvertToConventionalCell(structure);
-            setDisplayStructure(converted);
+      // If still null (or if cellType is primitive), use original structure (assuming it is primitive-like or best effort)
+      if (!currentCellStructure) {
+        currentCellStructure = structure;
+        console.log('⚠️ 回退到原始结构');
+      }
+
+      // Now extract latticeParams and baseAtomsFrac from this fallback structure
+      latticeParams = currentCellStructure.latticeParameters;
+      if (latticeParams && currentCellStructure.atoms) {
+        // Convert Cartesian atoms to Fractional for boundary generation logic
+        baseAtomsFrac = currentCellStructure.atoms.map(atom => {
+          const frac = cartesianToFractional(
+            atom.position,
+            latticeParams.a, latticeParams.b, latticeParams.c,
+            latticeParams.alpha, latticeParams.beta, latticeParams.gamma
+          );
+          return { element: atom.element, position: frac };
+        });
+      } else {
+        console.warn('⚠️ 无法获取晶格参数或原子数据，跳过边界填充');
+        baseAtomsFrac = []; // Ensure it's empty if no lattice params
+      }
+    }
+
+    // 3. Apply Boundary Completion (Ghost Atoms)
+    let finalAtomsCartesian: any[] = [];
+    const existingPos = new Set<string>(); // Set to track existing positions and avoid duplicates
+
+    if (!shouldFillBoundaries && currentCellStructure) {
+      // If not filling boundaries (e.g., primitive cell), just use the atoms from the determined structure
+      finalAtomsCartesian = currentCellStructure.atoms || [];
+    }
+    else if (latticeParams && baseAtomsFrac.length > 0) {
+      const { a, b, c, alpha, beta, gamma } = latticeParams;
+
+      baseAtomsFrac.forEach((atom, idx) => {
+        const [u, v, w] = atom.position;
+
+        // Normalize to [0, 1) to handle periodicity consistently
+        const u0 = (u % 1.0 + 1.0) % 1.0;
+        const v0 = (v % 1.0 + 1.0) % 1.0;
+        const w0 = (w % 1.0 + 1.0) % 1.0;
+
+        const shifts = [[0, 0, 0]]; // Base atom
+
+        if (shouldFillBoundaries) {
+          // Epsilon for boundary detection.
+          const eps = 0.05;
+          const u_shifts = (u0 < eps) ? [0, 1] : (u0 > 1 - eps ? [-1, 0] : [0]);
+          const v_shifts = (v0 < eps) ? [0, 1] : (v0 > 1 - eps ? [-1, 0] : [0]);
+          const w_shifts = (w0 < eps) ? [0, 1] : (w0 > 1 - eps ? [-1, 0] : [0]);
+
+          // Generate combinations
+          for (const du of u_shifts) {
+            for (const dv of v_shifts) {
+              for (const dw of w_shifts) {
+                if (du === 0 && dv === 0 && dw === 0) continue; // Already added as base
+                shifts.push([du, dv, dw]);
+              }
+            }
           }
         }
-      }
-    } else {
-      // 使用新的cellTypes数据
-      console.log('✅ 使用cellTypes数据，可用类型:', Object.keys(structure.cellTypes));
 
-      const cellData = structure.cellTypes[cellType];
-      if (!cellData || !cellData.latticeParameters || !Array.isArray(cellData.atoms)) {
-        console.error(`❌ cellTypes中没有${cellType}数据，可用类型:`, Object.keys(structure.cellTypes));
-        // 回退到primitive
-        const fallbackData = structure.cellTypes['primitive'];
-        if (fallbackData) {
-          console.log('🔄 回退到primitive');
-          setCellType('primitive');
-          return;
-        }
-        // 无法回退，使用原始结构以避免崩溃
-        setDisplayStructure({
-          ...structure,
-          atoms: Array.isArray(structure.atoms) ? structure.atoms : [],
+        // Convert all shifts to Cartesian
+        shifts.forEach(([du, dv, dw]) => {
+          const finalFrac: [number, number, number] = [u0 + du, v0 + dv, w0 + dw];
+          const cartPos = fractionalToCartesian(finalFrac, a, b, c, alpha, beta, gamma);
+
+          // Deduplicate
+          const key = `${cartPos[0].toFixed(3)},${cartPos[1].toFixed(3)},${cartPos[2].toFixed(3)}`;
+          if (!existingPos.has(key)) {
+            existingPos.add(key);
+            finalAtomsCartesian.push({
+              element: atom.element,
+              position: cartPos,
+              originalIndex: idx
+            });
+          }
         });
-        return;
-      }
-
-      const { a, b, c, alpha, beta, gamma } = cellData.latticeParameters;
-
-      // 将分数坐标转换为笛卡尔坐标
-      const cartesianAtoms = (cellData.atoms || []).map(atom => ({
-        ...atom,
-        position: fractionalToCartesian(
-          atom.position as [number, number, number],
-          a, b, c, alpha, beta, gamma
-        )
-      }));
-
-      const newStructure: CrystalStructure = {
-        ...structure,
-        latticeParameters: cellData.latticeParameters,
-        atoms: cartesianAtoms,
-        properties: {
-          ...structure.properties,
-          volume: cellData.volume,
-          numAtoms: cellData.numAtoms
-        },
-        currentCellType: cellType
-      };
-      console.log(`✅ 已切换到${cellType}，原子数:`, cartesianAtoms.length);
-      setDisplayStructure(newStructure);
+      });
+    } else {
+      // Fallback if calculations failed or no lattice params for boundary fill
+      finalAtomsCartesian = currentCellStructure?.atoms || [];
     }
-  }, [structure, cellType]);
+
+    // 4. Update Display
+    if (currentCellStructure) {
+      console.log(`✅ 已切换到${cellType}，显示原子数:`, finalAtomsCartesian.length);
+      setDisplayStructure({
+        ...currentCellStructure,
+        atoms: finalAtomsCartesian
+      });
+    }
+
+  }, [structure, cellType]); // Removed fillBoundaries from dependency to avoid loop, we derive it.
 
   // 分数坐标转笛卡尔坐标 (使用 cifParser 中的函数) - 备用函数
 
@@ -444,7 +521,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     // 清理
     return () => {
       resizeObserver.disconnect();
-      window.removeEventListener('resize', () => {});
+      window.removeEventListener('resize', () => { });
 
       // 清理场景中的所有对象
       if (atomGroupRef.current) {
@@ -483,15 +560,24 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
   }, []);
 
   // 创建文本标签
-  const createTextLabel = (labelText: string, color: string, size: number = 1.5) => {
+  const createTextLabel = (labelText: string, color: string, size: number = 1.0) => {
     const canvas = document.createElement('canvas');
-    canvas.width = 200;
-    canvas.height = 200;
+    canvas.width = 256;
+    canvas.height = 256;
     const context = canvas.getContext('2d');
     if (!context) return null;
 
     context.clearRect(0, 0, canvas.width, canvas.height);
-    context.font = '120px Times New Roman';
+    context.font = 'bold 160px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+
+    // 描边（黑色）
+    context.lineWidth = 8;
+    context.strokeStyle = 'rgba(0,0,0, 0.8)';
+    context.strokeText(labelText, canvas.width / 2, canvas.height / 2);
+
+    // 填充
     context.fillStyle = color;
     context.fillText(labelText, canvas.width / 2, canvas.height / 2);
 
@@ -501,11 +587,14 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
     const material = new THREE.SpriteMaterial({
       map: texture,
-      alphaTest: 0.2,
-      transparent: true
+      transparent: true,
+      depthTest: false, // 关键：禁用深度测试，使其总是位于顶层
+      depthWrite: false
     });
+
     const sprite = new THREE.Sprite(material);
     sprite.scale.set(size, size, size);
+    sprite.renderOrder = 999; // 确保最后渲染
 
     return sprite;
   };
@@ -514,11 +603,11 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
   const calculateBounds = (atoms: typeof structure.atoms) => {
     const list = Array.isArray(atoms) ? atoms : []
     if (list.length === 0) return { min: new THREE.Vector3(), max: new THREE.Vector3(), center: new THREE.Vector3(), size: 0 };
-    
+
     let minX = list[0].position[0], maxX = list[0].position[0];
     let minY = list[0].position[1], maxY = list[0].position[1];
     let minZ = list[0].position[2], maxZ = list[0].position[2];
-    
+
     list.forEach(atom => {
       minX = Math.min(minX, atom.position[0]);
       maxX = Math.max(maxX, atom.position[0]);
@@ -527,12 +616,12 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
       minZ = Math.min(minZ, atom.position[2]);
       maxZ = Math.max(maxZ, atom.position[2]);
     });
-    
+
     const min = new THREE.Vector3(minX, minY, minZ);
     const max = new THREE.Vector3(maxX, maxY, maxZ);
     const center = new THREE.Vector3().addVectors(min, max).multiplyScalar(0.5);
     const size = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
-    
+
     return { min, max, center, size };
   };
 
@@ -541,17 +630,17 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     const list = Array.isArray(atoms) ? atoms : []
     const atomGroup = new THREE.Group();
     atomGroup.name = 'atoms';
-    
+
     // 计算结构边界
     const bounds = calculateBounds(list);
-    
+
     // 根据结构大小调整原子半径，确保足够可见
     const baseRadius = Math.max(0.3, Math.min(1.2, bounds.size * 0.08));
 
     list.forEach((atom, index) => {
       // 原子位置已经是笛卡尔坐标,直接使用
       const [x, y, z] = atom.position;
-      
+
       // 使用元素特定的半径，如果没有则使用计算的半径
       const elementRadius = {
         'H': baseRadius * 0.5,
@@ -564,7 +653,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
         'Cu': baseRadius * 1.3,
         'Al': baseRadius * 1.2
       };
-      
+
       const radius = elementRadius[atom.element as keyof typeof elementRadius] || baseRadius;
       const geometry = new THREE.SphereGeometry(radius, 32, 16);
       const color = atomColor[atom.element.toLowerCase()] || atomColor.default;
@@ -578,10 +667,34 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
       sphere.name = `${atom.element}_${index}`;
       sphere.userData = { element: atom.element, position: [x, y, z], index };
       atomGroup.add(sphere);
+
+      // Add label if enabled
+      if (showLabels) {
+        const sprite = createTextLabel(atom.element, '#FFFFFF', 0.8);
+        if (sprite) {
+          sprite.position.set(x, y, z);
+          atomGroup.add(sprite);
+        }
+      }
     });
 
     return atomGroup;
   };
+
+  // Covalent radii (in Angstroms) for bond calculation
+  const covalentRadii: Record<string, number> = {
+    H: 0.31, He: 0.28, Li: 1.28, Be: 0.96, B: 0.84, C: 0.76, N: 0.71, O: 0.66, F: 0.57, Ne: 0.58,
+    Na: 1.66, Mg: 1.41, Al: 1.21, Si: 1.11, P: 1.07, S: 1.05, Cl: 1.02, Ar: 1.06,
+    K: 2.03, Ca: 1.76, Sc: 1.70, Ti: 1.60, V: 1.53, Cr: 1.39, Mn: 1.39, Fe: 1.32, Co: 1.26, Ni: 1.24, Cu: 1.32, Zn: 1.22,
+    Ga: 1.22, Ge: 1.20, As: 1.19, Se: 1.20, Br: 1.20, Kr: 1.16, Rb: 2.20, Sr: 1.95, Y: 1.90, Zr: 1.75, Nb: 1.64, Mo: 1.54,
+    Tc: 1.47, Ru: 1.46, Rh: 1.42, Pd: 1.39, Ag: 1.45, Cd: 1.44, In: 1.42, Sn: 1.39, Sb: 1.39, Te: 1.38, I: 1.39, Xe: 1.40,
+    Cs: 2.44, Ba: 2.15, La: 2.07, Ce: 2.04, Pr: 2.03, Nd: 2.01, Pm: 1.99, Sm: 1.98, Eu: 1.98, Gd: 1.96, Tb: 1.94, Dy: 1.92,
+    Ho: 1.92, Er: 1.89, Tm: 1.90, Yb: 1.87, Lu: 1.87, Hf: 1.75, Ta: 1.70, W: 1.62, Re: 1.51, Os: 1.44, Ir: 1.41, Pt: 1.36,
+    Au: 1.36, Hg: 1.32, Tl: 1.45, Pb: 1.46, Bi: 1.48, Po: 1.40, At: 1.50, Rn: 1.50,
+    Fr: 2.60, Ra: 2.21, Ac: 2.15, Th: 2.06, Pa: 2.00, U: 1.96, Np: 1.90, Pu: 1.87, Am: 1.80, Cm: 1.69
+  };
+
+  // ... inside component ...
 
   // 绘制化学键 (原子位置已经是笛卡尔坐标)
   const drawBand = (atoms: typeof structure.atoms) => {
@@ -589,8 +702,10 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
     const bandGroup = new THREE.Group();
     bandGroup.name = 'bands';
 
-    // 简单的键检测: 距离小于某个阈值的原子之间绘制键
-    const bondThreshold = 3.0; // Å
+    // 优化的键长检测算法
+    // 基于共价半径和 tolerance
+    // d < r1 + r2 + tolerance
+    const tolerance = 0.5; // Å 宽松度，允许一定的畸变
 
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
@@ -599,7 +714,18 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
         const point2 = new THREE.Vector3(...list[j].position);
         const distance = point1.distanceTo(point2);
 
-        if (distance < bondThreshold) {
+        // 快速过滤：如果距离太大，直接跳过 (例如 > 4.0 Å)
+        if (distance > 4.0) continue;
+        if (distance < 0.1) continue; // 重叠原子不绘制
+
+        const el1 = list[i].element;
+        const el2 = list[j].element;
+        const r1 = covalentRadii[el1] || 1.1; // 默认值 1.1
+        const r2 = covalentRadii[el2] || 1.1;
+
+        const limit = r1 + r2 + tolerance;
+
+        if (distance < limit) {
           // 计算中点
           const midpoint = new THREE.Vector3().addVectors(point1, point2).multiplyScalar(0.5);
 
@@ -831,8 +957,7 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
     console.log('Structure update complete');
 
-  }, [displayStructure, showUnitCell, showBonds, showAxisLabels]);
-
+  }, [displayStructure, showUnitCell, showBonds, showAxisLabels, autoRotateRef, panMode, scale, showLabels]);
   // 同步autoRotate到ref
   useEffect(() => {
     autoRotateRef.current = autoRotate;
@@ -874,6 +999,22 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
 
   return (
     <div className="w-full h-full relative bg-gray-800">
+      {/* 元素图例 */}
+      <div className="absolute top-4 left-4 bg-black bg-opacity-60 p-2 rounded text-white text-xs z-10 pointer-events-none select-none">
+        <h4 className="font-bold mb-1 border-b border-gray-500 pb-1">Elements</h4>
+        <div className="space-y-1">
+          {uniqueElements.map(el => (
+            <div key={el} className="flex items-center space-x-2">
+              <div
+                className="w-3 h-3 rounded-full border border-gray-400"
+                style={{ backgroundColor: atomColor[el.toLowerCase()] || atomColor.default }}
+              />
+              <span>{el}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* 紧凑的控制面板 - 横向布局 */}
       <div className="absolute top-4 right-4 z-10 bg-white rounded-lg shadow-lg px-2 py-1.5">
         <div className="flex items-center space-x-1">
@@ -955,8 +1096,16 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
             框
           </button>
 
-          {/* 分隔线 */}
-          <div className="w-px h-4 bg-gray-300 mx-1"></div>
+          <button
+            onClick={() => {
+              setShowLabels(!showLabels);
+              setAutoRotate(false);
+            }}
+            className={`px-1.5 py-1 text-xs rounded transition-colors ${showLabels ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-600'}`}
+            title="显示/隐藏元素符号"
+          >
+            符号
+          </button>
 
           {/* 晶胞类型切换 */}
           <button
@@ -964,11 +1113,10 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
               setCellType('primitive');
               setAutoRotate(false); // 停止自动旋转
             }}
-            className={`px-1.5 py-1 text-xs rounded transition-colors ${
-              cellType === 'primitive'
-                ? 'bg-green-100 text-green-600'
-                : 'hover:bg-gray-100 text-gray-600'
-            }`}
+            className={`px-1.5 py-1 text-xs rounded transition-colors ${cellType === 'primitive'
+              ? 'bg-green-100 text-green-600'
+              : 'hover:bg-gray-100 text-gray-600'
+              }`}
             title={structure.cellTypes ? `原胞 (${structure.cellTypes.primitive.numAtoms} 原子)` : '原胞'}
           >
             原胞
@@ -981,19 +1129,18 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
               }
             }}
             disabled={!structure.cellTypes && !structure.metadata?.conventionalStructure}
-            className={`px-1.5 py-1 text-xs rounded transition-colors ${
-              cellType === 'conventional'
-                ? 'bg-green-100 text-green-600'
-                : (!structure.cellTypes && !structure.metadata?.conventionalStructure)
+            className={`px-1.5 py-1 text-xs rounded transition-colors ${cellType === 'conventional'
+              ? 'bg-green-100 text-green-600'
+              : (!structure.cellTypes && !structure.metadata?.conventionalStructure)
                 ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
                 : 'hover:bg-gray-100 text-gray-600'
-            }`}
+              }`}
             title={
               structure.cellTypes
                 ? `惯胞 (${structure.cellTypes.conventional.numAtoms} 原子)`
                 : structure.metadata?.conventionalStructure
-                ? '惯胞'
-                : '惯胞数据不可用'
+                  ? '惯胞'
+                  : '惯胞数据不可用'
             }
           >
             惯胞
@@ -1008,9 +1155,8 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
               setShowDetailedInfo(!showDetailedInfo);
               setAutoRotate(false); // 停止自动旋转
             }}
-            className={`px-1.5 py-1 text-xs rounded transition-colors ${
-              showDetailedInfo ? 'bg-gray-100 text-gray-600' : 'hover:bg-gray-100 text-gray-600'
-            }`}
+            className={`px-1.5 py-1 text-xs rounded transition-colors ${showDetailedInfo ? 'bg-gray-100 text-gray-600' : 'hover:bg-gray-100 text-gray-600'
+              }`}
             title={showDetailedInfo ? '隐藏详情' : '显示详情'}
           >
             {showDetailedInfo ? '隐藏' : '详情'}
@@ -1044,11 +1190,10 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
             )}
             <div className="flex items-center gap-2">
               <span>晶胞类型:</span>
-              <span className={`px-1.5 py-0.5 rounded text-xs ${
-                cellType === 'primitive'
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-blue-100 text-blue-700'
-              }`}>
+              <span className={`px-1.5 py-0.5 rounded text-xs ${cellType === 'primitive'
+                ? 'bg-green-100 text-green-700'
+                : 'bg-blue-100 text-blue-700'
+                }`}>
                 {cellType === 'primitive' ? '原胞' : '惯胞'}
               </span>
             </div>

@@ -35,6 +35,7 @@ class MessageHandler:
             "get_conversation_stats": self.handle_get_conversation_stats,
             "get_user_stats": self.handle_get_user_stats,
             "get_global_stats": self.handle_get_global_stats,
+            "get_history": self.handle_get_history,  # 🆕 获取历史记录
         }
 
     async def handle_message(
@@ -574,7 +575,7 @@ class MessageHandler:
     ) -> None:
         """
         🆕 通过 WebSocket 获取全局计费统计
-
+        
         Args:
             client_id: 客户端 ID
             websocket: WebSocket 连接
@@ -583,10 +584,10 @@ class MessageHandler:
         """
         try:
             from .user_billing_config import get_billing_context_manager
-
+            
             context_manager = get_billing_context_manager()
             global_stats = context_manager.get_global_total_usage()
-
+            
             await self.send_message(websocket, "global_stats", {
                 "success": True,
                 "message": "获取成功",
@@ -596,6 +597,58 @@ class MessageHandler:
         except Exception as e:
             logger.error(f"❌ 获取全局计费统计失败: {e}", exc_info=True)
             await self.send_error(websocket, f"获取全局计费统计失败: {str(e)}")
+
+    async def handle_get_history(
+        self,
+        client_id: str,
+        websocket: Any,
+        data: dict,
+        agent_coordinator: "AgentCoordinator"
+    ) -> None:
+        """
+        🆕 获取会话历史记录
+        """
+        session_id = data.get("sessionId")
+        agent_id = data.get("agentId")
+        
+        if not session_id:
+            await self.send_error(websocket, "Session ID is required")
+            return
+
+        try:
+            # Construct session key used in AgentCoordinator
+            # Note: This requires knowledge of how keys are constructed. 
+            # Ideally AgentCoordinator should provide a method for this.
+            # But here we just need to load from SessionManager directly using the session_id pattern?
+            # Wait, SessionManager saves by session_key. 
+            # In AgentCoordinator: session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
+            # But SessionManager.save_history uses session_key.
+            
+            # We need to reconstruct the key. 
+            # If agent_id is missing, we might not find it if it was saved with agent_id in the key.
+            # Let's assume the frontend sends the same params.
+            if agent_id:
+                session_key = f"{client_id}_{agent_id}_{session_id}"
+            else:
+                # Fallback, might not work if multiple agents share session_id logic differently
+                session_key = session_id 
+
+            from .session_manager import SessionManager
+            history = SessionManager.load_history(session_key)
+            
+            # Also try loading with raw session_id if key failed (backward compatibility)
+            if not history:
+                 history = SessionManager.load_history(session_id)
+
+            await self.send_message(websocket, "history", {
+                "sessionId": session_id,
+                "history": history
+            })
+            logger.info(f"📜 Sent history for session {session_id} ({len(history)} messages)")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get history: {e}", exc_info=True)
+            await self.send_error(websocket, f"Failed to get history: {str(e)}")
 
     @staticmethod
     async def send_agent_thinking(websocket: Any, agent_id: str, thinking: str):

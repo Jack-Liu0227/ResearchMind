@@ -91,6 +91,36 @@ class AgentCoordinator:
         self.message_start_billing: Dict[str, Dict[str, Any]] = {}  # 记录消息开始时的计费状态
         self.stop_flags: Dict[str, bool] = {}  # 🆕 停止标志 (session_key -> should_stop)
 
+    def _restore_history_from_disk(self, history_key: str, fallback_key: Optional[str] = None) -> List[types.Content]:
+        """Restore session history from disk"""
+        from .session_manager import SessionManager
+        history_dicts = SessionManager.load_history(history_key)
+        
+        # 🆕 Fallback mechanism for migration: if shared history doesn't exist, try agent-specific history
+        if not history_dicts and fallback_key:
+            logger.info(f"⚠️ History not found for {history_key}, trying fallback {fallback_key}")
+            history_dicts = SessionManager.load_history(fallback_key)
+
+        if not history_dicts:
+            return []
+
+        restored_history = []
+        try:
+            for msg_data in history_dicts:
+                parts = []
+                for part_data in msg_data.get('parts', []):
+                    if 'text' in part_data:
+                        parts.append(types.Part(text=part_data['text']))
+                
+                if parts:
+                    content = types.Content(role=msg_data.get('role'), parts=parts)
+                    restored_history.append(content)
+        except Exception as e:
+            logger.error(f"❌ Failed to restore history for {history_key}: {e}")
+            return []
+            
+        return restored_history
+
     async def process_chat_message(
         self,
         client_id: str,
@@ -123,6 +153,8 @@ class AgentCoordinator:
 
             # Create session key
             session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
+            # 🆕 Shared history key (independent of agent_id)
+            history_key = f"{client_id}_{session_id or 'default'}"
 
             # 🆕 清除停止标志（开始新的处理）
             self.clear_stop_flag(session_key)
@@ -133,6 +165,15 @@ class AgentCoordinator:
 
             session = self.adk_sessions[session_key]
             runner = self.runners[session_key]
+
+            # 🆕 Sync history from shared storage to ensure cross-agent context
+            # This ensures that if another agent updated the history, this agent sees it
+            # Also try fallback to session_key (agent-specific) for migration
+            restored_history = self._restore_history_from_disk(history_key, fallback_key=session_key)
+            if restored_history:
+                session.history = restored_history
+                self.session_message_counts[session_key] = len(restored_history)
+                logger.info(f"🔄 Synced history for {session_key} from {history_key} (or fallback) ({len(restored_history)} messages)")
 
             # 检查会话消息数量
             message_count = self.session_message_counts.get(session_key, 0)
@@ -493,6 +534,14 @@ class AgentCoordinator:
             })
 
             logger.info(f"✅ [WebSocket] 已发送 complete 状态")
+            
+            # 🆕 Save session history to disk (using shared history key)
+            try:
+                from .session_manager import SessionManager
+                SessionManager.save_history(history_key, session.history)
+            except Exception as e:
+                logger.error(f"❌ Failed to save history for {history_key}: {e}")
+                
             logger.info(f"✅ Agent {agent_id} completed")
 
         except Exception as e:
@@ -657,8 +706,17 @@ class AgentCoordinator:
         )
         self.runners[session_key] = runner
 
-        # Initialize message count
-        self.session_message_counts[session_key] = 0
+        # 🆕 Try to load history from disk using shared key
+        history_key = f"{client_id}_{session_id or 'default'}"
+        # Use session_key as fallback for migration
+        restored_history = self._restore_history_from_disk(history_key, fallback_key=session_key)
+        
+        if restored_history:
+            session.history = restored_history
+            self.session_message_counts[session_key] = len(restored_history)
+            logger.info(f"♻️ Restored {len(restored_history)} messages for session {session_key} from {history_key}")
+        else:
+            self.session_message_counts[session_key] = 0
 
     def _get_tool_friendly_message(self, tool_name: str) -> str:
         """

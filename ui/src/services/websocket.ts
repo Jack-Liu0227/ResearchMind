@@ -61,7 +61,7 @@ class WebSocketService {
 
   // 心跳配置 (仅用于保活，不用于断开检测)
   private heartbeatInterval: number | null = null
-  private readonly HEARTBEAT_INTERVAL = 30000 // 30秒发送一次Ping保活
+  private readonly HEARTBEAT_INTERVAL = 20000 // 20秒发送一次Ping保活 (配合后端的25s间隔)
 
   // 🔧 优化：请求去重 - 跟踪待处理的消息
   private pendingMessages = new Set<string>() // 存储消息内容的哈希
@@ -429,7 +429,9 @@ class WebSocketService {
     this.reconnectAttempts++
     // 限制最大重连延迟为30秒，并在几次尝试后保持恒定，防止等待时间过长
     const maxDelay = 30000
-    const calculatedDelay = this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1)
+    // ⚡ 优化：首次重连只需1秒，加快网络抖动恢复
+    const baseDelay = this.reconnectAttempts === 1 ? 1000 : this.reconnectInterval
+    const calculatedDelay = baseDelay * Math.pow(1.5, this.reconnectAttempts - 1)
     const delay = Math.min(calculatedDelay, maxDelay)
 
     const maxAttemptsLog = this.maxReconnectAttempts === -1 ? '∞' : this.maxReconnectAttempts

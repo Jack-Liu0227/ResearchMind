@@ -118,6 +118,22 @@ export function repairStorage(): void {
  */
 export function forceSaveState(state: any): void {
   try {
+    // 辅助函数：移除 base64 数据
+    const stripBase64 = (obj: any) => {
+      if (!obj) return obj
+      const newObj = { ...obj }
+      if (newObj.base64) newObj.base64 = undefined
+      return newObj
+    }
+
+    const stripMessageBase64 = (msg: any) => ({
+      ...msg,
+      metadata: msg.metadata ? {
+        ...msg.metadata,
+        images: msg.metadata.images?.map(stripBase64)
+      } : undefined
+    })
+
     // 在保存前，确保当前会话的数据已同步到 sessions 数组中
     let sessionsToSave = [...(state.sessions || [])]
     let updatedCurrentSession = state.currentSession
@@ -131,11 +147,14 @@ export function forceSaveState(state: any): void {
         // 更新当前会话的数据 - 使用最新的 currentSession* 数据
         const updatedSession = {
           ...sessionsToSave[currentSessionIndex],
-          messages: state.messages || [],
+          messages: (state.messages || []).map(stripMessageBase64),
           structures: state.currentSessionStructures || [],
-          phononImages: state.currentSessionPhononImages || [],
+          phononImages: (state.currentSessionPhononImages || []).map(stripBase64),
           files: state.currentSessionFiles || [],
           updatedAt: new Date().toISOString(),
+          // 🆕 保存文献数据
+          papersCsvPath: state.currentPapersCsvPath,
+          papersCount: state.currentPapersCount,
         }
 
         sessionsToSave[currentSessionIndex] = updatedSession
@@ -153,21 +172,32 @@ export function forceSaveState(state: any): void {
       }
     }
 
+    // 优化所有会话数据，移除 base64
+    sessionsToSave = sessionsToSave.map(s => ({
+      ...s,
+      messages: s.messages?.map(stripMessageBase64),
+      phononImages: s.phononImages?.map(stripBase64)
+    }))
+
     const dataToSave = {
       state: {
         sessions: sessionsToSave,
         currentSession: updatedCurrentSession || null,
-        messages: state.messages || [],
+        messages: (state.messages || []).map(stripMessageBase64),
         settings: state.settings || {},
         // 持久化结构数据
         currentStructure: state.currentStructure || null,
         currentSessionStructures: state.currentSessionStructures || [],
         currentSessionFiles: state.currentSessionFiles || [],
         // 持久化声子谱数据
-        phononImages: state.phononImages || [],
-        currentSessionPhononImages: state.currentSessionPhononImages || [],
+        phononImages: [], // 不保存全局图片列表，与 useAppStore 保持一致
+        currentSessionPhononImages: (state.currentSessionPhononImages || []).map(stripBase64),
         showPhononVisualization: state.showPhononVisualization || false,
         phononDisplayMode: state.phononDisplayMode || 'fullscreen',
+        // 🆕 保存文献数据
+        currentPapersCsvPath: state.currentPapersCsvPath,
+        currentPapersSessionId: state.currentPapersSessionId,
+        currentPapersCount: state.currentPapersCount,
       },
       version: 0
     }
@@ -198,13 +228,11 @@ export function validateSessionData(sessions: any[]): boolean {
     return false
   }
   
+  // 宽松验证：只要有 id 和 messages 数组即可，其他字段可以缺失或修复
   return sessions.every(session => {
     return session && 
            typeof session.id === 'string' &&
-           typeof session.title === 'string' &&
-           Array.isArray(session.messages) &&
-           session.createdAt &&
-           session.updatedAt
+           Array.isArray(session.messages)
   })
 }
 

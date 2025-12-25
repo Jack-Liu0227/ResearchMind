@@ -9,6 +9,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { CrystalStructure } from '../types'
 import { PhononImage, useAppStore } from '../store/useAppStore'
 import StructureViewerThreeJS from './StructureViewerThreeJS'
@@ -180,8 +181,9 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
 
   const currentImage = images[imageIndex]
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black bg-opacity-95 flex flex-col">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] bg-black bg-opacity-95 flex flex-col">
+
       {/* 顶部工具栏 */}
       <div className="flex items-center justify-between p-4 bg-black bg-opacity-50">
         {/* 标题 */}
@@ -274,11 +276,10 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
                       setCurrentStructure(s)
                       toast.success(`已切换到: ${s.formula}`)
                     }}
-                    className={`w-full text-left p-3 rounded-lg transition-colors ${
-                      structure?.id === s.id
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                    }`}
+                    className={`w-full text-left p-3 rounded-lg transition-colors ${structure?.id === s.id
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                      }`}
                   >
                     <div className="font-semibold">{s.formula}</div>
                     <div className="text-xs mt-1 opacity-75">
@@ -385,7 +386,8 @@ const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
           <span>ESC 退出</span>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
