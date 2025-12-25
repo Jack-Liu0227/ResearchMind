@@ -433,6 +433,7 @@ async def get_pricing_config():
     try:
         from .pricing_config import (
             FEATURE_PRICING,
+            PRICING_MULTIPLIER,
             FREE_QUOTA_CONFIG,
             INVITATION_REWARDS_INVITER,
             INVITATION_REWARDS_INVITEE,
@@ -441,10 +442,16 @@ async def get_pricing_config():
             PRICING_CHANGELOG
         )
 
+        # 计算实际生效的价格（应用倍率）
+        effective_pricing = {
+            k: int(v * PRICING_MULTIPLIER)
+            for k, v in FEATURE_PRICING.items()
+        }
+
         return {
             "success": True,
             "version": get_latest_pricing_version(),
-            "feature_pricing": FEATURE_PRICING,
+            "feature_pricing": effective_pricing,
             "free_quota": FREE_QUOTA_CONFIG,
             "invitation_rewards": {
                 "inviter": INVITATION_REWARDS_INVITER,

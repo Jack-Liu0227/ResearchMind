@@ -243,7 +243,8 @@ def calculate_kappa_from_cif_impl(
             method,
             temperature,
             working_dir=working_dir,
-            keep_files=keep_files
+            keep_files=keep_files,
+            session_id=session_id  # 🔧 修复：传递 session_id 以保存 CSV
         )
     
     # Single CIF calculation (original logic)
@@ -330,8 +331,11 @@ def calculate_kappa_from_cif_impl(
                             sys.path.insert(0, str(shared_path))
                         from storage_manager import get_session_storage_path, get_file_url
 
-                        # 使用传入的 session_id，如果没有则使用 "default"
-                        effective_session_id = session_id or "default"
+                        # 使用传入的 session_id，如果没有则跳过保存（避免保存到错误目录）
+                        if not session_id:
+                            logger.warning("⚠️ session_id not provided, skipping CSV save")
+                            raise ValueError("session_id required for saving")
+                        effective_session_id = session_id
 
                         persistent_dir = get_session_storage_path(
                             session_id=effective_session_id,
@@ -453,7 +457,8 @@ def _calculate_kappa_batch(
     method: str = "kappa_p",
     temperature: float = 300.0,
     working_dir: Optional[str] = None,
-    keep_files: bool = False
+    keep_files: bool = False,
+    session_id: Optional[str] = None  # 🔧 修复：添加 session_id 参数以保存 CSV
 ) -> Dict[str, Any]:
     """
     Batch thermal conductivity calculation - processes all CIFs together in one temp directory.
@@ -604,8 +609,11 @@ def _calculate_kappa_batch(
                         sys.path.insert(0, str(shared_path))
                     from storage_manager import get_session_storage_path, get_file_url
 
-                    # 使用传入的 session_id，如果没有则使用 "default"
-                    effective_session_id = session_id or "default"
+                    # 使用传入的 session_id，如果没有则跳过保存（避免保存到错误目录）
+                    if not session_id:
+                        logger.warning("⚠️ session_id not provided, skipping batch CSV save")
+                        raise ValueError("session_id required for saving")
+                    effective_session_id = session_id
 
                     persistent_dir = get_session_storage_path(
                         session_id=effective_session_id,

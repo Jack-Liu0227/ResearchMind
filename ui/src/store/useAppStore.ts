@@ -86,6 +86,9 @@ interface AppState {
   structureList: CrystalStructure[]
   currentSessionStructures: CrystalStructure[]
   currentSessionFiles: SessionFile[]
+  
+  // 🆕 选中的结构（用于批量计算）
+  selectedStructureIds: string[]
 
   // Papers (文献)
   currentPapersCsvPath: string | null
@@ -140,6 +143,12 @@ interface AppState {
   setCurrentSessionFiles: (files: SessionFile[]) => void
   addToCurrentSessionFiles: (file: SessionFile) => void
   clearCurrentSessionFiles: () => void
+
+  // 🆕 选中结构的操作
+  setSelectedStructureIds: (ids: string[]) => void
+  toggleStructureSelection: (id: string) => void
+  selectAllStructures: () => void
+  clearSelectedStructures: () => void
 
   setPhononImages: (images: PhononImage[]) => void
   addPhononImage: (image: PhononImage) => void
@@ -248,6 +257,7 @@ export const useAppStore = create<AppState>()(
       structureList: [],
       currentSessionStructures: [],
       currentSessionFiles: [],
+      selectedStructureIds: [],  // 🆕 选中的结构 ID
 
       currentPapersCsvPath: null,
       currentPapersSessionId: null,
@@ -488,6 +498,26 @@ export const useAppStore = create<AppState>()(
         get().setCurrentSessionFiles([])
         setTimeout(() => forceSaveState(get()), 100)
       },
+
+      // 🆕 选中结构的操作
+      setSelectedStructureIds: (ids) => set({ selectedStructureIds: ids }),
+      
+      toggleStructureSelection: (id) => {
+        const { selectedStructureIds } = get()
+        if (selectedStructureIds.includes(id)) {
+          set({ selectedStructureIds: selectedStructureIds.filter(sid => sid !== id) })
+        } else {
+          set({ selectedStructureIds: [...selectedStructureIds, id] })
+        }
+      },
+      
+      selectAllStructures: () => {
+        const { currentSessionStructures } = get()
+        const allIds = currentSessionStructures.map(s => s.id).filter(Boolean) as string[]
+        set({ selectedStructureIds: allIds })
+      },
+      
+      clearSelectedStructures: () => set({ selectedStructureIds: [] }),
 
       setPhononImages: (images) => set({ phononImages: images }),
       addPhononImage: (image) => {

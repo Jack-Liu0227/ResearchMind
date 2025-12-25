@@ -33,10 +33,28 @@ FEATURE_PRICING: Dict[str, int] = {
     'structure_gen': 10,   # 结构生成（CrystaLLM 晶体结构生成）
     'relaxation': 5,       # 结构弛豫（MatterSim 结构优化）
     'phonon': 5,          # 声子谱计算（声子色散 + 态密度）
-    'batch_phonon': 4,     # 批量声子谱计算（每个结构，享受 20% 折扣）
     'kappa': 5,           # 热导率计算（AI4Kappa 预测）
-    'batch_kappa': 4,      # 批量热导率计算（每个结构，享受 20% 折扣）
 }
+
+# 全局价格倍率（用于统一调整价格）
+PRICING_MULTIPLIER: float = 3
+
+# ============================================================================
+# 批量计算折扣配置
+# ============================================================================
+
+BATCH_DISCOUNT: Dict[str, float] = {
+    'batch_phonon': 0.20,  # 批量声子谱计算享受 20% 折扣
+    'batch_kappa': 0.20,   # 批量热导率计算享受 20% 折扣
+}
+
+# 自动计算批量功能价格
+for batch_feature, discount in BATCH_DISCOUNT.items():
+    base_feature = batch_feature.replace('batch_', '')
+    if base_feature in FEATURE_PRICING:
+        # 批量价格 = 单个价格 * (1 - 折扣率)
+        # 注意：这里计算的是基础价格，get_feature_photons 会再乘上 PRICING_MULTIPLIER
+        FEATURE_PRICING[batch_feature] = int(FEATURE_PRICING[base_feature] * (1 - discount))
 
 # ============================================================================
 # 免费额度配置
@@ -72,15 +90,6 @@ INVITATION_REWARDS_INVITEE: Dict[str, Any] = {
 INVITATION_VALID_HOURS: int = 72  # 新用户需在 72 小时内填写学术码
 
 # ============================================================================
-# 批量计算折扣配置
-# ============================================================================
-
-BATCH_DISCOUNT: Dict[str, float] = {
-    'batch_phonon': 0.20,  # 批量声子谱计算享受 20% 折扣
-    'batch_kappa': 0.20,   # 批量热导率计算享受 20% 折扣
-}
-
-# ============================================================================
 # 辅助函数
 # ============================================================================
 
@@ -104,7 +113,8 @@ def get_feature_photons(feature_type: str) -> int:
         except ValueError:
             pass
 
-    return FEATURE_PRICING.get(feature_type, 0)
+    base_price = FEATURE_PRICING.get(feature_type, 0)
+    return int(base_price * PRICING_MULTIPLIER)
 
 
 def get_free_quota(feature_type: str) -> int:
@@ -203,13 +213,17 @@ def validate_pricing_config() -> bool:
 
     # 检查必需的功能类型
     required_features = ['search', 'database', 'export', 'chat', 'report',
-                        'structure_gen', 'relaxation', 'phonon', 'kappa', 'batch_kappa']
+                        'structure_gen', 'relaxation', 'phonon', 'kappa', 'batch_phonon', 'batch_kappa']
 
     for feature in required_features:
         if feature not in FEATURE_PRICING:
             errors.append(f"缺少功能定价配置: {feature}")
         elif FEATURE_PRICING[feature] < 0:
             errors.append(f"功能定价不能为负数: {feature} = {FEATURE_PRICING[feature]}")
+
+    # 检查价格倍率
+    if PRICING_MULTIPLIER < 0:
+        errors.append(f"价格倍率不能为负数: {PRICING_MULTIPLIER}")
 
     # 检查邀请奖励配置
     if not INVITATION_REWARDS_INVITER or not INVITATION_REWARDS_INVITEE:

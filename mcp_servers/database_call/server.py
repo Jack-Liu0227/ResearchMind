@@ -4,6 +4,14 @@ Provides tools for searching materials databases like Materials Project, OQMD, J
 Enhanced with frontend integration and structure generation support.
 """
 import os
+import sys
+import codecs
+
+# 🔧 修复 Windows GBK 编码问题
+if sys.platform == 'win32':
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, errors='replace')
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, errors='replace')
+    
 import math
 import asyncio
 import logging
@@ -102,20 +110,20 @@ fields_to_request = ["structure",
 @app.tool
 async def materials_project_query_tool(
     formula: str,
+    session_id: str = "",  # ⚠️ 强烈建议提供，用于保存 CIF 文件
     num_return: int = 3,
     return_frontend_format: bool = True,
-    session_id: str = None,
     optimize_output: bool = True
 ) -> Union[str, Dict[str, Any]]:
     """
     Searches the Materials Project database for a given chemical formula to get structure and properties of a specific inorganic material
 
-    ⚠️ 优化：默认将CIF内容保存到文件，仅返回文件路径和摘要，减少上下文开销
+    ⚠️ IMPORTANT: You MUST provide session_id parameter! CIF files will be saved to session directory.
 
     :param formula: formula of the material, str type, e.g. Li3Zr2Si2PO12, NaLiTiAl(PO4)3 or NaLiTiAlP3O12
     :param num_return: maximum number of results to return, default 3
     :param return_frontend_format: if True, returns structured data for frontend use, default True (changed from False)
-    :param session_id: session ID for saving CIF files (recommended to provide)
+    :param session_id: ⚠️ REQUIRED - session ID for saving CIF files. Get this from the system message.
     :param optimize_output: if True, saves CIF to files and returns paths instead of full content (default: True)
     :return: information of the material, such as its material id, composition, SymmetryData, Lattice, and PeriodicSite
     """
@@ -259,6 +267,17 @@ async def materials_project_query_tool(
         if optimize_output and session_id:
             cache_data = optimize_batch_results(cache_data, session_id=session_id, save_cif=True)
             logger.info(f"Optimized MP results for {formula}, CIF saved to files")
+            
+            # 🆕 Inject file paths into formatted_text for Agent visibility
+            saved_files_info = "\n\n💾 **Saved CIF Files (Use these paths for simulation):**\n"
+            for s in cache_data.get('structures', []):
+                if 'cif_file_path' in s:
+                    mid = s.get('material_id', 'Unknown')
+                    saved_files_info += f"- {mid}: `{s['cif_file_path']}`\n"
+            
+            if "formatted_text" in cache_data:
+                cache_data["formatted_text"] += saved_files_info
+                formatted_text += saved_files_info
 
         # Always return raw data (conversion will be done by services/structure_converter.py)
         if return_frontend_format:
@@ -287,13 +306,22 @@ class OQMDTool(BaseModel):
     composition: str = Field(description="chemical formula of the target material, e.g. Na3Zr2Si2PO12")
 
 @app.tool
-async def get_oqmd_phases(composition: str, num_return: int = 3):
+async def get_oqmd_phases(
+    composition: str, 
+    num_return: int = 3,
+    session_id: str = "",  # ⚠️ 必需参数，用于保存 CIF 文件
+    optimize_output: bool = True
+):
     """
     Searches the Open Quantum Materials Database (OQMD) for materials matching the given chemical formula,
     and extracts essential identification, composition, and structural information.
 
+    ⚠️ IMPORTANT: You MUST provide session_id parameter! CIF files will be saved to session directory.
+
     :param composition: chemical formula of the target material without brackets, e.g. "Na3PS4", NaLiTiAlP3O12, (not NaLiTiAl(PO4)3), str type
     :param num_return: maximum number of results to return, default 5
+    :param session_id: ⚠️ REQUIRED - session ID for saving CIF files. Get this from the system message.
+    :param optimize_output: if True, saves CIF to files and returns paths instead of full content (default: True)
     :return: list of simplified material records. Each record is a dict containing:
         - "material_id": unique entry ID in OQMD (from 'entry_id')
         - "icsd_id": unique entry ID in ICSD (from 'icsd_id')
@@ -309,6 +337,7 @@ async def get_oqmd_phases(composition: str, num_return: int = 3):
     Use this tool when you need to retrieve crystal structure and basic metadata for inorganic materials from OQMD.
     Returns an empty list if no results or request fails.
     """
+    from content_storage import optimize_batch_results
     with qr.QMPYRester() as q:
         kwargs = {
             "composition": composition,
@@ -375,7 +404,7 @@ async def get_oqmd_phases(composition: str, num_return: int = 3):
 
             if extracted:
                 # Return raw data (no conversion)
-                return {
+                result = {
                     "database": "OQMD",
                     "structures": extracted,
                     "count": len(extracted),
@@ -386,6 +415,24 @@ async def get_oqmd_phases(composition: str, num_return: int = 3):
                         "timestamp": datetime.now().isoformat()
                     }
                 }
+                
+                # 🆕 优化输出以减少上下文开销，保存 CIF 到文件
+                if optimize_output and session_id:
+                    result = optimize_batch_results(result, session_id=session_id, save_cif=True)
+                    logger.info(f"Optimized OQMD results for {composition}, CIF saved to files")
+                    
+                    # 🆕 Generate text summary with file paths
+                    saved_files_info = f"Found {len(extracted)} OQMD materials for {composition}:\n"
+                    for s in result.get('structures', []):
+                        mid = s.get('material_id', 'Unknown')
+                        comp = s.get('composition', '')
+                        sg = s.get('structure', {}).get('space_group', '')
+                        path = s.get('cif_file_path', 'N/A')
+                        saved_files_info += f"- {mid} ({comp}, {sg}):\n  Path: `{path}`\n"
+                    
+                    result["formatted_text"] = saved_files_info
+
+                return result
             else:
                 return {
                     "error": 'No matched material found in OQMD database',
@@ -406,18 +453,28 @@ class SearchCODByFormulaInput(BaseModel):
     formula: str = Field(description="chemical formula in Hill notation, with elements separated by spaces, e.g. 'Na3 O12 P Si2 Zr2'")
 
 @app.tool
-async def search_cod_by_formula(formula: str, num_return: int = 3):
+async def search_cod_by_formula(
+    formula: str, 
+    num_return: int = 3,
+    session_id: str = "",  # ⚠️ 必需参数，用于保存 CIF 文件
+    optimize_output: bool = True
+):
     """
     Searches the Crystallography Open Database (COD) for a given chemical formula.
 
+    ⚠️ IMPORTANT: You MUST provide session_id parameter! CIF files will be saved to session directory.
+
     :param formula: chemical formula (e.g., "NaCl", "H2O", "C8H10N4O2"), will be automatically converted to Hill notation
     :param num_return: maximum number of results to return, default 5
+    :param session_id: ⚠️ REQUIRED - session ID for saving CIF files. Get this from the system message.
+    :param optimize_output: if True, saves CIF to files and returns paths instead of full content (default: True)
     :return: dict containing JSON-formatted search results if the request succeeds; returns None if the request fails
     Use this tool when you need to retrieve crystal structure data from the Crystallography Open Database (COD) based on a given chemical formula.
     
     Note: COD server (www.crystallography.net) may be slow or unreachable due to network issues.
     If this tool fails, consider using MP, OQMD, or AFLOW databases instead.
     """
+    from content_storage import optimize_batch_results
 
     # Check cache first
     cache_key = get_cache_key("COD", formula, {"num_return": num_return})
@@ -491,7 +548,7 @@ async def search_cod_by_formula(formula: str, num_return: int = 3):
 
         if results:
             # Return raw data (no conversion)
-            return {
+            result = {
                 "database": "COD",
                 "structures": results,
                 "count": len(results),
@@ -502,6 +559,24 @@ async def search_cod_by_formula(formula: str, num_return: int = 3):
                     "timestamp": datetime.now().isoformat()
                 }
             }
+            
+            # 🆕 优化输出以减少上下文开销，保存 CIF 到文件
+            if optimize_output and session_id:
+                result = optimize_batch_results(result, session_id=session_id, save_cif=True)
+                logger.info(f"Optimized COD results for {formula}, CIF saved to files")
+            
+                # 🆕 Generate text summary with file paths
+                saved_files_info = f"Found {len(results)} COD materials for {formula}:\n"
+                for s in result.get('structures', []):
+                    cod_id = s.get('cod_id', 'Unknown')
+                    formula_res = s.get('chemical_formula', '')
+                    sg = s.get('space_group', '')
+                    path = s.get('cif_file_path', 'N/A')
+                    saved_files_info += f"- COD ID {cod_id} ({formula_res}, {sg}):\n  Path: `{path}`\n"
+                
+                result["formatted_text"] = saved_files_info
+
+            return result
         else:
             return {
                 "error": 'No matched material found in COD database',
@@ -603,12 +678,20 @@ class AflowSearchInput(BaseModel):
     formula_dict: dict = Field(description="Dictionary of element symbols and their stoichiometric ratios, e.g., {'Na':3, 'P':1, 'S':4}")
 
 @app.tool
-async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
+async def get_aflow_data(
+    formula_dict: dict,
+    session_id: str = "",  # ⚠️ 必需参数，用于保存 CIF 文件
+    optimize_output: bool = True
+) -> Dict[str, Any]:
     """
     Searches the AFLOW database by specifying element types and stoichiometric ratios.
     Returns simplified material records including ID, composition, and crystal structure.
 
+    ⚠️ IMPORTANT: You MUST provide session_id parameter! CIF files will be saved to session directory.
+
     :param formula_dict: Dictionary of element symbols and their stoichiometric ratios, e.g., {'Co':1,'N':8,'C':8,'Li':1,'H':24,'O':12}
+    :param session_id: ⚠️ REQUIRED - session ID for saving CIF files. Get this from the system message.
+    :param optimize_output: if True, saves CIF to files and returns paths instead of full content (default: True)
     :return: Dict containing database results with structures list, each structure containing:
         - "aflow_id": unique AFLOW UID (auid), e.g. "aflow:5db73d703b3b7767"
         - "compound": standardized compound name, e.g. "Na6P2S8"
@@ -623,6 +706,7 @@ async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
     Use this tool when you need precise crystal structure data from AFLOW by element & stoichiometry.
     Returns dict with structures list if results found, or error dict if no results or error occurs.
     """
+    from content_storage import optimize_batch_results
 
     species, stoichiometry = await process_formula_dict(formula_dict)
     try:
@@ -910,7 +994,7 @@ async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
 
         # Return raw data (no conversion)
         if extracted:
-            return {
+            result = {
                 "database": "AFLOW",
                 "structures": extracted,
                 "count": len(extracted),
@@ -921,6 +1005,23 @@ async def get_aflow_data(formula_dict: dict) -> Dict[str, Any]:
                     "timestamp": datetime.now().isoformat()
                 }
             }
+            
+            # 🆕 优化输出以减少上下文开销，保存 CIF 到文件
+            if optimize_output and session_id:
+                result = optimize_batch_results(result, session_id=session_id, save_cif=True)
+                logger.info(f"Optimized AFLOW results, CIF saved to files")
+            
+                # 🆕 Generate text summary with file paths
+                saved_files_info = f"Found {len(extracted)} AFLOW materials matching query:\n"
+                for s in result.get('structures', []):
+                    auid = s.get('aflow_id', 'Unknown')
+                    comp = s.get('compound', '')
+                    path = s.get('cif_file_path', 'N/A')
+                    saved_files_info += f"- {auid} ({comp}):\n  Path: `{path}`\n"
+                
+                result["formatted_text"] = saved_files_info
+
+            return result
         else:
             return {
                 "error": "No results found in AFLOW",

@@ -69,8 +69,9 @@ class SessionManager:
                 if not cls.BASE_DATA_DIR.exists():
                     cls.BASE_DATA_DIR.mkdir(exist_ok=True)
                 
-                # Create subdirectories
-                for directory in [cls.STRUCTURES_DIR, cls.IMAGES_DIR, cls.METADATA_DIR, cls.HISTORY_DIR]:
+                # 只创建核心目录（metadata, history）
+                # structures 和 images 目录在 create_session 时按需创建，避免空目录
+                for directory in [cls.METADATA_DIR, cls.HISTORY_DIR]:
                     if not directory.exists():
                         directory.mkdir(parents=True, exist_ok=True)
                 
@@ -93,7 +94,7 @@ class SessionManager:
         
         cls._initialized = True
         logger.info(f"✅ Session Manager initialized")
-        logger.info(f"📁 Base data directory: {cls.BASE_DATA_DIR.absolute()}")
+        logger.debug(f"📁 Base data directory: {cls.BASE_DATA_DIR.absolute()}")
     
     @classmethod
     def _load_session_registry(cls):
@@ -155,17 +156,15 @@ class SessionManager:
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
                 "message_count": 0,
-                "structure_count": 0,
-                "image_count": 0
             }
 
             # Create session directories
-            session_structures_dir = cls.STRUCTURES_DIR / session_id
-            session_images_dir = cls.IMAGES_DIR / session_id
+            # session_structures_dir = cls.STRUCTURES_DIR / session_id  # 🗑️ Removed as redundant
+            # session_images_dir = cls.IMAGES_DIR / session_id # 🗑️ Removed as redundant
             session_metadata_file = cls.METADATA_DIR / f"{session_id}.json"
 
-            session_structures_dir.mkdir(parents=True, exist_ok=True)
-            session_images_dir.mkdir(parents=True, exist_ok=True)
+            # session_structures_dir.mkdir(parents=True, exist_ok=True) # 🗑️ Removed
+            # session_images_dir.mkdir(parents=True, exist_ok=True) # 🗑️ Removed
 
             # Save session metadata
             try:
@@ -236,16 +235,16 @@ class SessionManager:
                 return
 
             # Delete session directories
-            session_structures_dir = cls.STRUCTURES_DIR / session_id
-            session_images_dir = cls.IMAGES_DIR / session_id
+            # session_structures_dir = cls.STRUCTURES_DIR / session_id # 🗑️ Removed
+            # session_images_dir = cls.IMAGES_DIR / session_id # 🗑️ Removed
             session_metadata_file = cls.METADATA_DIR / f"{session_id}.json"
             session_history_file = cls.HISTORY_DIR / f"{session_id}.json"  # 🆕
 
             try:
-                if session_structures_dir.exists():
-                    shutil.rmtree(session_structures_dir)
-                if session_images_dir.exists():
-                    shutil.rmtree(session_images_dir)
+                # if session_structures_dir.exists():
+                #     shutil.rmtree(session_structures_dir)
+                # if session_images_dir.exists():
+                #     shutil.rmtree(session_images_dir)
                 if session_metadata_file.exists():
                     session_metadata_file.unlink()
                 if session_history_file.exists():  # 🆕
@@ -269,21 +268,19 @@ class SessionManager:
         structures_dir.mkdir(parents=True, exist_ok=True)
         return structures_dir
 
-    @classmethod
-    def get_session_images_dir(cls, session_id: str) -> Path:
-        """
-        Get images directory for a session.
-        Creates the directory if it doesn't exist.
-        """
-        images_dir = cls.IMAGES_DIR / session_id
-        images_dir.mkdir(parents=True, exist_ok=True)
-        return images_dir
+    # @classmethod
+    # def get_session_images_dir(cls, session_id: str) -> Path:
+    #     """
+    #     Deprecated: Images are now stored in simulation directories.
+    #     """
+    #     return cls.BASE_DATA_DIR / "simulation" / session_id / "images"
     
     @classmethod
     def get_session_phonon_dir(cls, session_id: str) -> Path:
         """Get phonon results directory for a session"""
-        phonon_dir = cls.get_session_images_dir(session_id) / "phonon_results"
-        phonon_dir.mkdir(parents=True, exist_ok=True)  # ⭐ 添加 parents=True
+        # 🔧 Updated to point to new location: simulation/{session_id}/phonon_results
+        phonon_dir = cls.BASE_DATA_DIR / "simulation" / session_id / "phonon_results"
+        phonon_dir.mkdir(parents=True, exist_ok=True)
         return phonon_dir
     
     @classmethod
@@ -381,30 +378,67 @@ class SessionManager:
         
         Args:
             session_id: Session ID
-            history: List of message objects (Google ADK types)
+            history: List of message/event objects (Google ADK types)
         """
+        if not history:
+            logger.debug(f"📝 No history to save for session {session_id}")
+            return
+            
         try:
-            # Convert ADK message objects to serializable dicts
+            # Convert ADK message/event objects to serializable dicts
             serialized_history = []
-            for msg in history:
-                if hasattr(msg, 'to_dict'):
-                    serialized_history.append(msg.to_dict())
-                elif hasattr(msg, '__dict__'):
-                    # Fallback for simple objects
-                    data = msg.__dict__.copy()
-                    # Remove non-serializable fields if any
-                    if '_client' in data: del data['_client']
-                    serialized_history.append(data)
-                else:
-                    logger.warning(f"⚠️ Cannot serialize message object: {type(msg)}")
+            for i, msg in enumerate(history):
+                try:
+                    # Google ADK uses Pydantic models with model_dump()
+                    if hasattr(msg, 'model_dump'):
+                        serialized_history.append(msg.model_dump())
+                    elif hasattr(msg, 'to_dict'):
+                        serialized_history.append(msg.to_dict())
+                    elif hasattr(msg, 'dict'):
+                        # Older Pydantic v1 style
+                        serialized_history.append(msg.dict())
+                    elif isinstance(msg, dict):
+                        serialized_history.append(msg)
+                    elif hasattr(msg, '__dict__'):
+                        # Fallback for simple objects
+                        data = {}
+                        for k, v in msg.__dict__.items():
+                            if not k.startswith('_'):
+                                try:
+                                    # Test if value is JSON serializable
+                                    json.dumps(v)
+                                    data[k] = v
+                                except (TypeError, ValueError):
+                                    data[k] = str(v)
+                        serialized_history.append(data)
+                    else:
+                        logger.warning(f"⚠️ Cannot serialize message {i} of type {type(msg)}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to serialize message {i}: {e}")
+                    continue
+            
+            if not serialized_history:
+                logger.warning(f"⚠️ No messages could be serialized for session {session_id}")
+                return
+            
+            # Ensure history directory exists
+            if not cls.HISTORY_DIR.exists():
+                cls.HISTORY_DIR.mkdir(parents=True, exist_ok=True)
             
             history_file = cls.HISTORY_DIR / f"{session_id}.json"
-            with open(history_file, 'w', encoding='utf-8') as f:
-                json.dump(serialized_history, f, indent=2, ensure_ascii=False)
+            
+            # Atomic write pattern
+            temp_file = history_file.with_suffix('.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(serialized_history, f, indent=2, ensure_ascii=False, default=str)
+            
+            # Rename temp file to actual file
+            if temp_file.exists():
+                temp_file.replace(history_file)
                 
-            logger.debug(f"💾 Saved history for session {session_id} ({len(history)} messages)")
+            logger.info(f"💾 Saved {len(serialized_history)} events for session {session_id} to {history_file}")
         except Exception as e:
-            logger.error(f"❌ Failed to save session history: {e}")
+            logger.error(f"❌ Failed to save session history for {session_id}: {e}", exc_info=True)
 
     @classmethod
     def load_history(cls, session_id: str) -> List[Dict[str, Any]]:

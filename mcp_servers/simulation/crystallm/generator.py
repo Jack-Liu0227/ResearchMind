@@ -128,26 +128,28 @@ def generate_crystal_from_composition(
             }
         
         # Step 4: Create directories in generated_structures
-        # Use unified storage if session_id provided, otherwise use legacy path
-        if session_id:
-            # Import storage manager
-            sys.path.insert(0, str(_MODULE_DIR.parent.parent))
-            from shared.storage_manager import get_session_storage_path
+        # session_id is required for unified storage - no fallback to legacy path
+        if not session_id:
+            logger.error("session_id is required for structure generation")
+            return {
+                "success": False,
+                "error": "session_id is required. Please ensure the tool is called with a valid session_id.",
+                "composition": composition,
+                "generation_id": generation_id
+            }
+            
+        # Import storage manager
+        sys.path.insert(0, str(_MODULE_DIR.parent.parent))
+        from shared.storage_manager import get_session_storage_path
 
-            generated_structures_dir = get_session_storage_path(
-                session_id=session_id,
-                data_type="generated_structures",
-                create=True
-            )
-            logger.info("Using unified storage for generated structures",
-                       path=str(generated_structures_dir),
-                       session_id=session_id)
-        else:
-            # Legacy path for backward compatibility
-            generated_structures_dir = _MODULE_DIR / "generated_structures"
-            generated_structures_dir.mkdir(parents=True, exist_ok=True)
-            logger.info("Using legacy path for generated structures",
-                       path=str(generated_structures_dir))
+        generated_structures_dir = get_session_storage_path(
+            session_id=session_id,
+            data_type="generated_structures",
+            create=True
+        )
+        logger.info("Using unified storage for generated structures",
+                   path=str(generated_structures_dir),
+                   session_id=session_id)
 
         # Create subdirectories for this generation
         generation_subdir = generated_structures_dir / f"{composition}_{generation_id}"

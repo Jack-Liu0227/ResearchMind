@@ -147,10 +147,16 @@ class WebSocketServer:
                     # Extract or create session_id
                     session_id = data.get("sessionId") or data.get("session_id")
 
-                    # If no session_id provided, create a default one for this client
+                    # If no session_id provided, generate a proper session_id (not default_xxx)
                     if not session_id:
-                        session_id = f"default_{client_id}"
-                        logger.debug(f"No session_id provided, using default: {session_id}")
+                        # 🔧 修复：生成正确格式的 session_id，不使用 default 前缀
+                        import time
+                        import random
+                        import string
+                        timestamp = int(time.time() * 1000)
+                        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                        session_id = f"session_{timestamp}_{random_id}"
+                        logger.info(f"🆕 Generated new session_id: {session_id}")
 
                     # Ensure session exists
                     if not SessionManager.get_session(session_id):

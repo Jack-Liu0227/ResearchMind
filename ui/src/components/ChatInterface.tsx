@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Send, Paperclip, Mic, Square, X, Copy, Bot } from 'lucide-react'
+import { Send, Paperclip, Mic, Square, X, Copy, Bot, MessageSquarePlus } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import MessageList from './MessageList'
@@ -378,8 +378,11 @@ const ChatInterface: React.FC = () => {
                 retrievedAt: new Date(),
               }
               structure.cifContent = fileContent
+              // 🔧 Fix: Ensure we store the original filename so backend can find it
+              structure.cifFilename = file.name
               structure.metadata = {
                 ...structure.metadata,
+                originalFilename: file.name,
                 conventionalStructure,
               }
             }
@@ -410,6 +413,15 @@ const ChatInterface: React.FC = () => {
       setIsLoading(false)
       setLoadingMessage('')
     }
+  }
+
+  const handleNewTopic = () => {
+    if (!currentAgent) return
+
+    // 创建新会话以清除上下文
+    const newSession = createSession('新对话', currentAgent.id)
+    setCurrentSession(newSession)
+    toast.success('已开启新话题，上下文已重置')
   }
 
   const toggleRecording = () => {
@@ -625,6 +637,17 @@ const ChatInterface: React.FC = () => {
 
               {/* 右侧功能区：语音 & 发送 */}
               <div className="flex items-center gap-1">
+                {/* 新话题按钮 (仅在非录音且有上下文时显示，或者始终显示) */}
+                {messages.length > 0 && !inputValue && (
+                  <button
+                    onClick={handleNewTopic}
+                    className="p-2.5 rounded-xl transition-all active:scale-95 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                    title="开启新话题 (重置上下文)"
+                  >
+                    <MessageSquarePlus className="w-5 h-5" />
+                  </button>
+                )}
+
                 {/* 语音按钮 (仅在非录音或空输入时显示，保持简洁) */}
                 {!inputValue && (
                   <button

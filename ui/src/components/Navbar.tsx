@@ -35,13 +35,28 @@ const Navbar: React.FC = () => {
         <div className="flex items-center gap-4">
           {/* 侧边栏开关 或 返回按钮 */}
           {isHomePage ? (
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 hover:bg-white/20 rounded-xl transition-all text-gray-700 active:scale-95"
-              title="切换侧边栏"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="p-2 hover:bg-white/20 rounded-xl transition-all text-gray-700 active:scale-95"
+                title="切换侧边栏"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => {
+                  if (window.confirm('确定要清除当前会话吗？这将清空所有消息和结构数据。')) {
+                    // 简单地刷新页面即可完全重置状态，或者调用 store 的重置方法
+                    // 这里我们选择重新加载页面以确保彻底清除
+                    window.location.reload();
+                  }
+                }}
+                className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-xl transition-all active:scale-95"
+                title="清除会话并刷新"
+              >
+                <RefreshCw className="w-5 h-5" />
+              </button>
+            </div>
           ) : (
             <button
               onClick={() => navigate('/')}

@@ -73,6 +73,9 @@ def get_session_storage_path(
         base_path = SESSION_DATA_DIR / "simulation" / session_id / "relaxed"
     elif data_type == "generated_structures":
         base_path = SESSION_DATA_DIR / "simulation" / session_id / "generated"
+    elif data_type == "database":
+        # 🆕 数据库检索的结构文件 (MP, OQMD, COD, AFLOW)
+        base_path = SESSION_DATA_DIR / "simulation" / session_id / "database"
     else:
         # 通用路径
         base_path = SESSION_DATA_DIR / data_type / session_id

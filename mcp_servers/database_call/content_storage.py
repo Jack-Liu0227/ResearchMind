@@ -30,8 +30,8 @@ SESSION_DATA_DIR = session_data_root()
 STRUCTURES_DIR = SESSION_DATA_DIR / "structures"
 METADATA_DIR = SESSION_DATA_DIR / "metadata"
 
-# 确保目录存在
-ensure_dirs(STRUCTURES_DIR, METADATA_DIR)
+# 注意：不再在模块加载时创建目录
+# 目录会在实际保存文件时按需创建，避免产生空目录
 
 
 def save_structure_to_file(
@@ -50,37 +50,62 @@ def save_structure_to_file(
     Returns:
         文件路径
     """
+    if not session_id:
+        logger.warning("⚠️ session_id not provided, cannot save CIF")
+        return ""
+        
     try:
-        # 创建会话目录
-        session_dir = STRUCTURES_DIR / session_id
-        session_dir.mkdir(parents=True, exist_ok=True)
+        # 🔧 使用 simulation/session_id/cif 目录，与其他 CIF 文件保持一致
+        # 这样 simulation server 可以通过 _resolve_structure_path_by_source 找到这些文件
+        try:
+            shared_path = Path(__file__).parent.parent / "shared"
+            if str(shared_path) not in sys.path:
+                sys.path.insert(0, str(shared_path))
+            from storage_manager import get_session_storage_path
+            
+            # 保存到 simulation/session_id/database 目录（数据库检索的结构单独存放）
+            session_cif_dir = get_session_storage_path(
+                session_id=session_id,
+                data_type="database",  # 🆕 使用专门的 database 目录
+                create=True
+            )
+        except Exception as e:
+            logger.error(f"Failed to get session storage path: {e}")
+            return "" # 🗑️ Removed legacy fallback to STRUCTURES_DIR
         
         # 生成文件名
         material_id = structure_data.get('material_id', 'unknown')
-        formula = structure_data.get('formula_pretty', 'unknown')
+        formula = structure_data.get('formula_pretty', structure_data.get('name', 'unknown'))
+        
+        # 清理文件名中的非法字符
+        import re
+        safe_formula = re.sub(r'[<>:"/\\|?*]', '_', str(formula))
+        safe_material_id = re.sub(r'[<>:"/\\|?*]', '_', str(material_id))
+        
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{database}_{formula}_{material_id}_{timestamp}.cif"
+        filename = f"{database}_{safe_formula}_{safe_material_id}_{timestamp}.cif"
         
         # 保存CIF文件
         cif_content = structure_data.get('cifContent', '')
         if cif_content and cif_content != 'N/A':
-            cif_path = session_dir / filename
+            cif_path = session_cif_dir / filename
             with open(cif_path, 'w', encoding='utf-8') as f:
                 f.write(cif_content)
-            logger.info(f"Saved CIF to: {cif_path}")
+            logger.info(f"💾 Saved CIF to: {cif_path}")
             return str(cif_path)
         
         return ""
     
     except Exception as e:
-        logger.error(f"Failed to save structure to file: {e}")
+        logger.error(f"❌ Failed to save structure to file: {e}")
         return ""
 
 
 def optimize_structure_data(
     structure_data: Dict[str, Any],
     session_id: str = None,
-    save_cif: bool = True
+    save_cif: bool = True,
+    database: str = "MP"  # 🆕 Added database parameter
 ) -> Dict[str, Any]:
     """
     优化结构数据，减少上下文开销
@@ -89,28 +114,29 @@ def optimize_structure_data(
         structure_data: 原始结构数据
         session_id: 会话ID（如果提供，则保存CIF到文件）
         save_cif: 是否保存CIF到文件
+        database: 数据库名称
     
     Returns:
-        优化后的结构数据（CIF内容替换为文件路径或摘要）
+        优化后的结构数据（添加文件路径，保留CIF内容）
     """
     optimized = structure_data.copy()
     
-    # 如果CIF内容较大，保存到文件
+    # 如果CIF内容较大，保存到文件（但保留 cifContent 供前端渲染）
     cif_content = optimized.get('cifContent', '')
     if cif_content and cif_content != 'N/A' and len(cif_content) > 500:
         if save_cif and session_id:
             # 保存到文件
-            cif_path = save_structure_to_file(structure_data, session_id)
+            cif_path = save_structure_to_file(structure_data, session_id, database=database) # 🆕 Pass database
             if cif_path:
                 optimized['cif_file_path'] = cif_path
-                # 保留CIF摘要
-                optimized['cif_summary'] = cif_content[:200] + f"... (saved to file, total {len(cif_content)} chars)"
-                # 移除完整CIF内容
-                del optimized['cifContent']
-        else:
-            # 不保存文件，只保留摘要
-            optimized['cif_summary'] = cif_content[:200] + f"... (truncated, total {len(cif_content)} chars)"
-            del optimized['cifContent']
+                # 🔧 修复：保留 cifContent 供前端 3D 渲染使用
+                # 前端使用 cifContent 渲染结构，后端工具使用 cif_file_path
+                logger.info(f"✅ CIF saved to {cif_path}, cifContent retained for frontend")
+            else:
+                # 🔧 保存失败，保留完整的 cifContent 以便前端显示
+                logger.warning(f"⚠️ Failed to save CIF, keeping full content for frontend")
+        # 🔧 不再删除 cifContent，因为前端需要它来渲染 3D 结构
+        # 即使没有 session_id，也保留完整的 cifContent
     
     return optimized
 
@@ -133,10 +159,13 @@ def optimize_batch_results(
     """
     optimized = results.copy()
     
+    # 🆕 Get database name from results
+    database = optimized.get("database", "MP")
+    
     # 优化structures列表
     if 'structures' in optimized and isinstance(optimized['structures'], list):
         optimized['structures'] = [
-            optimize_structure_data(s, session_id, save_cif)
+            optimize_structure_data(s, session_id, save_cif, database=database) # 🆕 Pass database
             for s in optimized['structures']
         ]
     

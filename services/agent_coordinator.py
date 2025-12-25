@@ -171,7 +171,9 @@ class AgentCoordinator:
             # Also try fallback to session_key (agent-specific) for migration
             restored_history = self._restore_history_from_disk(history_key, fallback_key=session_key)
             if restored_history:
-                session.history = restored_history
+                # Google ADK Session uses 'events' not 'history'
+                if hasattr(session, 'events'):
+                    session.events = restored_history
                 self.session_message_counts[session_key] = len(restored_history)
                 logger.info(f"🔄 Synced history for {session_key} from {history_key} (or fallback) ({len(restored_history)} messages)")
 
@@ -235,9 +237,9 @@ class AgentCoordinator:
             # 创建用户消息 - 需要使用 types.Content 包装 types.Part
             parts = []
 
-            # 🔧 对于 deep_research_agent，在消息开头添加 session_id 信息
-            # 这样 Agent 可以在所有操作中使用相同的 session_id
-            if agent_id == 'deep_research_agent' and session_id:
+            # 🔧 对于 deep_research_agent 和 simulation_agent，在消息开头添加 session_id 信息
+            # 这样 Agent 可以在所有操作中使用相同的 session_id，避免使用 default
+            if agent_id in ['deep_research_agent', 'simulation_agent', 'database_agent'] and session_id:
                 session_info = f"[系统信息] 当前会话 session_id=\"{session_id}\"，所有工具调用必须使用此 session_id\n\n"
                 parts.append(types.Part(text=session_info))
 
@@ -397,7 +399,7 @@ class AgentCoordinator:
                         file_info = f"\n\n用户上传了 {len(saved_files)} 个文件：\n"
                         for f in saved_files:
                             size_kb = f['size'] / 1024
-                            file_info += f"- {f['filename']} ({size_kb:.2f}KB, {f['mime_type']})\n"
+                            file_info += f"- {f['filename']} ({size_kb:.2f}KB): `{f['path']}`\n"  # 🆕 Added file path
                         file_info += f"\n文件已保存到：{upload_dir}\n"
 
                         # 根据 agent 类型提供不同的工具调用提示
@@ -538,7 +540,11 @@ class AgentCoordinator:
             # 🆕 Save session history to disk (using shared history key)
             try:
                 from .session_manager import SessionManager
-                SessionManager.save_history(history_key, session.history)
+                # Google ADK Session uses 'events' not 'history'
+                session_events = getattr(session, 'events', None) or []
+                if session_events:
+                    SessionManager.save_history(history_key, session_events)
+                    logger.info(f"💾 Saved {len(session_events)} events for {history_key}")
             except Exception as e:
                 logger.error(f"❌ Failed to save history for {history_key}: {e}")
                 
@@ -630,8 +636,8 @@ class AgentCoordinator:
             if not session:
                 return
 
-            # Get current history
-            history = session.history if hasattr(session, 'history') else []
+            # Get current history (Google ADK uses 'events')
+            history = getattr(session, 'events', None) or []
             current_count = len(history)
 
             if current_count > MAX_CONTEXT_MESSAGES:
@@ -641,21 +647,25 @@ class AgentCoordinator:
 
                 if len(history) > 0 and hasattr(history[0], 'role') and history[0].role == 'system':
                     # Keep system message + recent messages
-                    session.history = [history[0]] + history[-keep_count:]
+                    if hasattr(session, 'events'):
+                        session.events = [history[0]] + history[-keep_count:]
                 else:
                     # Just keep recent messages
-                    session.history = history[-MAX_CONTEXT_MESSAGES:]
+                    if hasattr(session, 'events'):
+                        session.events = history[-MAX_CONTEXT_MESSAGES:]
 
-                removed_count = current_count - len(session.history)
-                logger.info(f"✂️ Truncated session {session_key}: removed {removed_count} old messages, kept {len(session.history)}")
+                new_history = getattr(session, 'events', None) or []
+                removed_count = current_count - len(new_history)
+                logger.info(f"✂️ Truncated session {session_key}: removed {removed_count} old messages, kept {len(new_history)}")
 
                 # Update message count
-                self.session_message_counts[session_key] = len(session.history)
+                self.session_message_counts[session_key] = len(new_history)
 
                 # Notify user
+                new_history = getattr(session, 'events', None) or []
                 await MessageHandler.send_message(
                     websocket,
-                    f"📝 已自动清理 {removed_count} 条旧消息，保留最近 {len(session.history)} 条消息以避免上下文超限。",
+                    f"📝 已自动清理 {removed_count} 条旧消息，保留最近 {len(new_history)} 条消息以避免上下文超限。",
                     message_type="info"
                 )
 
@@ -712,7 +722,9 @@ class AgentCoordinator:
         restored_history = self._restore_history_from_disk(history_key, fallback_key=session_key)
         
         if restored_history:
-            session.history = restored_history
+            # Google ADK Session uses 'events' not 'history'
+            if hasattr(session, 'events'):
+                session.events = restored_history
             self.session_message_counts[session_key] = len(restored_history)
             logger.info(f"♻️ Restored {len(restored_history)} messages for session {session_key} from {history_key}")
         else:
@@ -766,7 +778,8 @@ class AgentCoordinator:
         session_id: str,
         user_id: Optional[str] = None,
         user_access_key: Optional[str] = None,
-        user_client_name: Optional[str] = None
+        user_client_name: Optional[str] = None,
+        tool_args: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         在工具调用前检查是否需要扣费，并执行扣费
@@ -777,12 +790,17 @@ class AgentCoordinator:
             user_id: 用户 ID（可选）
             user_access_key: 用户访问密钥（可选）
             user_client_name: 用户客户端名称（可选）
+            tool_args: 工具参数（可选，用于计算批量数量）
 
         Returns:
             扣费结果字典，包含 success, message, photons 等字段
         """
         # 检查工具是否需要扣费
         feature_type = TOOL_FEATURE_MAPPING.get(tool_name)
+        
+        # 确保 tool_args 是字典
+        if tool_args is None:
+            tool_args = {}
 
         if not feature_type:
             # 免费工具，无需扣费
@@ -798,6 +816,75 @@ class AgentCoordinator:
         try:
             logger.info(f"💰 工具 {tool_name} 需要扣费，功能类型: {feature_type}")
 
+            # 计算扣费数量
+            quantity = 1
+            
+            # 针对批量工具动态计算数量
+            if tool_name in ['calculate_phonon_from_directory', 'calculate_kappa_from_directory']:
+                # 1. 优先检查是否指定了文件列表
+                cif_filenames = tool_args.get('cif_filenames')
+                if cif_filenames and isinstance(cif_filenames, list) and len(cif_filenames) > 0:
+                    quantity = len(cif_filenames)
+                    logger.info(f"📊 批量工具 {tool_name} 指定了 {quantity} 个文件")
+                else:
+                    # 2. 尝试确定目录并计算文件数
+                    target_dir = None
+                    cif_directory = tool_args.get('cif_directory') or tool_args.get('directory')
+                    
+                    if cif_directory:
+                        target_dir = cif_directory
+                    elif session_id:
+                        # 尝试根据 source_type 和 session_id 解析目录
+                        source_type = tool_args.get('source_type', 'uploaded') # 默认为 uploaded (与工具定义一致)
+                        
+                        try:
+                            # 动态导入 storage_manager
+                            import sys
+                            from pathlib import Path as PathLib
+                            
+                            # 确保 mcp_servers/shared 在 sys.path 中
+                            shared_path = PathLib(__file__).parent.parent / "mcp_servers" / "shared"
+                            if str(shared_path) not in sys.path:
+                                sys.path.insert(0, str(shared_path))
+                                
+                            from storage_manager import get_session_storage_path
+                            
+                            if source_type == "relaxed":
+                                path = get_session_storage_path(session_id=session_id, data_type="relaxed_structures", create=False)
+                                if path.exists():
+                                    target_dir = str(path)
+                            elif source_type == "uploaded":
+                                path = get_session_storage_path(session_id=session_id, data_type="uploads", create=False)
+                                if path.exists():
+                                    target_dir = str(path)
+                        except Exception as e:
+                            logger.warning(f"⚠️ 解析会话目录失败: {e}")
+
+                    # 3. 如果找到了目录，计算其中的 CIF 文件数
+                    if target_dir:
+                        try:
+                            abs_target_dir = os.path.abspath(target_dir)
+                            if os.path.exists(abs_target_dir) and os.path.isdir(abs_target_dir):
+                                cif_files = [f for f in os.listdir(abs_target_dir) if f.lower().endswith('.cif')]
+                                quantity = len(cif_files)
+                                if quantity == 0:
+                                    quantity = 1 # 避免为 0
+                                logger.info(f"📊 批量工具 {tool_name} 在目录 {target_dir} 中检测到 {quantity} 个结构")
+                            else:
+                                logger.warning(f"⚠️ 目录不存在: {target_dir}，默认按 1 个计费")
+                        except Exception as e:
+                            logger.error(f"❌ 统计目录文件数失败: {e}，默认按 1 个计费")
+                    else:
+                        logger.warning(f"⚠️ 无法确定目标目录，默认按 1 个计费")
+            
+            elif tool_name == 'batch_calculate_kappa':
+                structures = tool_args.get('structures')
+                if isinstance(structures, list):
+                    quantity = len(structures)
+                    if quantity == 0:
+                        quantity = 1
+                    logger.info(f"📊 批量工具 {tool_name} 检测到 {quantity} 个结构")
+
             # 调用扣费服务
             result = PricingService.charge_for_feature(
                 feature_type=feature_type,
@@ -805,7 +892,7 @@ class AgentCoordinator:
                 user_id=user_id,
                 user_access_key=user_access_key,
                 user_client_name=user_client_name,
-                quantity=1
+                quantity=quantity
             )
 
             # 🆕 记录扣费到会话的计费上下文（无论成功或失败都记录）
@@ -1016,7 +1103,8 @@ class AgentCoordinator:
                                 session_id=session_id or 'unknown',
                                 user_id=user_id_for_charge,
                                 user_access_key=user_access_key,
-                                user_client_name=user_client_name
+                                user_client_name=user_client_name,
+                                tool_args=tool_input
                             )
 
                             # 记录扣费结果到工具调用记录

@@ -60,41 +60,36 @@ IMAGES_DIR = SESSION_DATA_ROOT / 'images'
 
 def ensure_data_directories():
     """
-    确保所有数据目录存在
+    确保核心数据目录存在
+    
+    注意：只创建必需的核心目录，其他目录（cache, reports, exports等）
+    会在实际使用时按需创建，避免产生大量空目录。
 
     Returns:
-        bool: 所有目录创建成功返回 True
+        bool: 核心目录创建成功返回 True
     """
-    directories = [
-        CACHE_DIR,
-        SEARCH_CACHE_DIR,
-        REPORTS_DIR,
-        EXPORTS_DIR,
-        DATABASE_DIR,
-        VISUALIZATIONS_DIR,
-        STRUCTURES_DIR,
-        LOGS_DIR,
-        TEMP_DIR,
-        PAPERS_DIR,
-        SIMULATION_DIR,
-        METADATA_DIR,
-        IMAGES_DIR
+    # 只创建核心必需目录，其他目录按需创建
+    core_directories = [
+        DATABASE_DIR,       # 数据库文件（必需）
+        PAPERS_DIR,         # 论文会话（核心功能）
+        SIMULATION_DIR,     # 模拟数据（核心功能）
+        METADATA_DIR,       # 元数据（核心功能）
     ]
 
     try:
-        ensure_dirs(*directories)
+        ensure_dirs(*core_directories)
 
         import structlog
         logger = structlog.get_logger(__name__)
-        logger.info(f"Data directories initialized at {SESSION_DATA_ROOT}")
+        logger.debug(f"Core data directories initialized at {SESSION_DATA_ROOT}")
         return True
     except Exception as e:
         import structlog
         logger = structlog.get_logger(__name__)
-        logger.error(f"Failed to create data directories: {e}")
+        logger.error(f"Failed to create core data directories: {e}")
         return False
 
-# 启动时自动创建目录
+# 启动时只创建核心目录
 ensure_data_directories()
 
 # ==================== 并发控制 ====================
