@@ -23,8 +23,9 @@ from .pricing_service import PricingService
 logger = logging.getLogger(__name__)
 
 # 会话管理配置
-MAX_CONTEXT_MESSAGES = 20  # 最多保留20条消息（10轮对话）
-CONTEXT_SUMMARY_THRESHOLD = 15  # 超过15条消息时开始总结
+MAX_CONTEXT_MESSAGES = 16  # 最多保留16条消息（8轮对话），降低限制避免超限
+CONTEXT_SUMMARY_THRESHOLD = 10  # 超过10条消息时提前警告
+CONTEXT_AUTO_CLEAR_THRESHOLD = 12  # 超过12条消息时自动清理到8条
 
 # 🆕 工具名称到功能类型的映射（用于按功能扣费）
 TOOL_FEATURE_MAPPING = {
@@ -186,14 +187,30 @@ class AgentCoordinator:
                 await self._truncate_session_history(session_key, websocket)
                 message_count = self.session_message_counts.get(session_key, 0)
 
+            # 🆕 如果超过自动清理阈值，主动清理（避免等到超限才清理）
+            elif message_count >= CONTEXT_AUTO_CLEAR_THRESHOLD:
+                logger.warning(f"⚠️ Session {session_key} has {message_count} messages. Auto-clearing to avoid overflow...")
+                await self._truncate_session_history(session_key, websocket, target_count=8)
+                message_count = self.session_message_counts.get(session_key, 0)
+                await MessageHandler.send_message(
+                    websocket,
+                    "status",
+                    {
+                        "status": "info",
+                        "message": f"💡 已自动清理旧消息以避免上下文超限（保留最近{message_count}条）"
+                    }
+                )
+
             # 如果接近上下文限制，发送警告
             elif message_count >= CONTEXT_SUMMARY_THRESHOLD:
                 logger.warning(f"⚠️ Session {session_key} has {message_count} messages. Approaching context limit.")
                 await MessageHandler.send_message(
                     websocket,
-                    f"💡 提示：对话历史较长（{message_count}条消息），如遇到上下文超限错误，请使用清除会话功能。",
-                    agent_id=agent_id,
-                    message_type="warning"
+                    "status",
+                    {
+                        "status": "warning",
+                        "message": f"💡 对话历史较长（{message_count}条），将在更多消息后自动清理"
+                    }
                 )
 
             # 增加消息计数
@@ -622,7 +639,8 @@ class AgentCoordinator:
     async def _truncate_session_history(
         self,
         session_key: str,
-        websocket: Any
+        websocket: Any,
+        target_count: Optional[int] = None
     ) -> None:
         """
         Truncate session history to keep only recent messages
@@ -630,6 +648,7 @@ class AgentCoordinator:
         Args:
             session_key: Session key
             websocket: WebSocket connection for notifications
+            target_count: Optional target message count (default: MAX_CONTEXT_MESSAGES)
         """
         try:
             session = self.adk_sessions.get(session_key)
@@ -640,10 +659,13 @@ class AgentCoordinator:
             history = getattr(session, 'events', None) or []
             current_count = len(history)
 
-            if current_count > MAX_CONTEXT_MESSAGES:
-                # Keep only the most recent MAX_CONTEXT_MESSAGES messages
+            # 使用指定的 target_count 或默认值
+            keep_target = target_count if target_count else MAX_CONTEXT_MESSAGES
+
+            if current_count > keep_target:
+                # Keep only the most recent messages
                 # Keep system message (first) + recent messages
-                keep_count = MAX_CONTEXT_MESSAGES - 1  # -1 for system message
+                keep_count = keep_target - 1  # -1 for system message
 
                 if len(history) > 0 and hasattr(history[0], 'role') and history[0].role == 'system':
                     # Keep system message + recent messages
@@ -652,7 +674,7 @@ class AgentCoordinator:
                 else:
                     # Just keep recent messages
                     if hasattr(session, 'events'):
-                        session.events = history[-MAX_CONTEXT_MESSAGES:]
+                        session.events = history[-keep_target:]
 
                 new_history = getattr(session, 'events', None) or []
                 removed_count = current_count - len(new_history)
@@ -661,16 +683,21 @@ class AgentCoordinator:
                 # Update message count
                 self.session_message_counts[session_key] = len(new_history)
 
-                # Notify user
-                new_history = getattr(session, 'events', None) or []
-                await MessageHandler.send_message(
-                    websocket,
-                    f"📝 已自动清理 {removed_count} 条旧消息，保留最近 {len(new_history)} 条消息以避免上下文超限。",
-                    message_type="info"
-                )
+                # Notify user (only for explicit truncation, not auto-clear)
+                if not target_count:
+                    new_history = getattr(session, 'events', None) or []
+                    await MessageHandler.send_message(
+                        websocket,
+                        "status",
+                        {
+                            "status": "info",
+                            "message": f"📝 已自动清理 {removed_count} 条旧消息，保留最近 {len(new_history)} 条"
+                        }
+                    )
 
         except Exception as e:
             logger.error(f"❌ Failed to truncate session history: {e}", exc_info=True)
+
 
     async def _create_session(
         self,

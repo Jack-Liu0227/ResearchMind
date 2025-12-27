@@ -36,6 +36,7 @@ class MessageHandler:
             "get_user_stats": self.handle_get_user_stats,
             "get_global_stats": self.handle_get_global_stats,
             "get_history": self.handle_get_history,  # 🆕 获取历史记录
+            "recover_session": self.handle_recover_session,  # 🆕 重连后恢复会话状态
         }
 
     async def handle_message(
@@ -666,3 +667,60 @@ class MessageHandler:
             "timestamp": datetime.now().isoformat()
         })
 
+    async def handle_recover_session(
+        self,
+        client_id: str,
+        websocket: Any,
+        data: dict,
+        agent_coordinator: "AgentCoordinator"
+    ) -> None:
+        """
+        🆕 处理会话恢复请求（重连后使用）
+
+        当 WebSocket 重新连接后，客户端会发送此消息请求恢复会话状态。
+        服务器会返回当前任务的状态，帮助前端正确显示 UI。
+
+        Args:
+            client_id: Client ID
+            websocket: WebSocket connection
+            data: 消息数据，包含 sessionId, clientId
+            agent_coordinator: Agent 协调器
+        """
+        session_id = data.get("sessionId")
+        logger.info(f"🔄 [Client:{client_id}] 收到会话恢复请求 [Session:{session_id}]")
+
+        try:
+            # 1) 发送认证确认
+            await self.send_message(websocket, "connected", {
+                "clientId": client_id,
+                "message": "Reconnected to ResearchMind",
+                "timestamp": datetime.now().isoformat(),
+                "isReconnection": True
+            })
+
+            # 2) 发送 agents 列表
+            await self.send_agent_list(websocket)
+
+            # 3) 检查是否有正在进行的任务
+            has_active_task = False
+            active_task_info = None
+
+            # 从 agent_coordinator 获取任务状态
+            if hasattr(agent_coordinator, 'get_active_task_status'):
+                active_task_info = agent_coordinator.get_active_task_status(client_id, session_id)
+                has_active_task = active_task_info is not None
+
+            # 4) 发送恢复状态
+            await self.send_message(websocket, "session_recovered", {
+                "sessionId": session_id,
+                "clientId": client_id,
+                "hasActiveTask": has_active_task,
+                "activeTask": active_task_info,
+                "timestamp": datetime.now().isoformat()
+            })
+
+            logger.info(f"✅ [Client:{client_id}] 会话恢复完成, 活跃任务: {has_active_task}")
+
+        except Exception as e:
+            logger.error(f"❌ 会话恢复失败: {e}", exc_info=True)
+            await self.send_error(websocket, f"会话恢复失败: {str(e)}")

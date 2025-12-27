@@ -1,0 +1,128 @@
+<mxfile host="app.diagrams.net" modified="2024-05-22T00:00:00.000Z" agent="Agent" etag="WjZ9" version="24.4.0" type="device">
+  <diagram id="ResearchMindArch" name="Architecture">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Frontend Layer -->
+        <mxCell id="frontend_bg" value="Frontend Layer (UI)" style="swimlane;whiteSpace=wrap;html=1;startSize=23;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="760" height="200" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="browser" value="Web Browser" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;fontColor=#333333;strokeColor=#666666;" vertex="1" parent="frontend_bg">
+          <mxGeometry x="280" y="40" width="200" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="react_app" value="React 18 + TypeScript + Vite" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="frontend_bg">
+          <mxGeometry x="230" y="100" width="300" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="ui_components" value="UI Components&#xa;(Chat, StructureViewer, FileViewer)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="frontend_bg">
+          <mxGeometry x="40" y="100" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="state_mgmt" value="State Management&#xa;(Zustand)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="frontend_bg">
+            <mxGeometry x="560" y="100" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Services Layer -->
+        <mxCell id="services_bg" value="Backend Services Layer (Python/FastAPI)" style="swimlane;whiteSpace=wrap;html=1;startSize=23;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="40" y="280" width="760" height="400" as="geometry" />
+        </mxCell>
+
+        <!-- Communication -->
+        <mxCell id="comm_layer" value="Communication Layer" style="group" vertex="1" connectable="0" parent="services_bg">
+             <mxGeometry x="40" y="40" width="680" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ws_server" value="WebSocket Server&#xa;(ws://localhost:8001)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="comm_layer">
+          <mxGeometry x="100" y="20" width="180" height="50" as="geometry" />
+        </mxCell>
+         <mxCell id="http_server" value="HTTP Server (FastAPI)&#xa;(http://localhost:8000)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="comm_layer">
+          <mxGeometry x="400" y="20" width="180" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Message Processing -->
+        <mxCell id="msg_handler" value="Message Handler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="services_bg">
+          <mxGeometry x="140" y="140" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <!-- Agent Layer -->
+        <mxCell id="agent_coord" value="Agent Coordinator&#xa;(Google ADK Runner)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1" vertex="1" parent="services_bg">
+          <mxGeometry x="250" y="220" width="260" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="session_svc" value="Session Service&#xa;(Base/InMemory)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="services_bg">
+           <mxGeometry x="60" y="220" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Data Layer -->
+        <mxCell id="data_proc" value="Data Processor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="services_bg">
+          <mxGeometry x="250" y="320" width="140" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="struct_conv" value="Structure Converter&#xa;(CIF Parser)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="services_bg">
+          <mxGeometry x="440" y="140" width="140" height="50" as="geometry" />
+        </mxCell>
+
+         <mxCell id="static_svc" value="Static File Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="services_bg">
+           <mxGeometry x="600" y="140" width="120" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Connections inside Services -->
+        <mxCell id="edge_ws_msg" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="services_bg" source="ws_server" target="msg_handler">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge_msg_agent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="services_bg" source="msg_handler" target="agent_coord">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge_http_conv" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="services_bg" source="http_server" target="struct_conv">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+         <mxCell id="edge_http_static" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="services_bg" source="http_server" target="static_svc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_agent_data" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="services_bg" source="agent_coord" target="data_proc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge_agent_sess" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="services_bg" source="agent_coord" target="session_svc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Cross-Layer Connections -->
+        <mxCell id="edge_react_ws" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=classic;startFill=1;" edge="1" parent="1" source="react_app" target="ws_server">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+                <mxPoint x="380" y="220" />
+                <mxPoint x="230" y="220" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl_ws" value="WebSocket" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="edge_react_ws">
+            <mxGeometry x="0" y="0" relative="1" as="geometry">
+                <mxPoint as="offset" />
+            </mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge_react_http" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=classic;startFill=1;" edge="1" parent="1" source="react_app" target="http_server">
+           <mxGeometry relative="1" as="geometry">
+             <Array as="points">
+                <mxPoint x="380" y="220" />
+                <mxPoint x="530" y="220" />
+            </Array>
+           </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl_http" value="HTTP/REST" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="edge_react_http">
+            <mxGeometry x="0" y="0" relative="1" as="geometry">
+                <mxPoint as="offset" />
+            </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

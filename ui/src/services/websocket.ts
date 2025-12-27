@@ -112,6 +112,7 @@ class WebSocketService {
 
         this.ws.onopen = () => {
           console.log('✅ WebSocket 已连接')
+          const wasReconnect = this.reconnectAttempts > 0
           this.isConnecting = false
           this.reconnectAttempts = 0
           this.notifyConnectionHandlers(true)
@@ -121,6 +122,12 @@ class WebSocketService {
 
           // 🆕 发送 JWT Token 进行认证
           this.sendAuthToken()
+
+          // 🆕 如果是重连，请求恢复任务状态
+          if (wasReconnect) {
+            console.log('🔄 重连成功，请求恢复会话状态...')
+            this.requestSessionRecovery()
+          }
 
           resolve()
         }
@@ -513,6 +520,26 @@ class WebSocketService {
       this.ws.send(JSON.stringify(message))
     } else {
       console.warn('⚠️ WebSocket 未连接，无法请求全局统计')
+    }
+  }
+
+  /**
+   * 🆕 请求恢复会话状态（重连后使用）
+   * 通知服务器重新发送当前会话的任务状态
+   */
+  requestSessionRecovery(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const sessionId = localStorage.getItem('researchmind_session_id')
+      const message = {
+        type: 'recover_session',
+        sessionId: sessionId || undefined,
+        clientId: this.clientId,
+        timestamp: new Date().toISOString(),
+      }
+      console.log('🔄 [WebSocket] 请求恢复会话状态:', { sessionId, clientId: this.clientId })
+      this.ws.send(JSON.stringify(message))
+    } else {
+      console.warn('⚠️ WebSocket 未连接，无法请求会话恢复')
     }
   }
 }

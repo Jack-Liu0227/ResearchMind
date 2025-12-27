@@ -108,21 +108,36 @@ const StructureList: React.FC = () => {
       return
     }
 
-    const structures = currentSessionStructures
-      .filter(s => selectedStructureIds.includes(s.id))
-      .map(s => ({
-        // 🔧 优先使用后端返回的绝对路径 cif_file_path
-        filename: (s as any).cif_file_path || (s as any).cifFilename || `${s.formula}.cif`,
-        source: s.source?.database === 'Upload' ? 'upload' :
-          s.source?.database === 'Relaxed' ? 'relax' :
-            s.source?.database === 'Generated' ? 'generate' : 'upload'
-      }))
+    // 🆕 过滤掉已弛豫的结构
+    const selectedStructs = currentSessionStructures.filter(s => selectedStructureIds.includes(s.id))
+    const nonRelaxedStructs = selectedStructs.filter(s => s.source?.database !== 'Relaxed')
+    const alreadyRelaxedCount = selectedStructs.length - nonRelaxedStructs.length
+
+    if (alreadyRelaxedCount > 0) {
+      toast(`⚠️ 已自动跳过 ${alreadyRelaxedCount} 个已弛豫的结构`, {
+        icon: 'ℹ️',
+        duration: 3000
+      })
+    }
+
+    if (nonRelaxedStructs.length === 0) {
+      toast.error('所有选中的结构都已弛豫，无需再次弛豫')
+      return
+    }
+
+    const structures = nonRelaxedStructs.map(s => ({
+      // 🔧 优先使用后端返回的绝对路径 cif_file_path
+      filename: (s as any).cif_file_path || (s as any).cifFilename || `${s.formula}.cif`,
+      source: s.source?.database === 'Upload' ? 'upload' :
+        s.source?.database === 'Relaxed' ? 'relax' :
+          s.source?.database === 'Generated' ? 'generate' : 'upload'
+    }))
 
     const structuresJson = JSON.stringify(structures)
-    const message = `请对选中的 ${selectedCount} 个结构进行弛豫计算。
+    const message = `请对选中的 ${nonRelaxedStructs.length} 个结构进行弛豫计算。
 ⚠️ 重要指令：
 1.所有结构均已包含绝对文件路径（filename字段）。
-2.请【直接】调用 relax_structure 工具处理这 ${selectedCount} 个文件。
+2.请【直接】调用 relax_structure 工具处理这 ${nonRelaxedStructs.length} 个文件。
 3.【绝对不要】调用 extract_and_validate_cif，也不要试图重新提取文件。
 4.必须一次性处理所有文件，不要遗漏数据库来源的文件。
 
@@ -132,7 +147,7 @@ structures=${structuresJson}
 device="cuda"`
 
     wsService.sendMessage(message, 'simulation_agent', sessionId)
-    toast.success(`已发送弛豫请求（${selectedCount} 个结构）`)
+    toast.success(`已发送弛豫请求（${nonRelaxedStructs.length} 个结构）`)
     setShowActions(false)
   }
 

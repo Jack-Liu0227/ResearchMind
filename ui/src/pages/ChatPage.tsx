@@ -167,6 +167,8 @@ const ChatPage: React.FC = () => {
       metadata.phonon_dos_csv_path ? extractFileName(metadata.phonon_dos_csv_path) : undefined
     )
 
+    // 注意：CIF 文件不在数据栏显示，只有 CSV 和 MD 文件需要显示
+
     console.log('📄 [createSessionFilesFromMetadata] 创建了', files.length, '个文件:', files.map(f => f.name))
     return files
   }
@@ -919,6 +921,29 @@ const ChatPage: React.FC = () => {
           duration: 6000,
           icon: '❌'
         })
+      } else if ((message.type as any) === 'session_recovered' && message.data) {
+        // 🆕 处理会话恢复消息（WebSocket 重连后）
+        console.log('🔄 [会话恢复] 收到恢复确认:', message.data)
+
+        // 检查是否有活跃任务
+        if (message.data.hasActiveTask && message.data.activeTask) {
+          console.log('🔄 [会话恢复] 发现活跃任务:', message.data.activeTask)
+          // 恢复加载状态
+          setIsLoading(true)
+          setLoadingMessage(`🔄 恢复中: ${message.data.activeTask.description || '正在处理...'}`)
+        } else {
+          // 没有活跃任务，确保清除加载状态
+          console.log('🔄 [会话恢复] 无活跃任务，清除加载状态')
+          setIsLoading(false)
+          setLoadingMessage('')
+          toast.dismiss('agent-processing-toast')
+        }
+
+        toast.success('已恢复连接', { duration: 2000, icon: '🔄' })
+      } else if ((message.type as any) === 'connected' && message.data?.isReconnection) {
+        // 🆕 处理重连成功消息
+        console.log('🔄 [重连] WebSocket 重连成功')
+        toast.success('重新连接成功', { duration: 2000, icon: '🔄' })
       }
     })
 
@@ -929,6 +954,17 @@ const ChatPage: React.FC = () => {
         toast.success('重新连接成功')
       } else {
         toast.error('连接已断开')
+        // 🆕 连接断开时，设置超时后自动清除加载状态，避免卡住
+        setTimeout(() => {
+          const currentLoading = useAppStore.getState()
+          // 如果 5 秒后仍然断开且仍在加载中，清除加载状态
+          if (!wsService.isConnected) {
+            console.log('⚠️ [超时恢复] 连接断开超过 5 秒，清除加载状态')
+            setIsLoading(false)
+            setLoadingMessage('')
+            toast.dismiss('agent-processing-toast')
+          }
+        }, 5000)
       }
     })
 

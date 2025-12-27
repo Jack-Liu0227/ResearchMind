@@ -566,6 +566,30 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
     setExpandedDataIndex(expandedDataIndex === index ? null : index)
   }
 
+  // 🆕 下载 CSV 数据文件
+  const handleDownloadCsv = async (csvPath: string, defaultFilename: string) => {
+    try {
+      const url = resolveFileUrl(csvPath)
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error(`下载失败: ${response.statusText}`)
+      }
+      const blob = await response.blob()
+      const downloadUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = defaultFilename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(downloadUrl)
+      toast.success('数据已下载')
+    } catch (error) {
+      console.error('CSV download failed:', error)
+      toast.error('下载失败，请稍后重试')
+    }
+  }
+
   if (!phononImages.length) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-gray-500">
@@ -655,6 +679,34 @@ const PhononTab: React.FC<PhononTabProps> = ({ phononImages, onImageFullscreen, 
             {/* 🆕 原始数据展示区域 */}
             {hasRawData && isDataExpanded && (
               <div className="border-t border-gray-200 bg-gray-50 p-3 space-y-3">
+                {/* 🆕 快速下载按钮区域 */}
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {image.dispersionCsvPath && (
+                    <button
+                      onClick={() => handleDownloadCsv(
+                        image.dispersionCsvPath!,
+                        image.dispersionCsvPath!.split('/').pop() || 'phonon_dispersion.csv'
+                      )}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      下载色散数据
+                    </button>
+                  )}
+                  {image.dosCsvPath && (
+                    <button
+                      onClick={() => handleDownloadCsv(
+                        image.dosCsvPath!,
+                        image.dosCsvPath!.split('/').pop() || 'phonon_dos.csv'
+                      )}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md transition-colors border border-green-200"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      下载DOS数据
+                    </button>
+                  )}
+                </div>
+
                 {image.dispersionCsvPath && (
                   <div className="bg-white rounded p-2">
                     <h5 className="text-xs font-medium text-gray-700 mb-2">
@@ -1132,9 +1184,9 @@ session_id="${sessionId}"`
 
     // 显示提示
     if (newSelectedIds.length > 0) {
-      toast.info(`已选择 ${newSelectedIds.length} 篇文献（点击"确认选择"按钮同步）`)
+      toast(`已选择 ${newSelectedIds.length} 篇文献（点击"确认选择"按钮同步）`, { icon: 'ℹ️' })
     } else {
-      toast.info('已清空选择')
+      toast('已清空选择', { icon: 'ℹ️' })
     }
   }
 

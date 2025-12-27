@@ -166,6 +166,7 @@ def _resolve_structures(session_id: str, structures: List[Dict[str, Any]]) -> Tu
     1. cif_file_path: Direct absolute path to CIF file (from database queries)
     2. filename + source: Resolve path based on session storage
     3. cifContent: Direct CIF content (no file needed)
+    4. filename as full path: If filename contains path separators, treat as path
     
     Returns (resolved_list, missing_filenames_list)
     """
@@ -210,6 +211,26 @@ def _resolve_structures(session_id: str, structures: List[Dict[str, Any]]) -> Tu
         if not filename:
             logger.warning(f"⚠️ Structure {i} missing filename and no cif_file_path/cifContent, skipping.")
             continue
+        
+        # 🆕 Priority 3.1: Check if filename is actually a full path (contains path separators)
+        # This handles cases where frontend passes full path as filename for generated structures
+        if os.path.sep in filename or '/' in filename or '\\' in filename:
+            full_path = Path(filename)
+            if full_path.exists() and full_path.is_file():
+                try:
+                    content = full_path.read_text(encoding='utf-8')
+                    resolved.append({
+                        "filename": full_path.name,  # Use just the filename for display
+                        "path": full_path,
+                        "content": content,
+                        "source": source
+                    })
+                    logger.info(f"✅ Resolved structure {i} from full path in filename: {full_path}")
+                    continue
+                except Exception as e:
+                    logger.error(f"❌ Error reading full path {filename}: {e}")
+                    missing.append(full_path.name)
+                    continue
             
         cif_path = _resolve_structure_path_by_source(session_id, filename, source)
         if cif_path and cif_path.exists():
@@ -355,19 +376,38 @@ async def calculate_phonon(
 
                 if result.get("success"):
                     completed += 1
-                    # Process images (simplified)
+                    # Process images with CSV paths
                     url_prefix = f"/api/images/phonon/{session_id}/phonon_results/{result.get('structure_directory')}"
+                    
+                    # 🆕 构建 CSV URL 路径
+                    dispersion_csv_url = None
+                    dos_csv_url = None
+                    
+                    if dispersion_csv := result.get("phonon_dispersion_csv"):
+                        dispersion_csv_name = Path(dispersion_csv).name
+                        dispersion_csv_url = f"{url_prefix}/{dispersion_csv_name}"
+                    
+                    if dos_csv := result.get("phonon_dos_csv"):
+                        dos_csv_name = Path(dos_csv).name
+                        dos_csv_url = f"{url_prefix}/{dos_csv_name}"
                     
                     for plot_type, name_suffix in [("phonon_band_plot_path", "Dispersion"), ("phonon_dos_plot_path", "DOS")]:
                         if path := result.get(plot_type):
                             p = Path(path)
                             if p.exists():
-                                all_images.append({
+                                image_data = {
                                     "name": f"{cif_file.stem} - Phonon {name_suffix}",
                                     "url": f"{url_prefix}/{p.name}",
                                     "type": f"phonon_{name_suffix.lower()}",
                                     "available": True
-                                })
+                                }
+                                # 🆕 添加 CSV 路径到图片数据
+                                if dispersion_csv_url:
+                                    image_data["dispersionCsvPath"] = dispersion_csv_url
+                                if dos_csv_url:
+                                    image_data["dosCsvPath"] = dos_csv_url
+                                
+                                all_images.append(image_data)
                 else:
                     failed += 1
                 
