@@ -385,6 +385,17 @@ class StructureConverter:
                 # Also keep in metadata for backward compatibility
                 standardized["metadata"]["cifData"] = cif_data
 
+            # 🆕 关键修复：保留 cif_file_path 字段（用于模拟计算）
+            cif_file_path = data.get("cif_file_path")
+            if cif_file_path:
+                standardized["cif_file_path"] = cif_file_path
+                logger.info(f"📁 Preserving cif_file_path: {cif_file_path}")
+
+            # 🆕 保留 cifFilename 字段
+            cif_filename = data.get("cifFilename")
+            if cif_filename:
+                standardized["cifFilename"] = cif_filename
+
             # Ensure properties field exists
             if "properties" not in standardized:
                 standardized["properties"] = {}
@@ -492,6 +503,10 @@ class StructureConverter:
                                     if k not in ['formula', 'spaceGroup', 'latticeParameters', 'atoms', 'properties', 'cifContent'] and v is not None:
                                         preserved_fields[k] = v
 
+                                # 🆕 确保 cif_file_path 被保留
+                                if 'cif_file_path' in preserved_fields:
+                                    logger.info(f"📁 Preserving cif_file_path in analyzed structure: {preserved_fields['cif_file_path']}")
+
                                 # 合并：分析后的数据优先，只添加额外字段
                                 analyzed.update(preserved_fields)
 
@@ -534,6 +549,13 @@ class StructureConverter:
                                 database_type
                             )
                             if converted:
+                                # 🆕 关键修复：保留原始 struct 中的 cif_file_path
+                                if struct.get("cif_file_path"):
+                                    converted["cif_file_path"] = struct["cif_file_path"]
+                                    logger.info(f"📁 Preserved cif_file_path: {struct['cif_file_path']}")
+                                if struct.get("cifFilename"):
+                                    converted["cifFilename"] = struct["cifFilename"]
+                                
                                 # Add additional metadata from source database
                                 if "metadata" not in converted:
                                     converted["metadata"] = {}

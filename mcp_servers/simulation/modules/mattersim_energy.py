@@ -1148,11 +1148,22 @@ def relax_structure_impl(
         # Step 8: Save relaxed structure to CIF
         relaxed_cif_path = temp_dir_path / f"relaxed_{cif_filename}"
         try:
+            # Validate relaxed structure before saving
+            if relaxed_structure is None or len(relaxed_structure) == 0:
+                raise ValueError("Relaxed structure is empty or None")
+
             ase_io.write(str(relaxed_cif_path), relaxed_structure, format='cif')
+
+            # Verify file exists and has content
+            if not relaxed_cif_path.exists() or relaxed_cif_path.stat().st_size == 0:
+                raise IOError(f"Failed to write CIF file: {relaxed_cif_path}")
 
             # Read the relaxed CIF content
             with open(relaxed_cif_path, 'r') as f:
                 relaxed_cif_content = f.read()
+
+            if not relaxed_cif_content.strip():
+                 raise ValueError("Generated CIF content is empty")
 
             # Encode to base64
             relaxed_cif_base64 = base64.b64encode(relaxed_cif_content.encode('utf-8')).decode('utf-8')
@@ -1160,9 +1171,11 @@ def relax_structure_impl(
             logger.info("Saved relaxed structure to CIF", path=str(relaxed_cif_path))
 
         except Exception as e:
-            logger.warning("Failed to save relaxed structure", error=str(e))
-            relaxed_cif_content = ""
-            relaxed_cif_base64 = ""
+            logger.error("Failed to save relaxed structure", error=str(e))
+            return {
+                "success": False,
+                "error": f"Failed to save relaxed structure to CIF: {str(e)}"
+            }
 
         # Step 9: Calculate structure changes
         try:

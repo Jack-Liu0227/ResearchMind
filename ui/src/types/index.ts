@@ -150,6 +150,8 @@ export interface CrystalStructure {
   }
   atoms: Atom[]
   cifContent?: string  // CIF 文件内容（统一字段）
+  cif_file_path?: string  // 🆕 CIF 文件在服务器上的绝对路径
+  cifFilename?: string  // 🆕 CIF 文件名
   properties?: {
     bandGap?: number
     density?: number

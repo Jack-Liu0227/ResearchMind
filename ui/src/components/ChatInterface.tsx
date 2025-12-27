@@ -7,6 +7,7 @@ import { useAppStore } from '../store/useAppStore'
 import { wsService } from '../services/websocket'
 import { APP_CONFIG, API_CONFIG } from '../constants'
 import { parseCIF as apiParseCIF, checkAPIHealthSafe as checkAPIHealth, resolveFileUrl } from '../utils/apiClient'
+import { uploadFile } from '../services/api'
 import { copyToClipboard } from '../utils'
 
 const ChatInterface: React.FC = () => {
@@ -357,44 +358,56 @@ const ChatInterface: React.FC = () => {
 
     // 读取 CIF 文件内容并解析，同时作为附件发送给后端以便Agent处理
     try {
-      const apiAvailable = await checkAPIHealth()
       const cifFiles = uploadedFiles.filter(f => f.name.toLowerCase().endsWith('.cif'))
 
       const attachments: Array<{ filename: string; content: string }> = []
+      
+      // 🔧 修复：使用后端 API 上传文件，获取 cif_file_path
+      // 这样后续模拟计算可以通过路径找到文件
       for (const file of cifFiles) {
         const fileContent = await file.text()
         attachments.push({ filename: file.name, content: fileContent })
 
-        // 本地解析用于3D预览，不阻断发送
         try {
-          let structure: any = null
-          if (apiAvailable) {
-            structure = await apiParseCIF(fileContent)
-            const conventionalStructure = await apiParseCIF(fileContent, true)
-            if (structure && conventionalStructure) {
-              structure.source = {
-                database: 'Upload',
-                materialId: structure.id,
-                retrievedAt: new Date(),
-              }
-              structure.cifContent = fileContent
-              // 🔧 Fix: Ensure we store the original filename so backend can find it
-              structure.cifFilename = file.name
-              structure.metadata = {
-                ...structure.metadata,
-                originalFilename: file.name,
-                conventionalStructure,
-              }
-            }
-          }
-          if (structure) {
+          // 调用后端上传 API，它会保存文件并返回包含 cif_file_path 的结构数据
+          const response = await uploadFile(file, 'structure')
+          
+          if (response.data?.success && response.data?.structures?.length > 0) {
+            const structure = response.data.structures[0]
+            // 后端返回的结构数据已包含 cif_file_path
             setCurrentStructure(structure)
             addToCurrentSessionStructures(structure)
             toast.success(`已加载结构 ${structure.formula}`)
+            console.log('📁 Uploaded structure with cif_file_path:', structure.cif_file_path)
+          } else {
+            // 后端上传失败，回退到本地解析（但没有 cif_file_path）
+            console.warn('Backend upload failed, falling back to local parsing')
+            const apiAvailable = await checkAPIHealth()
+            if (apiAvailable) {
+              const structure = await apiParseCIF(fileContent)
+              const conventionalStructure = await apiParseCIF(fileContent, true)
+              if (structure && conventionalStructure) {
+                structure.source = {
+                  database: 'Upload',
+                  materialId: structure.id,
+                  retrievedAt: new Date(),
+                }
+                structure.cifContent = fileContent
+                structure.cifFilename = file.name
+                structure.metadata = {
+                  ...structure.metadata,
+                  originalFilename: file.name,
+                  conventionalStructure,
+                }
+                setCurrentStructure(structure)
+                addToCurrentSessionStructures(structure)
+                toast.success(`已加载结构 ${structure.formula}（本地解析，无服务器路径）`)
+              }
+            }
           }
         } catch (error) {
-          console.error('CIF 解析失败:', error)
-          toast.error(`CIF 解析失败: ${file.name}`)
+          console.error('CIF 上传/解析失败:', error)
+          toast.error(`CIF 处理失败: ${file.name}`)
         }
       }
 

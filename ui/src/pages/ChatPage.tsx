@@ -544,6 +544,7 @@ const ChatPage: React.FC = () => {
 
         structures.forEach((structure: any) => {
           console.log('➕ 添加结构到当前会话:', structure.id || 'no-id', structure.formula || 'no-formula')
+          console.log('📁 cif_file_path:', structure.cif_file_path || 'N/A')  // 🆕 调试日志
           // 只添加到当前会话结构列表，不添加到全局列表
           addToCurrentSessionStructures(structure)
         })

@@ -768,9 +768,50 @@ class HTTPServer:
                 # Mark as uploaded
                 structure = StructureConverter.mark_as_uploaded(structure)
 
+                # 🆕 关键修复：保存 CIF 文件到磁盘并添加 cif_file_path
+                # 这样后续的模拟工具可以通过路径找到文件，而不仅是文件名
+                try:
+                    from mcp_servers.shared.storage_manager import get_session_storage_path
+                    from utils.paths import session_data_root
+                    
+                    # 从请求头获取 session_id（如果有）
+                    # 如果没有，使用一个默认的 "uploads" 目录
+                    # 注意：前端在发送文件时应该在请求中包含 session_id
+                    import uuid
+                    default_session_id = f"upload_{uuid.uuid4().hex[:8]}"
+                    
+                    # 尝试从查询参数或请求头获取 session_id
+                    # 这里我们使用一个通用的 uploads 目录
+                    cif_dir = session_data_root() / "simulation" / "uploads" / "cif"
+                    cif_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # 生成唯一文件名（包含时间戳避免冲突）
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    safe_filename = file.filename.replace(" ", "_")
+                    unique_filename = f"{timestamp}_{safe_filename}"
+                    cif_file_path = cif_dir / unique_filename
+                    
+                    # 保存文件
+                    cif_file_path.write_text(cif_content, encoding='utf-8')
+                    logger.info(f"💾 Saved uploaded CIF to: {cif_file_path}")
+                    
+                    # 添加文件路径到结构数据
+                    structure["cif_file_path"] = str(cif_file_path)
+                    structure["cifFilename"] = unique_filename
+                    if "metadata" not in structure:
+                        structure["metadata"] = {}
+                    structure["metadata"]["cif_file_path"] = str(cif_file_path)
+                    structure["metadata"]["original_filename"] = file.filename
+                    
+                except Exception as save_error:
+                    logger.warning(f"⚠️ Could not save CIF to disk: {save_error}")
+                    # 继续处理，但没有文件路径
+
                 logger.info(f"✅ Uploaded structure: {structure.get('formula', 'Unknown')} from {file.filename}")
                 logger.info(f"📋 Final structure source: {structure.get('source')}")
                 logger.info(f"📋 Final structure metadata: {structure.get('metadata')}")
+                logger.info(f"📋 CIF file path: {structure.get('cif_file_path', 'N/A')}")
 
                 # Prepare attachment payload so frontend can forward to agent via WebSocket
                 attachment = {
@@ -987,8 +1028,38 @@ class HTTPServer:
                         # Mark as uploaded
                         structure = StructureConverter.mark_as_uploaded(structure)
 
+                        # 🆕 关键修复：保存 CIF 文件到磁盘并添加 cif_file_path
+                        try:
+                            from utils.paths import session_data_root
+                            from datetime import datetime
+                            
+                            cif_dir = session_data_root() / "simulation" / "uploads" / "cif"
+                            cif_dir.mkdir(parents=True, exist_ok=True)
+                            
+                            # 生成唯一文件名
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                            safe_filename = file.filename.replace(" ", "_")
+                            unique_filename = f"{timestamp}_{safe_filename}"
+                            cif_file_path = cif_dir / unique_filename
+                            
+                            # 保存文件
+                            cif_file_path.write_text(cif_content, encoding='utf-8')
+                            logger.info(f"💾 Saved uploaded CIF to: {cif_file_path}")
+                            
+                            # 添加文件路径到结构数据
+                            structure["cif_file_path"] = str(cif_file_path)
+                            structure["cifFilename"] = unique_filename
+                            if "metadata" not in structure:
+                                structure["metadata"] = {}
+                            structure["metadata"]["cif_file_path"] = str(cif_file_path)
+                            structure["metadata"]["original_filename"] = file.filename
+                            
+                        except Exception as save_error:
+                            logger.warning(f"⚠️ Could not save CIF to disk: {save_error}")
+
                         structures.append(structure)
                         logger.info(f"✅ Uploaded structure: {structure.get('formula', 'Unknown')} from {file.filename}")
+                        logger.info(f"📋 CIF file path: {structure.get('cif_file_path', 'N/A')}")
 
                     except UnicodeDecodeError as e:
                         error_msg = f"{file.filename}: Invalid file encoding (must be UTF-8)"

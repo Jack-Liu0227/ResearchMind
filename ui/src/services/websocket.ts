@@ -66,6 +66,10 @@ class WebSocketService {
   // 🔧 优化：请求去重 - 跟踪待处理的消息
   private pendingMessages = new Set<string>() // 存储消息内容的哈希
 
+  // 🔧 优化：上次收到消息的时间戳 (用于看门狗检测僵尸连接)
+  private lastMessageTime: number = Date.now()
+  private readonly WATCHDOG_TIMEOUT = 120000 // 120秒 (2分钟) 无消息才视为僵尸连接
+
   constructor(url?: string) {
     this.url = url || API_CONFIG.WS_URL
     console.log('🔧 WebSocketService constructor - url param:', url)
@@ -115,9 +119,10 @@ class WebSocketService {
           const wasReconnect = this.reconnectAttempts > 0
           this.isConnecting = false
           this.reconnectAttempts = 0
+          this.lastMessageTime = Date.now() // 重置心跳计时
           this.notifyConnectionHandlers(true)
 
-          // 启动保活心跳
+          // 启动保活心跳 & 看门狗
           this.startHeartbeat()
 
           // 🆕 发送 JWT Token 进行认证
@@ -134,6 +139,9 @@ class WebSocketService {
 
         this.ws.onmessage = (event) => {
           try {
+            // 收到任何消息都更新活跃时间
+            this.lastMessageTime = Date.now()
+
             const message: WebSocketMessage = JSON.parse(event.data)
 
             // 处理心跳响应 (仅记录日志，不作超时处理)
@@ -188,25 +196,69 @@ class WebSocketService {
     }
   }
 
+  // 🔧 优化：使用 Web Worker 进行心跳保活，防止后台页面的定时器被浏览器冻结
+  private heartbeatWorker: Worker | null = null
+
   /**
-   * 启动保活心跳
-   * 仅发送Ping以保持链路活跃（防止Nginx/防火墙超时），不主动检测超时断开
+   * 启动保活心跳 & 看门狗机制
+   * 1. 发送Ping保持链路活跃
+   * 2. 检查 lastMessageTime，如果超时未收到消息（僵尸连接），主动断开重连
    */
   private startHeartbeat(): void {
-    this.stopHeartbeat() // 先清除旧的定时器
+    this.stopHeartbeat() // 先清除旧的定时器/Worker
 
-    this.heartbeatInterval = window.setInterval(() => {
-      if (this.isConnected) {
-        // console.debug('💓 发送保活 Ping')
-        this.send({ type: 'ping', data: { timestamp: Date.now() } })
+    // 初始化 Worker (如果尚未初始化)
+    if (!this.heartbeatWorker) {
+      try {
+        // 使用 Vite 的 worker 导入方式
+        this.heartbeatWorker = new Worker(new URL('./heartbeat.worker.ts', import.meta.url), { type: 'module' });
+
+        this.heartbeatWorker.onmessage = (e) => {
+          if (e.data.type === 'tick') {
+            if (this.isConnected) {
+              const now = Date.now()
+              // 🐕 看门狗检查
+              if (now - this.lastMessageTime > this.WATCHDOG_TIMEOUT) {
+                console.warn(`🐕 Watchdog: Connection dead (no data for ${now - this.lastMessageTime}ms). Reconnecting...`)
+                if (this.ws) this.ws.close(4000, 'Watchdog timeout');
+                return;
+              }
+              // 发送 Ping
+              this.send({ type: 'ping', data: { timestamp: now } });
+            }
+          }
+        };
+      } catch (e) {
+        console.error('❌ Failed to create heartbeat worker:', e);
+        // Fallback to setInterval if Worker fails
+        this.heartbeatInterval = window.setInterval(() => {
+          // ... interval fallback logic ...
+          if (this.isConnected) {
+            const now = Date.now();
+            if (now - this.lastMessageTime > this.WATCHDOG_TIMEOUT) {
+              if (this.ws) this.ws.close(4000, 'Watchdog timeout');
+              return;
+            }
+            this.send({ type: 'ping', data: { timestamp: now } });
+          }
+        }, this.HEARTBEAT_INTERVAL);
+        return;
       }
-    }, this.HEARTBEAT_INTERVAL)
+    }
+
+    // 启动 Worker 计时
+    this.heartbeatWorker.postMessage({ type: 'start', interval: this.HEARTBEAT_INTERVAL });
   }
 
   /**
    * 停止心跳检测
    */
   private stopHeartbeat(): void {
+    if (this.heartbeatWorker) {
+      this.heartbeatWorker.postMessage({ type: 'stop' });
+      // Don't terminate, reuse the worker instance
+    }
+
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval)
       this.heartbeatInterval = null

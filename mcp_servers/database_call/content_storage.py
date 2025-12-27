@@ -129,6 +129,9 @@ def optimize_structure_data(
             cif_path = save_structure_to_file(structure_data, session_id, database=database) # 🆕 Pass database
             if cif_path:
                 optimized['cif_file_path'] = cif_path
+                # 🆕 添加 cifFilename，使用保存的文件名
+                import os
+                optimized['cifFilename'] = os.path.basename(cif_path)
                 # 🔧 修复：保留 cifContent 供前端 3D 渲染使用
                 # 前端使用 cifContent 渲染结构，后端工具使用 cif_file_path
                 logger.info(f"✅ CIF saved to {cif_path}, cifContent retained for frontend")

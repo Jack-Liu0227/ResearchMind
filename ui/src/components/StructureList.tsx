@@ -125,18 +125,19 @@ const StructureList: React.FC = () => {
       return
     }
 
+    // 🔧 只传递 file_path 和 source
     const structures = nonRelaxedStructs.map(s => ({
-      // 🔧 优先使用后端返回的绝对路径 cif_file_path
-      filename: (s as any).cif_file_path || (s as any).cifFilename || `${s.formula}.cif`,
+      file_path: (s as any).cif_file_path,
       source: s.source?.database === 'Upload' ? 'upload' :
         s.source?.database === 'Relaxed' ? 'relax' :
-          s.source?.database === 'Generated' ? 'generate' : 'upload'
+          s.source?.database === 'Generated' ? 'generate' :
+            ['MP', 'OQMD', 'COD', 'AFLOW'].includes(s.source?.database || '') ? 'database' : 'upload'
     }))
 
     const structuresJson = JSON.stringify(structures)
     const message = `请对选中的 ${nonRelaxedStructs.length} 个结构进行弛豫计算。
 ⚠️ 重要指令：
-1.所有结构均已包含绝对文件路径（filename字段）。
+1.所有结构均已包含绝对文件路径（file_path字段）。
 2.请【直接】调用 relax_structure 工具处理这 ${nonRelaxedStructs.length} 个文件。
 3.【绝对不要】调用 extract_and_validate_cif，也不要试图重新提取文件。
 4.必须一次性处理所有文件，不要遗漏数据库来源的文件。
@@ -168,22 +169,23 @@ device="cuda"`
       })
     }
 
+    // 🔧 只传递 file_path 和 source
     const structures = selectedStructs.map(s => ({
-      // 🔧 优先使用后端返回的绝对路径 cif_file_path
-      filename: (s as any).cif_file_path || (s as any).cifFilename || `${s.formula}.cif`,
+      file_path: (s as any).cif_file_path,
       source: s.source?.database === 'Upload' ? 'upload' :
         s.source?.database === 'Relaxed' ? 'relax' :
-          s.source?.database === 'Generated' ? 'generate' : 'upload'
+          s.source?.database === 'Generated' ? 'generate' :
+            ['MP', 'OQMD', 'COD', 'AFLOW'].includes(s.source?.database || '') ? 'database' : 'upload'
     }))
 
     const structuresJson = JSON.stringify(structures)
     // 🔧 修改：声子计算不再内置弛豫，用户需要先单独弛豫
     const message = `请对选中的 ${selectedCount} 个结构进行声子计算。
 ⚠️ 重要指令：
-1.所有结构均已包含绝对文件路径（filename字段）。
-2.请【直接】调用 calculate_phonon 工具处理这 ${selectedCount} 个文件。
+1.所有结构均已包含绝对文件路径（file_path字段）。
+2.请【直接】调用 calculate_phonon 工具处理这 ${selectedCount} 个结构。
 3.【绝对不要】调用 extract_and_validate_cif。
-4.必须一次性处理所有文件。
+4.必须一次性处理所有结构。
 
 参数：
 session_id="${sessionId}"
@@ -203,22 +205,24 @@ device="cuda"`
       return
     }
 
+    // 🔧 只传递 file_path 和 source
     const structures = currentSessionStructures
       .filter(s => selectedStructureIds.includes(s.id))
       .map(s => ({
-        filename: (s as any).cif_file_path || (s as any).cifFilename || `${s.formula}.cif`,
+        file_path: (s as any).cif_file_path,
         source: s.source?.database === 'Upload' ? 'upload' :
           s.source?.database === 'Relaxed' ? 'relax' :
-            s.source?.database === 'Generated' ? 'generate' : 'upload'
+            s.source?.database === 'Generated' ? 'generate' :
+              ['MP', 'OQMD', 'COD', 'AFLOW'].includes(s.source?.database || '') ? 'database' : 'upload'
       }))
 
     const structuresJson = JSON.stringify(structures)
     const message = `请对选中的 ${selectedCount} 个结构进行静态能量计算。
 ⚠️ 重要指令：
-1.所有结构均已包含绝对文件路径（filename字段）。
-2.请【直接】调用 calculate_energy 工具处理这 ${selectedCount} 个文件。
+1.所有结构均已包含绝对文件路径（file_path字段）。
+2.请【直接】调用 calculate_energy 工具处理这 ${selectedCount} 个结构。
 3.【绝对不要】调用 extract_and_validate_cif。
-4.必须一次性处理所有文件。
+4.必须一次性处理所有结构。
 
 参数：
 session_id="${sessionId}"
@@ -236,23 +240,24 @@ device="cuda"`
       return
     }
 
+    // 🔧 只传递 file_path 和 source
     const structures = currentSessionStructures
       .filter(s => selectedStructureIds.includes(s.id))
       .map(s => ({
-        // 🔧 优先使用后端返回的绝对路径 cif_file_path
-        filename: (s as any).cif_file_path || (s as any).cifFilename || `${s.formula}.cif`,
+        file_path: (s as any).cif_file_path,
         source: s.source?.database === 'Upload' ? 'upload' :
           s.source?.database === 'Relaxed' ? 'relax' :
-            s.source?.database === 'Generated' ? 'generate' : 'upload'
+            s.source?.database === 'Generated' ? 'generate' :
+              ['MP', 'OQMD', 'COD', 'AFLOW'].includes(s.source?.database || '') ? 'database' : 'upload'
       }))
 
     const structuresJson = JSON.stringify(structures)
     const message = `请对选中的 ${selectedCount} 个结构进行热导率计算。
 ⚠️ 重要指令：
-1.所有结构均已包含绝对文件路径（filename字段）。
-2.请【直接】调用 calculate_kappa 工具处理这 ${selectedCount} 个文件。
+1.所有结构均已包含绝对文件路径（file_path字段）。
+2.请【直接】调用 calculate_kappa 工具处理这 ${selectedCount} 个结构。
 3.【绝对不要】调用 extract_and_validate_cif。
-4.必须一次性处理所有文件。
+4.必须一次性处理所有结构。
 
 参数：
 session_id="${sessionId}"
@@ -406,7 +411,7 @@ temperature=300.0`
             className="md:hidden fixed inset-0 bg-black/20 z-40"
             onClick={() => setShowActions(false)}
           />
-          <div className="md:static fixed bottom-0 left-0 right-0 z-[100] bg-white md:bg-gradient-to-r md:from-blue-50 md:to-indigo-50 border-t md:border-b md:border-t-0 border-blue-200 px-4 py-4 md:py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] md:shadow-none space-y-3 md:space-y-2 animate-in slide-in-from-bottom duration-200">
+          <div className="md:static fixed bottom-0 left-0 right-0 z-[100] bg-white md:bg-gradient-to-r md:from-blue-50 md:to-indigo-50 border-t md:border-b md:border-t-0 border-blue-200 px-4 pt-4 pb-32 md:py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] md:shadow-none space-y-3 md:space-y-2 animate-in slide-in-from-bottom duration-200">
             <div className="flex items-center justify-between md:block">
               <p className="text-sm font-medium text-gray-700 md:text-gray-600 md:text-xs md:font-normal">
                 对选中的 {selectedCount} 个结构执行计算：

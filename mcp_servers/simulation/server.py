@@ -109,6 +109,7 @@ def _resolve_structure_path_by_source(session_id: str, filename: str, source: st
         pass
 
     # Security: Ensure filename is just a name, not a path
+    original_filename = filename
     filename = Path(filename).name
     
     source_lower = str(source).lower()
@@ -119,13 +120,13 @@ def _resolve_structure_path_by_source(session_id: str, filename: str, source: st
     elif source_lower in ["relax", "relaxed", "relaxed_structures"]:
         priority = ["relaxed_structures"]
     elif source_lower in ["generate", "generated", "generated_structures"]:
-        priority = ["generated_structures"]
+        priority = ["generated_structures", "generated"]  # 🆕 Add "generated" alias
     elif source_lower in ["database", "db", "mp", "oqmd", "cod", "aflow"]:
         # 🆕 数据库检索的结构
         priority = ["database"]
     
     # Add fallbacks (包含 database 目录)
-    search_order = priority + [t for t in ["relaxed_structures", "database", "cif", "uploads", "generated_structures"] if t not in priority]
+    search_order = priority + [t for t in ["relaxed_structures", "database", "cif", "uploads", "generated_structures", "generated"] if t not in priority]
     
     for data_type in search_order:
         try:
@@ -138,10 +139,10 @@ def _resolve_structure_path_by_source(session_id: str, filename: str, source: st
             # 2. Fuzzy match (prefix/suffix/containment)
             # Useful when requested "NaCl.cif" but stored as "MP_NaCl_123.cif"
             filename_stem = Path(filename).stem
-            filename_suffix = Path(filename).suffix
+            filename_suffix = Path(filename).suffix or ".cif"  # 🆕 Default to .cif if no suffix
             
             # List all files in directory
-            candidates = list(storage_path.glob(f"*{filename_suffix}")) if filename_suffix else list(storage_path.glob("*"))
+            candidates = list(storage_path.glob(f"*{filename_suffix}"))
             
             for candidate in candidates:
                 # Check if the requested stem is part of the candidate name
@@ -150,31 +151,48 @@ def _resolve_structure_path_by_source(session_id: str, filename: str, source: st
                     logger.info(f"Using fuzzy match for structure: {filename} -> {candidate.name}")
                     return candidate
 
-            # 3. Recursive check for generated structures (already covered by fuzzy if flat, but keeping for nested)
-            if data_type == "generated_structures":
-                 if found := list(storage_path.rglob(filename)): return found[0]
-        except Exception:
+            # 3. Recursive check for generated structures 
+            # 🆕 Enhanced: Always do recursive search for generated_structures
+            if data_type in ["generated_structures", "generated"]:
+                # Try exact recursive match first
+                found = list(storage_path.rglob(filename))
+                if found: 
+                    logger.info(f"✅ Found via rglob exact: {found[0]}")
+                    return found[0]
+                
+                # 🆕 Try recursive fuzzy match (for nested directories)
+                found = list(storage_path.rglob(f"*{filename_stem}*{filename_suffix}"))
+                if found:
+                    logger.info(f"✅ Found via rglob fuzzy: {found[0]}")
+                    return found[0]
+                    
+        except Exception as e:
+            logger.debug(f"Error searching {data_type}: {e}")
             continue
 
+    logger.warning(f"⚠️ Could not resolve: {original_filename} (source={source}, session={session_id})")
     return None
 
 
 def _resolve_structures(session_id: str, structures: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
     Helper to resolve and read multiple structures.
-    Supports multiple input formats:
-    1. cif_file_path: Direct absolute path to CIF file (from database queries)
-    2. filename + source: Resolve path based on session storage
-    3. cifContent: Direct CIF content (no file needed)
-    4. filename as full path: If filename contains path separators, treat as path
+    Supports multiple input formats (checked in order):
+    1. cif_file_path/path/file_path: Direct absolute path to CIF file
+    2. filename containing full path: If filename contains path separators, treat as path
+    3. cifContent/cif_content: Direct CIF content (no file needed)
+    4. filename + source: Resolve path based on session storage
     
     Returns (resolved_list, missing_filenames_list)
     """
     resolved = []
     missing = []
     for i, struct in enumerate(structures, 1):
-        # 🆕 Priority 1: Check for direct cif_file_path (from database queries)
-        cif_file_path = struct.get("cif_file_path") or struct.get("path")
+        logger.debug(f"🔍 Resolving structure {i}: {struct}")
+        
+        # 🆕 Priority 1: Check for direct path fields (cif_file_path, path, file_path)
+        # Support multiple naming conventions used by different parts of the system
+        cif_file_path = struct.get("cif_file_path") or struct.get("path") or struct.get("file_path")
         if cif_file_path:
             cif_path = Path(cif_file_path)
             if cif_path.exists() and cif_path.is_file():
@@ -210,11 +228,20 @@ def _resolve_structures(session_id: str, structures: List[Dict[str, Any]]) -> Tu
         
         if not filename:
             logger.warning(f"⚠️ Structure {i} missing filename and no cif_file_path/cifContent, skipping.")
+            missing.append(f"structure_{i}_no_filename")
             continue
         
         # 🆕 Priority 3.1: Check if filename is actually a full path (contains path separators)
         # This handles cases where frontend passes full path as filename for generated structures
-        if os.path.sep in filename or '/' in filename or '\\' in filename:
+        # Also check for absolute paths on Windows (drive letter) and Unix (leading /)
+        is_full_path = (
+            os.path.sep in filename or 
+            '/' in filename or 
+            '\\' in filename or
+            (len(filename) > 2 and filename[1] == ':')  # Windows drive letter (e.g., D:\...)
+        )
+        
+        if is_full_path:
             full_path = Path(filename)
             if full_path.exists() and full_path.is_file():
                 try:
@@ -231,6 +258,10 @@ def _resolve_structures(session_id: str, structures: List[Dict[str, Any]]) -> Tu
                     logger.error(f"❌ Error reading full path {filename}: {e}")
                     missing.append(full_path.name)
                     continue
+            else:
+                logger.warning(f"⚠️ Full path in filename does not exist: {filename}, trying with just filename...")
+                # 🆕 Fix: Extract just the filename for session storage resolution
+                filename = full_path.name
             
         cif_path = _resolve_structure_path_by_source(session_id, filename, source)
         if cif_path and cif_path.exists():
@@ -273,6 +304,20 @@ async def calculate_phonon(
 ) -> Dict[str, Any]:
     """
     Calculate phonon spectra for selected structures (single or batch).
+    
+    Args:
+        session_id: Session ID.
+        structures: List of structures to process. Each item should be a dict with:
+                    - "file_path": (PREFERRED) The absolute path to the CIF file.
+                    - "cif_file_path": Alternative field name for absolute path.
+                    - "filename": (FALLBACK) The CIF filename (will be resolved via session storage).
+                    - "source": The source of the file ("upload", "relax", "generate", "database").
+        perform_relaxation: Whether to relax structures before phonon calculation.
+        device: Computing device ('cuda' or 'cpu').
+        supercell_matrix: Supercell matrix for phonon calculation.
+        amplitude: Displacement amplitude.
+        find_prim: Whether to find primitive cell.
+        keep_intermediate_files: Whether to keep intermediate files.
     """
     if not MATTERSIM_AVAILABLE:
         return {"success": False, "error": "MatterSim not available."}
@@ -456,6 +501,15 @@ async def calculate_energy(
 ) -> Dict[str, Any]:
     """
     Calculate energy properties for selected structures (single or batch) using MatterSim.
+    
+    Args:
+        session_id: Session ID.
+        structures: List of structures to process. Each item should be a dict with:
+                    - "file_path": (PREFERRED) The absolute path to the CIF file.
+                    - "cif_file_path": Alternative field name for absolute path.
+                    - "filename": (FALLBACK) The CIF filename (will be resolved via session storage).
+                    - "source": The source of the file ("upload", "relax", "generate", "database").
+        device: Computing device ('cuda' or 'cpu').
     """
     if not MATTERSIM_AVAILABLE:
         return {"success": False, "error": "MatterSim not available."}
@@ -520,6 +574,20 @@ async def relax_structure(
 ) -> Dict[str, Any]:
     """
     Perform structure relaxation for selected structures (single or batch).
+    
+    Args:
+        session_id: Session ID.
+        structures: List of structures to process. Each item should be a dict with:
+                    - "file_path": (PREFERRED) The absolute path to the CIF file.
+                    - "cif_file_path": Alternative field name for absolute path.
+                    - "filename": (FALLBACK) The CIF filename (will be resolved via session storage).
+                    - "source": The source of the file ("upload", "relax", "generate", "database").
+        device: Computing device ('cuda' or 'cpu').
+        optimizer: Optimization method ('BFGS', 'FIRE', 'LBFGS').
+        filter_type: Filter to apply ('ExpCellFilter', 'FrechetCellFilter', None).
+        constrain_symmetry: Whether to constrain symmetry during relaxation.
+        max_steps: Maximum optimization steps.
+        fmax: Force convergence criterion (eV/Å).
     """
     if not MATTERSIM_AVAILABLE:
         return {"success": False, "error": "MatterSim not available."}
@@ -546,12 +614,17 @@ async def relax_structure(
 
     for i, r in enumerate(resolved, 1):
         try:
-            logger.info(f"  ⚡ Relaxing {i}/{len(resolved)}: {r['filename']}")
+            logger.info(f"  ⚡ Relaxing {i}/{len(resolved)}: {r['filename']} (path: {r.get('path')})")
 
             result = relax_structure_impl(
                 r["content"], r["filename"], device, optimizer, filter_type,
                 constrain_symmetry, max_steps, fmax
             )
+            
+            # 🆕 Debug: Log result keys and success status
+            logger.info(f"  📋 Relax result for {r['filename']}: success={result.get('success')}, "
+                       f"has_content={bool(result.get('relaxed_cif_content'))}, "
+                       f"content_len={len(result.get('relaxed_cif_content', '')) if result.get('relaxed_cif_content') else 0}")
 
             # 🆕 Auto-retry logic for symmetry constraint failures
             if not result.get("success") and constrain_symmetry:
@@ -573,33 +646,82 @@ async def relax_structure(
                 relaxed_file_path = structures_dir / relaxed_filename
 
                 relaxed_file_path.write_text(result["relaxed_cif_content"], encoding='utf-8')
+                logger.info(f"  ✅ Saved relaxed structure: {relaxed_file_path}")
 
                 # Update result
                 result["relaxed_cif_file"] = str(relaxed_file_path)
                 result["relaxed_cif_filename"] = relaxed_filename
                 result["source_file"] = r["filename"]
+                result["source_path"] = str(r["path"]) if r.get("path") else None  # 🆕 添加原始路径
                 
                 # Convert to frontend format
                 if convert_cif_to_frontend_structure:
-                    frontend_structure = convert_cif_to_frontend_structure(
-                        result["relaxed_cif_content"],
-                        result.get("composition", "Unknown"),
-                        source="Relaxed"
-                    )
-                    
-                    if frontend_structure:
-                        frontend_structure["source"] = {"database": "Relaxed", "isRelaxed": True}
-                        frontend_structure["cifFilename"] = relaxed_filename  # 🆕 添加文件名引用
-                        frontend_structure["cif_file_path"] = str(relaxed_file_path)  # 🆕 添加完整文件路径
-                        frontend_structure["metadata"] = {
-                            "relaxation": {
-                                "initial_energy": result.get("initial_energy"),
-                                "final_energy": result.get("final_energy"),
-                                "energy_change": result.get("energy_change")
-                            },
-                            "source_file": r["filename"]  # 原始文件名
+                    try:
+                        frontend_structure = convert_cif_to_frontend_structure(
+                            result["relaxed_cif_content"],
+                            result.get("composition", "Unknown"),
+                            source="Relaxed"
+                        )
+                        
+                        if frontend_structure:
+                            frontend_structure["source"] = {"database": "Relaxed", "isRelaxed": True}
+                            frontend_structure["cifFilename"] = relaxed_filename  # 🆕 添加文件名引用
+                            frontend_structure["cif_file_path"] = str(relaxed_file_path)  # 🆕 添加完整文件路径
+                            frontend_structure["metadata"] = {
+                                "relaxation": {
+                                    "initial_energy": result.get("initial_energy"),
+                                    "final_energy": result.get("final_energy"),
+                                    "energy_change": result.get("energy_change")
+                                },
+                                "source_file": r["filename"]  # 原始文件名
+                            }
+                            result["frontend_structure"] = frontend_structure
+                            logger.info(f"  ✅ Created frontend_structure for {r['filename']}")
+                        else:
+                            # 🆕 Convert failed but file was saved, create minimal frontend_structure
+                            logger.warning(f"  ⚠️ convert_cif_to_frontend_structure returned None for {r['filename']}, creating minimal structure")
+                            result["frontend_structure"] = {
+                                "id": f"relaxed_{Path(r['filename']).stem}",
+                                "name": result.get("composition", "Unknown"),
+                                "formula": result.get("composition", "Unknown"),
+                                "source": {"database": "Relaxed", "isRelaxed": True},
+                                "cifFilename": relaxed_filename,
+                                "cif_file_path": str(relaxed_file_path),
+                                "cifContent": result.get("relaxed_cif_content", ""),
+                                "metadata": {
+                                    "relaxation": {
+                                        "initial_energy": result.get("initial_energy"),
+                                        "final_energy": result.get("final_energy"),
+                                        "energy_change": result.get("energy_change")
+                                    },
+                                    "source_file": r["filename"],
+                                    "conversion_failed": True
+                                }
+                            }
+                    except Exception as conv_e:
+                        logger.error(f"  ❌ Error converting to frontend structure: {conv_e}")
+                        # 🆕 Still provide file path even if conversion fails
+                        result["frontend_structure"] = {
+                            "id": f"relaxed_{Path(r['filename']).stem}",
+                            "name": result.get("composition", "Unknown"),
+                            "formula": result.get("composition", "Unknown"),
+                            "source": {"database": "Relaxed", "isRelaxed": True},
+                            "cifFilename": relaxed_filename,
+                            "cif_file_path": str(relaxed_file_path),
+                            "metadata": {"source_file": r["filename"], "conversion_error": str(conv_e)}
                         }
-                        result["frontend_structure"] = frontend_structure
+                else:
+                    # 🆕 Fallback when convert_cif_to_frontend_structure is not available
+                    logger.info(f"  ℹ️ convert_cif_to_frontend_structure not available, creating minimal structure")
+                    result["frontend_structure"] = {
+                        "id": f"relaxed_{Path(r['filename']).stem}",
+                        "name": result.get("composition", "Unknown"),
+                        "formula": result.get("composition", "Unknown"),
+                        "source": {"database": "Relaxed", "isRelaxed": True},
+                        "cifFilename": relaxed_filename,
+                        "cif_file_path": str(relaxed_file_path),
+                        "metadata": {"source_file": r["filename"]}
+                    }
 
                 if "relaxed_cif_content" in result:
                     del result["relaxed_cif_content"]
@@ -607,7 +729,18 @@ async def relax_structure(
                 completed += 1
             else:
                 failed += 1
-                logger.warning(f"  ❌ Relaxation failed for {r['filename']}: {result.get('error')}")
+                # 🆕 Enhanced error message for missing CIF content
+                if result.get("success") and not result.get("relaxed_cif_content"):
+                    error_msg = "计算完成但结果中缺少弛豫后的CIF文件信息。可能原因：结构过于复杂或模型对该材料预测能力有限"
+                    result["error"] = error_msg
+                    result["success"] = False
+                    logger.warning(f"  ❌ Relaxation for {r['filename']}: success=True but no CIF content")
+                else:
+                    error_msg = result.get("error") or "Unknown error"
+                    logger.warning(f"  ❌ Relaxation failed for {r['filename']}: {error_msg}")
+                
+                result["filename"] = r["filename"]
+                result["source_path"] = str(r["path"]) if r.get("path") else None
 
             results.append(result)
 
@@ -857,8 +990,10 @@ async def calculate_kappa(
     Args:
         session_id: Session ID.
         structures: List of structures to process. Each item should be a dict with:
-                    - "filename": The CIF filename.
-                    - "source": The source of the file ("upload", "relax", "generate").
+                    - "file_path": (PREFERRED) The absolute path to the CIF file.
+                    - "cif_file_path": Alternative field name for absolute path.
+                    - "filename": (FALLBACK) The CIF filename (will be resolved via session storage).
+                    - "source": The source of the file ("upload", "relax", "generate", "database").
         method: Calculation method ("kappa_p" or "kappa_mtp").
         temperature: Temperature in Kelvin.
         keep_files: Whether to keep intermediate files.
@@ -871,31 +1006,22 @@ async def calculate_kappa(
         session_id=session_id
     )
 
-    # 1. Resolve paths and read content for all structures
+    # 1. Use unified _resolve_structures to handle all input formats
+    # This supports: cif_file_path, filename with full path, filename+source, cifContent
+    resolved, missing = _resolve_structures(session_id, structures)
+    
+    if missing:
+        logger.warning(f"⚠️ Could not resolve {len(missing)} structures: {missing}")
+    
+    # Convert to format expected by calculate_kappa_from_cif_impl
     resolved_structures = []
-    for i, struct in enumerate(structures, 1):
-        filename = struct.get("filename") or struct.get("name")
-        source = struct.get("source", "upload")
-        
-        if not filename:
-            logger.warning(f"⚠️ Structure {i} missing filename, skipping.")
-            continue
-            
-        cif_path = _resolve_structure_path_by_source(session_id, filename, source)
-        if not cif_path or not cif_path.exists():
-            logger.warning(f"⚠️ File not found: {filename} (source: {source}), skipping.")
-            continue
-            
-        try:
-            cif_content = cif_path.read_text(encoding='utf-8')
-            resolved_structures.append({
-                "cifContent": cif_content,
-                "formula": cif_path.stem, # Use stem as formula/ID
-                "id": cif_path.stem,
-                "source_file": str(cif_path)
-            })
-        except Exception as e:
-            logger.error(f"❌ Error reading {filename}: {e}")
+    for r in resolved:
+        resolved_structures.append({
+            "cifContent": r["content"],
+            "formula": Path(r["filename"]).stem if r["filename"] else "unknown",
+            "id": Path(r["filename"]).stem if r["filename"] else "unknown",
+            "source_file": str(r["path"]) if r["path"] else r["filename"]
+        })
 
     if not resolved_structures:
         return {"success": False, "error": "No valid structures found."}

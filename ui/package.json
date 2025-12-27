@@ -59,6 +59,7 @@
     "tailwindcss": "^3.3.5",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.2.2",
-    "vite": "^5.4.20"
+    "vite": "^5.4.20",
+    "worker-loader": "^3.0.8"
   }
 }

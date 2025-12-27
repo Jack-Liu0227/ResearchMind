@@ -305,15 +305,21 @@ class CrystalStructureGenerator:
                     structure = Structure.from_file(cif_file)
                     structure_id = f"{self.composition}_generated_{i+1}_{int(datetime.now().timestamp())}"
                     
+                    # 🆕 获取绝对路径
+                    cif_file_abs = os.path.abspath(cif_file)
+                    
                     # 添加一些元数据
                     metadata = {
                         "sampleIndex": i + 1,
-                        "cifFile": cif_file,
+                        "cifFile": cif_file_abs,
                         "generationMethod": "CrystaLLM_AI"
                     }
                     
                     frontend_structure = self._structure_to_frontend_format(structure, structure_id, metadata)
                     if frontend_structure:
+                        # 🆕 关键修复：添加 cif_file_path 字段，确保后端能找到文件
+                        frontend_structure["cif_file_path"] = cif_file_abs
+                        frontend_structure["cifFilename"] = f"sample_{i+1}.cif"
                         structures.append(frontend_structure)
                         
                 except Exception as e:
