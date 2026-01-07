@@ -58,6 +58,7 @@ def normalize_paper_fields(paper: Dict[str, Any], source: str = None) -> Dict[st
         'external_ids',
         'id',  # 保留原始 ID
         'summary',  # 保留摘要的别名
+        'journal_name',
     ]
 
     for field in optional_fields:
@@ -208,19 +209,55 @@ def merge_paper_data(papers_list: List[List[Dict[str, Any]]]) -> List[Dict[str, 
     Returns:
         Merged and deduplicated list of papers
     """
-    seen_ids = set()
-    merged = []
-    
+    merged_by_id: Dict[str, Dict[str, Any]] = {}
+
+    def _merge_fields(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+        if not existing:
+            return incoming
+
+        # Prefer richer text fields if missing
+        for key in ["title", "abstract", "summary", "url", "pdf_url", "published", "doi", "journal_name"]:
+            if not existing.get(key) and incoming.get(key):
+                existing[key] = incoming[key]
+
+        # Prefer longer author list if existing is empty
+        if not existing.get("authors") and incoming.get("authors"):
+            existing["authors"] = incoming["authors"]
+        elif incoming.get("authors") and len(incoming.get("authors", [])) > len(existing.get("authors", [])):
+            existing["authors"] = incoming["authors"]
+
+        # Categories: use incoming if existing empty
+        if not existing.get("categories") and incoming.get("categories"):
+            existing["categories"] = incoming["categories"]
+
+        # Citation count: keep the max if available
+        try:
+            existing_cc = int(existing.get("citation_count") or 0)
+        except (TypeError, ValueError):
+            existing_cc = 0
+        try:
+            incoming_cc = int(incoming.get("citation_count") or 0)
+        except (TypeError, ValueError):
+            incoming_cc = 0
+        if incoming_cc > existing_cc:
+            existing["citation_count"] = incoming_cc
+
+        # Preserve other optional fields if missing
+        for key in ["score", "published_date", "publication_types", "external_ids", "id"]:
+            if key in incoming and (existing.get(key) in (None, "", [])):
+                existing[key] = incoming[key]
+
+        return existing
+
     for papers in papers_list:
         for paper in papers:
-            # Normalize first
             normalized = normalize_paper_fields(paper)
             paper_id = normalized['paper_id']
-            
-            # Skip duplicates
-            if paper_id not in seen_ids:
-                seen_ids.add(paper_id)
-                merged.append(normalized)
-    
-    return merged
+
+            if paper_id in merged_by_id:
+                merged_by_id[paper_id] = _merge_fields(merged_by_id[paper_id], normalized)
+            else:
+                merged_by_id[paper_id] = normalized
+
+    return list(merged_by_id.values())
 

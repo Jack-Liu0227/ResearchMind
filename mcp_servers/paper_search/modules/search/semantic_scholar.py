@@ -258,4 +258,3 @@ def _save_semantic_scholar_results_to_file(
             f"Failed to save Semantic Scholar results: {str(e)}",
             session_id=session_id
         )
-

@@ -12,6 +12,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
+
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent.parent / ".env"
 if env_path.exists():
@@ -420,7 +421,20 @@ async def list_papers_from_csv(
 
     # 默认返回字段（包含 url 和 topic 字段）
     if fields is None:
-        fields = ["paper_id", "title", "authors", "published", "source", "score", "abstract", "url", "topic"]
+        fields = [
+            "paper_id",
+            "title",
+            "authors",
+            "published",
+            "source",
+            "score",
+            "abstract",
+            "url",
+            "topic",
+            "journal_name",
+            "citation_count",
+            "doi",
+        ]
 
     try:
         logger.info(f"Loading papers from CSV: {csv_file_path} for session: {session_id}")
@@ -1017,6 +1031,7 @@ async def search_papers(
 
     final_result = {
         'status': 'success',
+        'session_id': session_id,
         'sources_used': list(actual_sources_used) if actual_sources_used else (sources or ['arxiv', 'tavily_academic', 'semantic_scholar']),
         'total_results': len(final_papers),
         'papers_added': papers_added,

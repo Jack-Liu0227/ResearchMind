@@ -7,6 +7,7 @@ import os
 import sys
 import codecs
 
+
 # 🔧 修复 Windows GBK 编码问题
 if sys.platform == 'win32':
     sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, errors='replace')
@@ -299,7 +300,8 @@ async def materials_project_query_tool(
     except Exception as e:
         error_msg = f"An error occurred while querying the Materials Project API: {str(e)}"
         logger.error(error_msg)
-        return {"error": error_msg, "database": "MP", "structures": []}
+        # 标准化失败返回，方便后置扣费判断
+        return {"error": error_msg, "database": "MP", "structures": [], "success": False}
 
 
 class OQMDTool(BaseModel):

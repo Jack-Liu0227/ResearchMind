@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { useAppStore } from '../store/useAppStore'
-import { SessionFile } from '../types'
+import { SessionFile, Message } from '../types'
 import { wsService } from '../services/websocket'
 import ChatInterface from '../components/ChatInterface'
 import AgentSelector from '../components/AgentSelector'
@@ -40,14 +40,56 @@ const ChatPage: React.FC = () => {
     setGlobalBillingStats,
     setPapersData,
     messages,
-    isLoading
+    isLoading,
+    setMessages,
+    connected
   } = useAppStore()
 
   const pendingFileMetadataRef = useRef<any[]>([])
+  const historyRequestRef = useRef<string | null>(null)
 
   const normalizePath = (input?: string): string | undefined => {
     if (!input) return undefined
-    return input.replace(/^[./\\]+/, '').replace(/\\/g, '/')
+    let value = input.trim().replace(/\\/g, '/')
+    if (!value) return undefined
+
+    if (value.includes('session_data/')) {
+      value = value.split('session_data/')[1]
+    } else if (/^[A-Za-z]:\//.test(value)) {
+      if (value.includes('/papers/')) {
+        value = `papers/${value.split('/papers/')[1]}`
+      } else {
+        const filename = value.split('/').pop()
+        value = filename || value
+      }
+    }
+
+    return value.replace(/^([./])+/, '')
+  }
+
+  const normalizePapersCsvPath = (input?: string): string | undefined => {
+    if (!input) return undefined
+    let value = input.trim().replace(/\\/g, '/')
+    if (!value) return undefined
+
+    if (value.includes('/api/download/')) {
+      const parts = value.split('/api/download/')
+      if (parts.length > 1) {
+        value = parts[1]
+      }
+    }
+
+    if (value.includes('session_data/')) {
+      value = value.split('session_data/')[1]
+    }
+
+    if (value.startsWith('api/download/')) {
+      value = value.replace(/^api\/download\//, '')
+    } else if (value.startsWith('download/')) {
+      value = value.replace(/^download\//, '')
+    }
+
+    return value.replace(/^([./])+/, '')
   }
 
   const normalizeDownloadUrl = (rawUrl?: string, filePath?: string): string | undefined => {
@@ -66,6 +108,37 @@ const ChatPage: React.FC = () => {
     const clean = input.split('?')[0]
     const segments = clean.split('/').filter(Boolean)
     return segments.pop() || fallback || '数据文件'
+  }
+
+  const buildMessagesFromHistory = (history: any[]): Message[] => {
+    if (!Array.isArray(history)) {
+      return []
+    }
+
+    return history
+      .map((item, idx) => {
+        const roleRaw = item?.role || item?.author || ''
+        const role = roleRaw === 'model' ? 'assistant' : roleRaw
+        const parts = Array.isArray(item?.parts) ? item.parts : []
+        const content = parts
+          .map((part: any) => part?.text || part?.content || '')
+          .filter((text: string) => text && typeof text === 'string')
+          .join('')
+          .trim()
+
+        if (!content || (role !== 'user' && role !== 'assistant')) {
+          return null
+        }
+
+        return {
+          id: `history_${idx}_${Date.now()}`,
+          content,
+          role,
+          timestamp: new Date(item?.timestamp || Date.now()),
+          type: 'text',
+        } as Message
+      })
+      .filter(Boolean) as Message[]
   }
 
   const createSessionFilesFromMetadata = (metadata: any, sourceMessageId?: string): SessionFile[] => {
@@ -671,27 +744,21 @@ const ChatPage: React.FC = () => {
             if (toolExecutionData.toolName === 'search_papers' &&
               toolExecutionData.output.csv_file_path &&
               toolExecutionData.output.total_papers_in_csv) {
-              const sessionId = toolExecutionData.sessionId || currentSession?.id || 'default'
-
-              // 🔧 修复：从 csv_file_path 提取相对路径（相对于 session_data/）
-              let csvPath = toolExecutionData.output.csv_file_path
-              if (csvPath.includes('session_data/')) {
-                csvPath = csvPath.split('session_data/')[1]
-              } else if (csvPath.includes('session_data\\')) {
-                csvPath = csvPath.split('session_data\\')[1].replace(/\\/g, '/')
+              const sessionId = toolExecutionData.output.session_id || toolExecutionData.sessionId || currentSession?.id || 'default'
+              const csvPath = normalizePapersCsvPath(toolExecutionData.output.csv_file_path)
+              if (csvPath) {
+                setPapersData(
+                  csvPath,
+                  sessionId,
+                  toolExecutionData.output.total_papers_in_csv
+                )
+                console.log('📚 设置文献数据到 store:', {
+                  originalPath: toolExecutionData.output.csv_file_path,
+                  csvPath: csvPath,
+                  sessionId: sessionId,
+                  count: toolExecutionData.output.total_papers_in_csv
+                })
               }
-
-              setPapersData(
-                csvPath,
-                sessionId,
-                toolExecutionData.output.total_papers_in_csv
-              )
-              console.log('📚 设置文献数据到 store:', {
-                originalPath: toolExecutionData.output.csv_file_path,
-                csvPath: csvPath,
-                sessionId: sessionId,
-                count: toolExecutionData.output.total_papers_in_csv
-              })
             }
           }
         } else {
@@ -738,17 +805,20 @@ const ChatPage: React.FC = () => {
             if (toolExecutionData.toolName === 'search_papers' &&
               toolExecutionData.output.csv_file_path &&
               toolExecutionData.output.total_papers_in_csv) {
-              const sessionId = toolExecutionData.sessionId || currentSession?.id || 'default'
-              setPapersData(
-                toolExecutionData.output.csv_file_path,
-                sessionId,
-                toolExecutionData.output.total_papers_in_csv
-              )
-              console.log('📚 设置文献数据到 store:', {
-                csvPath: toolExecutionData.output.csv_file_path,
-                sessionId: sessionId,
-                count: toolExecutionData.output.total_papers_in_csv
-              })
+              const sessionId = toolExecutionData.output.session_id || toolExecutionData.sessionId || currentSession?.id || 'default'
+              const csvPath = normalizePapersCsvPath(toolExecutionData.output.csv_file_path)
+              if (csvPath) {
+                setPapersData(
+                  csvPath,
+                  sessionId,
+                  toolExecutionData.output.total_papers_in_csv
+                )
+                console.log('📚 设置文献数据到 store:', {
+                  csvPath: csvPath,
+                  sessionId: sessionId,
+                  count: toolExecutionData.output.total_papers_in_csv
+                })
+              }
             }
           }
         }
@@ -922,6 +992,14 @@ const ChatPage: React.FC = () => {
           duration: 6000,
           icon: '❌'
         })
+      } else if ((message.type as any) === 'history' && message.data?.history) {
+        const historyMessages = buildMessagesFromHistory(message.data.history)
+        if (historyMessages.length > 0) {
+          setMessages(historyMessages)
+          console.log('📜 已恢复历史消息:', historyMessages.length)
+        } else {
+          console.log('📜 历史消息为空或无法解析')
+        }
       } else if ((message.type as any) === 'session_recovered' && message.data) {
         // 🆕 处理会话恢复消息（WebSocket 重连后）
         console.log('🔄 [会话恢复] 收到恢复确认:', message.data)
@@ -976,6 +1054,20 @@ const ChatPage: React.FC = () => {
       // 不断开WebSocket连接，让其他组件继续使用
     }
   }, []) // 移除函数依赖项，这些函数引用会导致不断重连
+
+  useEffect(() => {
+    if (!connected || !currentSession?.id) return
+    if (historyRequestRef.current === currentSession.id) return
+
+    wsService.send({
+      type: 'get_history',
+      data: {
+        sessionId: currentSession.id,
+        agentId: currentAgent?.id,
+      }
+    })
+    historyRequestRef.current = currentSession.id
+  }, [connected, currentSession?.id, currentAgent?.id])
 
   // 自动创建会话 - 仅在发送消息时创建，避免刷新页面时自动创建
   // 移除自动创建逻辑，改为在发送消息时检查并创建

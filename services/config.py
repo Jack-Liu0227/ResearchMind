@@ -153,6 +153,16 @@ class MCPConfig:
     }
 
 
+class BillingFeatureFlags:
+    """Feature flags for billing behavior"""
+
+    # Enable postpaid billing: charge only after successful tool completion
+    POSTPAID_BILLING = os.getenv("POSTPAID_BILLING", "true").lower() == "true"
+
+    # Whether database/search tools should charge when no results returned
+    # Default: false (do not charge on empty results)
+    DB_CHARGE_ON_EMPTY = os.getenv("DB_CHARGE_ON_EMPTY", "false").lower() == "true"
+
 class DataFormatConfig:
     """Data format configuration"""
     
@@ -184,4 +194,5 @@ server_config = ServerConfig()
 agent_config = AgentConfig()
 mcp_config = MCPConfig()
 data_format_config = DataFormatConfig()
+billing_flags = BillingFeatureFlags()
 

@@ -127,6 +127,7 @@ class PaperInfoResponse(BaseModel):
     doi: Optional[str] = None
     journal_name: Optional[str] = None
     venue: Optional[str] = None
+    citation_count: Optional[int] = None
     error: Optional[str] = None
 
 
@@ -208,7 +209,7 @@ async def get_paper_info_from_semantic_scholar(paper_id: str = Query(..., descri
         clean_paper_id = paper_id.replace("s2_", "")
 
         # 🆕 查询更多字段：externalIds, venue, journal
-        url = f"{SEMANTIC_SCHOLAR_API_BASE}/paper/{clean_paper_id}?fields=externalIds,venue,journal"
+        url = f"{SEMANTIC_SCHOLAR_API_BASE}/paper/{clean_paper_id}?fields=externalIds,venue,journal,citationCount"
 
         headers = {}
         # 使用轮询器获取API密钥
@@ -224,6 +225,7 @@ async def get_paper_info_from_semantic_scholar(paper_id: str = Query(..., descri
 
         # 提取 DOI
         doi = data.get("externalIds", {}).get("DOI")
+        citation_count = data.get("citationCount")
 
         # 提取期刊/会议名称
         venue = data.get("venue", "")
@@ -273,7 +275,8 @@ async def get_paper_info_from_semantic_scholar(paper_id: str = Query(..., descri
                 status="success",
                 doi=doi,
                 journal_name=journal_name if journal_name else None,
-                venue=venue if venue else None
+                venue=venue if venue else None,
+                citation_count=citation_count if isinstance(citation_count, int) else None,
             )
         else:
             logger.warning(f"⚠️ [Journal API] 该文献没有 DOI 和期刊名称")

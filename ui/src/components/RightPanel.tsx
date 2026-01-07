@@ -13,7 +13,7 @@ import { CrystalStructure, SessionFile } from '../types'
 import toast from 'react-hot-toast'
 import { resolveFileUrl } from '../utils/apiClient'
 import { downloadFile, copyToClipboard } from '../utils'
-import { getJournalInfo, JournalInfo } from '../services/easyScholarService'
+import { getJournalInfo, resolvePaperViaOpenAlex, JournalInfo } from '../services/easyScholarService'
 import { API_CONFIG } from '../constants'
 import { wsService } from '../services/websocket'
 import BatchAnalysisPanel from './BatchAnalysisPanel'
@@ -948,17 +948,24 @@ const PapersTab: React.FC = () => {
   const loadPapers = async () => {
     if (!csvFilePath || !sessionId) return
 
-    // 🔧 路径清理：如果传入的是下载URL，尝试提取真实路径
+    // 🔧 路径清理：如果传入的是下载URL或绝对路径，尝试提取真实路径
     let cleanPath = csvFilePath
-    // 如果包含 /api/download/，说明是 URL，尝试提取真实路径
-    // 格式可能为: http://host:port/api/download/path/to/file.csv
-    // 或者: /api/download/path/to/file.csv
     if (cleanPath.includes('/api/download/')) {
       const parts = cleanPath.split('/api/download/')
       if (parts.length > 1) {
         cleanPath = parts[1]
-        console.log('🔧 [RightPanel] 自动修正 CSV 路径:', { original: csvFilePath, cleaned: cleanPath })
       }
+    }
+
+    cleanPath = sanitizeRelativePath(cleanPath) || cleanPath
+    if (cleanPath.startsWith('api/download/')) {
+      cleanPath = cleanPath.replace(/^api\/download\//, '')
+    } else if (cleanPath.startsWith('download/')) {
+      cleanPath = cleanPath.replace(/^download\//, '')
+    }
+
+    if (cleanPath !== csvFilePath) {
+      console.log('🔧 [RightPanel] 自动修正 CSV 路径:', { original: csvFilePath, cleaned: cleanPath })
     }
 
     setLoading(true)
@@ -1407,7 +1414,7 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
         published: paper.published || paper.publication_date || '未知',
         categories: paper.categories || [],
         doi: paper.doi,
-        citations: paper.citations
+        citations: paper.citation_count ?? paper.citations ?? paper.cited_by_count ?? 0
       })
       console.log('✅ 文献详细信息加载成功')
     } catch (error: any) {
@@ -1529,9 +1536,18 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
 
     setLoadingJournal(true)
     try {
-      console.log('📡 [API] 调用 EasyScholar API...')
-      console.log('📡 [API] 期刊名称:', journalName)
-      const info = await getJournalInfo(journalName)
+      // 优先通过 OpenAlex 获取被引数与期刊基础信息
+      const openalex = await resolvePaperViaOpenAlex({ doi: detailedInfo?.doi, title: paper?.title })
+      let info = null as any
+      // EasyScholar 仅用于分区等本地化补充
+      const easy = await getJournalInfo(journalName)
+      if (openalex || easy) {
+        info = {
+          ...(easy || {}),
+          ...(openalex || {}),
+          journal_name: (easy && (easy as any).journal_name) || (openalex && openalex.journal_name) || journalName,
+        }
+      }
 
       console.log('📡 [API] getJournalInfo 返回值:', info)
       console.log('📡 [API] 返回值类型:', typeof info)
@@ -1597,6 +1613,16 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
       info.country
     )
   }
+
+  const citationCount = detailedInfo?.citations ?? paper.citation_count ?? paper.citations ?? paper.cited_by_count ?? 0
+  const journalLabel = paper.journal_name || journalInfo?.journal_name || ''
+  const impactFactorValue = journalInfo?.impact_factor ?? journalInfo?.five_year_impact_factor
+  const impactFactorLabel = impactFactorValue !== undefined ? `IF ${impactFactorValue.toFixed(1)}` : 'IF --'
+  const quartileLabel = journalInfo?.jcr_quartile
+    ? `JCR ${journalInfo.jcr_quartile}`
+    : journalInfo?.cas_quartile
+      ? `中科院 ${journalInfo.cas_quartile}`
+      : '分区 --'
 
   return (
     <div
@@ -1688,11 +1714,21 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
                 </div>
               )}
 
+              {/* 期刊 */}
+              {journalLabel && (
+                <div className="flex items-center gap-1">
+                  <BookOpen className="w-3 h-3 text-gray-400" />
+                  <span className="font-medium text-blue-600 truncate max-w-[140px]">{journalLabel}</span>
+                </div>
+              )}
+
               {/* 来源 */}
-              <div className="flex items-center gap-1">
-                <BookOpen className="w-3 h-3 text-gray-400" />
-                <span className="font-medium text-blue-600">{paper.source}</span>
-              </div>
+              {paper.source && (!journalLabel || paper.source !== journalLabel) && (
+                <div className="flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3 text-gray-400" />
+                  <span className="text-gray-500">{paper.source}</span>
+                </div>
+              )}
             </div>
 
             {/* 摘要（可展开） */}
@@ -1735,46 +1771,27 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
                   </span>
                 )}
 
-                {/* 引用数（如果有详细信息） */}
-                {detailedInfo?.citations !== undefined && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-medium rounded">
-                    📊 被引 {detailedInfo.citations}
+                {/* 引用数 */}
+                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-medium rounded">
+                  📊 被引 {citationCount}
+                </span>
+
+                {/* 影响因子 */}
+                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded border border-blue-200">
+                  {impactFactorLabel}
+                </span>
+
+                {/* 期刊分区 */}
+                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-semibold rounded border border-purple-200">
+                  {quartileLabel}
+                </span>
+
+                {/* Top 期刊标识 - 温和的金色 */}
+                {journalInfo?.cas_top && (
+                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-semibold rounded border border-amber-200">
+                    <Award className="w-2.5 h-2.5" />
+                    TOP
                   </span>
-                )}
-
-                {/* 🆕 期刊信息标签 - 紧凑视图显示核心信息（温和配色）*/}
-                {hasUsefulJournalInfo(journalInfo) && (
-                  <>
-                    {/* 影响因子 - 温和的蓝色 */}
-                    {journalInfo.impact_factor !== undefined && (
-                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded border border-blue-200">
-                        IF {journalInfo.impact_factor.toFixed(1)}
-                      </span>
-                    )}
-
-                    {/* SCI/SSCI 分区 - 温和的紫色 */}
-                    {journalInfo.jcr_quartile && (
-                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-semibold rounded border border-purple-200">
-                        {journalInfo.sci ? 'SCI' : journalInfo.ssci ? 'SSCI' : 'JCR'} {journalInfo.jcr_quartile}
-                      </span>
-                    )}
-
-                    {/* 中科院分区 - 温和的红色 */}
-                    {journalInfo.cas_quartile && (
-                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-rose-50 text-rose-700 text-[10px] font-semibold rounded border border-rose-200">
-                        中科院 {journalInfo.cas_quartile}
-                        {journalInfo.cas_small_category && ` ${journalInfo.cas_small_category}`}
-                      </span>
-                    )}
-
-                    {/* Top 期刊标识 - 温和的金色 */}
-                    {journalInfo.cas_top && (
-                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-semibold rounded border border-amber-200">
-                        <Award className="w-2.5 h-2.5" />
-                        TOP
-                      </span>
-                    )}
-                  </>
                 )}
 
                 {/* 🆕 特殊来源标识 */}
@@ -1937,8 +1954,11 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
                         {/* 期刊名称 */}
                         {journalInfo.journal_name && (
                           <div className="text-[11px] pb-1 border-b border-indigo-100">
-                            <span className="font-medium text-gray-700">期刊名称: </span>
-                            <span className="text-gray-900 font-medium">{journalInfo.journal_name}</span>
+                            <div>
+                              <span className="font-medium text-gray-700">期刊名称: </span>
+                              <span className="text-gray-900 font-medium">{journalInfo.journal_name}</span>
+                            </div>
+                            <div className="text-[10px] text-gray-500 mt-1">数据来源：OpenAlex · EasyScholar</div>
                           </div>
                         )}
 

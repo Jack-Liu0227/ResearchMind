@@ -128,6 +128,7 @@ interface AppState {
   setCurrentSession: (session: ChatSession | null) => void
   addMessage: (message: Message) => void
   updateMessage: (messageId: string, updates: Partial<Message>) => void
+  setMessages: (messages: Message[]) => void
 
   setSidebarOpen: (open: boolean) => void
   setRightPanelOpen: (open: boolean) => void  // 设置右侧面板状态
@@ -397,6 +398,29 @@ export const useAppStore = create<AppState>()(
 
         set({
           messages: updatedMessages,
+          currentSession: updatedSession,
+          sessions: nextSessions,
+        })
+      },
+
+      setMessages: (messages) => {
+        const state = get()
+        const { currentSession, sessions } = state
+
+        if (!currentSession) {
+          set({ messages })
+          return
+        }
+
+        const updatedSession: ChatSession = {
+          ...currentSession,
+          messages,
+          updatedAt: new Date(),
+        }
+        const nextSessions = sessions.map((s) => (s.id === currentSession.id ? updatedSession : s))
+
+        set({
+          messages,
           currentSession: updatedSession,
           sessions: nextSessions,
         })

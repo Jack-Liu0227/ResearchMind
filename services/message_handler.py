@@ -617,29 +617,19 @@ class MessageHandler:
             return
 
         try:
-            # Construct session key used in AgentCoordinator
-            # Note: This requires knowledge of how keys are constructed. 
-            # Ideally AgentCoordinator should provide a method for this.
-            # But here we just need to load from SessionManager directly using the session_id pattern?
-            # Wait, SessionManager saves by session_key. 
-            # In AgentCoordinator: session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
-            # But SessionManager.save_history uses session_key.
-            
-            # We need to reconstruct the key. 
-            # If agent_id is missing, we might not find it if it was saved with agent_id in the key.
-            # Let's assume the frontend sends the same params.
-            if agent_id:
-                session_key = f"{client_id}_{agent_id}_{session_id}"
-            else:
-                # Fallback, might not work if multiple agents share session_id logic differently
-                session_key = session_id 
+            # 优先使用稳定键（仅 session_id），与 AgentCoordinator 保存逻辑一致
+            from .hybrid_session_manager import HybridSessionManager
+            history = HybridSessionManager.load_history(session_id)
 
-            from .session_manager import SessionManager
-            history = SessionManager.load_history(session_key)
-            
-            # Also try loading with raw session_id if key failed (backward compatibility)
+            # 兼容旧键：client_id + session_id
             if not history:
-                 history = SessionManager.load_history(session_id)
+                old_shared_key = f"{client_id}_{session_id}"
+                history = HybridSessionManager.load_history(old_shared_key)
+
+            # 兼容更旧的 agent-specific 键：client_id + agent_id + session_id
+            if not history and agent_id:
+                legacy_key = f"{client_id}_{agent_id}_{session_id}"
+                history = HybridSessionManager.load_history(legacy_key)
 
             await self.send_message(websocket, "history", {
                 "sessionId": session_id,

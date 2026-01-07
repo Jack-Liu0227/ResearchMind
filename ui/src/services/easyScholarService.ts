@@ -130,6 +130,34 @@ export async function getJournalInfo(journalName: string): Promise<JournalInfo |
 }
 
 /**
+ * OpenAlex 解析：根据 DOI 或标题解析被引数、期刊名、ISSN
+ */
+export async function resolvePaperViaOpenAlex(params: { doi?: string; title?: string }): Promise<{ cited_by_count?: number; journal_name?: string; issn?: string } | null> {
+  const { doi, title } = params
+  if (!doi && !title) return null
+  try {
+    const search = new URLSearchParams()
+    if (doi) search.set('doi', doi)
+    if (title) search.set('title', title)
+    const res = await fetch(`/api/journal/resolve?${search.toString()}`, { headers: { 'Accept': 'application/json' } })
+    if (!res.ok) return null
+    const json = await res.json()
+    if (json && json.status === 'success' && json.data) {
+      const d = json.data
+      return {
+        cited_by_count: d.cited_by_count,
+        journal_name: d.journal_name,
+        issn: Array.isArray(d.issn) ? (d.issn[0] || undefined) : d.issn,
+      }
+    }
+    return null
+  } catch (e) {
+    console.warn('OpenAlex resolve failed', e)
+    return null
+  }
+}
+
+/**
  * 从 DOI 获取期刊名称
  * @param doi DOI 标识符
  * @returns 期刊名称
@@ -808,4 +836,3 @@ function parseJournalInfo(data: any): JournalInfo | null {
     return null
   }
 }
-

@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import zipfile
 from datetime import datetime
@@ -225,25 +226,36 @@ def _process_single_file(
     if not text_content.strip():
         text_content = f"用户上传的文件（{filename}）已保存，暂未自动提取文本内容。"
 
+    zotero_metadata: Optional[Dict[str, Any]] = None
+    if file_bytes or (target_path.exists() and target_path.suffix.lower() == ".pdf"):
+        if target_path.suffix.lower() == ".pdf" or (mime_type and "pdf" in mime_type.lower()):
+            pdf_bytes = file_bytes or target_path.read_bytes()
+            zotero_metadata = _fetch_zotero_metadata(pdf_bytes, filename)
+
     summary_text = _summarize_text(text_content)
+    if zotero_metadata and zotero_metadata.get("abstract"):
+        summary_text = zotero_metadata["abstract"]
+
     paper_id = _generate_upload_paper_id(session_id, filename, order, text_content)
     published = datetime.now().strftime("%Y-%m-%d")
     relative_path = _relative_path(target_path)
 
     raw_entry = {
         "paper_id": paper_id,
-        "title": Path(filename).stem or paper_id,
-        "authors": file_data.get("authors", []),
+        "title": (zotero_metadata or {}).get("title") or Path(filename).stem or paper_id,
+        "authors": (zotero_metadata or {}).get("authors") or file_data.get("authors", []),
         "abstract": summary_text,
         "summary": summary_text,
         "content": text_content,
         "full_text": text_content,
-        "url": relative_path,
+        "url": (zotero_metadata or {}).get("url") or relative_path,
         "pdf_url": "",
-        "published": published,
+        "published": (zotero_metadata or {}).get("published") or published,
         "source": "upload",
         "categories": file_data.get("categories", []),
         "score": file_data.get("score"),
+        "doi": (zotero_metadata or {}).get("doi") or "",
+        "journal_name": (zotero_metadata or {}).get("journal_name") or "",
         "uploaded_at": datetime.now().isoformat(),
         "upload_metadata": {
             "filename": filename,
@@ -252,6 +264,7 @@ def _process_single_file(
             "encoding": encoding or "utf-8",
             "session_id": session_id,
             "topic": topic,
+            "zotero": zotero_metadata or {},
         },
     }
 
@@ -282,6 +295,77 @@ def _process_single_file(
     )
 
     return normalized, file_record
+
+
+def _fetch_zotero_metadata(file_bytes: bytes, filename: str) -> Optional[Dict[str, Any]]:
+    """Extract metadata from Zotero translation-server when available."""
+    server_url = os.getenv("ZOTERO_TRANSLATION_SERVER_URL", "http://127.0.0.1:1969/import").strip()
+    if not server_url:
+        return None
+
+    try:
+        import httpx  # type: ignore
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("Zotero translation-server requires httpx", error=str(exc))
+        return None
+
+    headers = {
+        "Content-Type": "application/pdf",
+        "Accept": "application/json",
+    }
+
+    try:
+        with httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0, read=30.0)) as client:
+            response = client.post(server_url, content=file_bytes, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        logger.warning("Zotero translation-server request failed", error=str(exc), filename=filename)
+        return None
+
+    items: List[Dict[str, Any]] = []
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = payload.get("items") or payload.get("data") or []
+
+    if not items:
+        logger.warning("Zotero translation-server returned no items", filename=filename)
+        return None
+
+    return _parse_zotero_item(items[0])
+
+
+def _parse_zotero_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    creators = item.get("creators") or []
+    authors: List[str] = []
+    for creator in creators:
+        if not isinstance(creator, dict):
+            continue
+        if creator.get("creatorType") and creator.get("creatorType") != "author":
+            continue
+        name = creator.get("name")
+        if name:
+            authors.append(str(name))
+            continue
+        first = creator.get("firstName") or ""
+        last = creator.get("lastName") or ""
+        full_name = f"{first} {last}".strip()
+        if full_name:
+            authors.append(full_name)
+
+    return {
+        "title": item.get("title") or "",
+        "abstract": item.get("abstractNote") or item.get("abstract") or "",
+        "authors": authors,
+        "doi": item.get("DOI") or item.get("doi") or "",
+        "journal_name": item.get("publicationTitle") or item.get("journalAbbreviation") or "",
+        "published": item.get("date") or item.get("year") or "",
+        "url": item.get("url") or "",
+        "issn": item.get("ISSN") or "",
+        "eissn": item.get("EISSN") or item.get("eISSN") or "",
+        "item_type": item.get("itemType") or "",
+    }
 
 
 def _sanitize_filename(filename: str) -> str:

@@ -99,14 +99,20 @@ def trim_llm_request_context(
                 if hasattr(content, 'role') and content.role == 'system':
                     trimmed_contents.append(content)
             
-            # 然后保留最近的用户和助手消息
+            # 然后保留最近的用户和助手消息，同时保留它们之间的 tool 消息
             user_assistant_messages = [
-                c for c in contents 
+                c for c in contents
                 if hasattr(c, 'role') and c.role in ['user', 'model']
             ]
-            
+
             if len(user_assistant_messages) > RECENT_MESSAGES_TO_KEEP:
-                trimmed_contents.extend(user_assistant_messages[-RECENT_MESSAGES_TO_KEEP:])
+                retained = set(user_assistant_messages[-RECENT_MESSAGES_TO_KEEP:])
+            else:
+                retained = set(user_assistant_messages)
+
+            if retained:
+                start_index = min(i for i, c in enumerate(contents) if c in retained)
+                trimmed_contents.extend(contents[start_index:])
             else:
                 trimmed_contents.extend(user_assistant_messages)
             

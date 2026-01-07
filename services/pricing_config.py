@@ -28,16 +28,16 @@ FEATURE_PRICING: Dict[str, int] = {
     'database': 1,         # 数据库查询（Materials Project、OQMD、COD、AFLOW）
     # ===== 高级计算功能 =====
     'search': 1,           # 文献搜索（ArXiv、semantic cholar、Tavily）
-    'report': 30,  # 文献调研报告（全文报告分析 + Markdown 报告生成）
-    "analysis":15,        # 文献分析报告 （摘要简单分析+ Markdown 报告生成）
+    'report': 30,          # 文献调研报告（全文报告分析 + Markdown 报告生成）
+    'analysis': 15,        # 文献分析报告 （摘要简单分析+ Markdown 报告生成）
     'structure_gen': 10,   # 结构生成（CrystaLLM 晶体结构生成）
     'relaxation': 5,       # 结构弛豫（MatterSim 结构优化）
-    'phonon': 5,          # 声子谱计算（声子色散 + 态密度）
-    'kappa': 5,           # 热导率计算（AI4Kappa 预测）
+    'phonon': 5,           # 声子谱计算（声子色散 + 态密度）
+    'kappa': 5,            # 热导率计算（AI4Kappa 预测）
 }
 
 # 全局价格倍率（用于统一调整价格）
-PRICING_MULTIPLIER: float = 150
+PRICING_MULTIPLIER: float = 10
 # ============================================================================
 # 批量计算折扣配置
 # ============================================================================
@@ -246,4 +246,3 @@ def validate_pricing_config() -> bool:
 # 模块加载时自动验证
 if __name__ != "__main__":
     validate_pricing_config()
-

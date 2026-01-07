@@ -99,6 +99,8 @@ class HTTPServer:
 
         # Setup journal API routes
         self._setup_journal_routes()
+        # Setup OpenAlex resolver routes
+        self._setup_journal_resolver()
 
         # Setup static files
         StaticFileService.setup_static_files(self.app)
@@ -633,6 +635,15 @@ class HTTPServer:
             logger.info("✅ Journal API routes registered")
         except Exception as e:
             logger.warning(f"⚠️ Failed to register journal API routes: {e}")
+
+    def _setup_journal_resolver(self):
+        """Setup OpenAlex-based journal resolver routes"""
+        try:
+            from services.journal_resolver import router as resolver_router
+            self.app.include_router(resolver_router)
+            logger.info("✅ Journal resolver routes (OpenAlex) registered")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to register journal resolver: {e}")
 
     def _setup_upload_endpoints(self):
         """Setup file upload endpoints"""
