@@ -152,6 +152,11 @@ class AgentCoordinator:
 
     """Coordinate Google ADK agents"""
 
+    _LONG_RUNNING_TOOLS = {
+        "batch_paper_analysis",
+        "generate_research_report",
+    }
+
 
 
     def __init__(self, agents: Dict[str, Any]):
@@ -192,8 +197,59 @@ class AgentCoordinator:
         self.active_tasks: Dict[str, asyncio.Task] = {}
 
         self.active_task_meta: Dict[str, Any] = {}
+        self.heartbeat_tasks: Dict[str, asyncio.Task] = {}
 
 
+
+    def _get_long_running_timeout(self, session_key: str, base_timeout: float) -> float:
+        last_call = self.last_tool_call.get(session_key)
+        if not last_call or last_call.get("status") != "pending":
+            return base_timeout
+        if last_call.get("name") in self._LONG_RUNNING_TOOLS:
+            return max(base_timeout, 3600.0)
+        return base_timeout
+
+    def _start_task_heartbeat(
+        self,
+        session_key: str,
+        websocket: Any,
+        agent_id: str,
+        session_id: Optional[str],
+        interval: float = 20.0
+    ) -> None:
+        if session_key in self.heartbeat_tasks:
+            task = self.heartbeat_tasks.get(session_key)
+            if task and not task.done():
+                return
+
+        async def _beat() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(interval)
+                    if self.should_stop(session_key):
+                        break
+                    if getattr(websocket, 'closed', False):
+                        break
+                    await MessageHandler.send_message(websocket, 'status', {
+                        'status': 'working',
+                        'message': 'Task is still running...',
+                        'agentId': agent_id,
+                        'sessionId': session_id,
+                    })
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.warning(f'Heartbeat send failed: {e}')
+            finally:
+                self.heartbeat_tasks.pop(session_key, None)
+
+        self.heartbeat_tasks[session_key] = asyncio.create_task(_beat())
+
+    def _stop_task_heartbeat(self, session_key: str) -> None:
+        task = self.heartbeat_tasks.get(session_key)
+        if task and not task.done():
+            task.cancel()
+        self.heartbeat_tasks.pop(session_key, None)
 
     def _restore_history_from_disk(self, history_key: str) -> List[types.Content]:
 
@@ -768,6 +824,7 @@ class AgentCoordinator:
                                     'mime_type': att.get('mime_type', 'application/octet-stream')
 
                                 })
+            self._stop_task_heartbeat(session_key)
 
                                 logger.info(f"💾 Saved base64 file: {original_filename} -> {file_path.name} ({len(file_bytes)} bytes)")
 
@@ -987,7 +1044,7 @@ class AgentCoordinator:
 
                                 self._handle_agent_event(event, agent_id, websocket, client_id, session_id),
 
-                                timeout=300.0  # 5 分钟
+                                timeout=1200.0  # 20 分钟
 
                             )
 
@@ -1005,7 +1062,7 @@ class AgentCoordinator:
 
 
 
-                await asyncio.wait_for(process_events(), timeout=900.0)  # 15 分钟总超息
+                await asyncio.wait_for(process_events(), timeout=1200.0)  # 20 分钟总超时
 
 
 
@@ -1017,7 +1074,7 @@ class AgentCoordinator:
 
                     websocket,
 
-                    "Agent 处理超时息5分钟），请稍后重试或减小任务规模"
+                    "Agent 处理超时（20分钟），请稍后重试或减小任务规模"
 
                 )
 
@@ -1114,6 +1171,7 @@ class AgentCoordinator:
                 "message": "Agent completed.",
                 "billing": billing_data,
             })
+            self._stop_task_heartbeat(session_key)
 
             try:
                 session_events = getattr(session, 'events', None) or []
@@ -1139,10 +1197,12 @@ class AgentCoordinator:
                 "status": "stopped",
                 "message": "任务已停止。",
             })
+            self._stop_task_heartbeat(session_key)
             return
         except Exception as e:
 
             error_msg = str(e)
+            self._stop_task_heartbeat(session_key)
 
             logger.error(f"息Agent processing error: {error_msg}", exc_info=True)
 
@@ -2497,6 +2557,8 @@ class AgentCoordinator:
                         # 根据工具名称生成更友好的提示信息
 
                         tool_message = self._get_tool_friendly_message(tool_name)
+                        if tool_name in self._LONG_RUNNING_TOOLS:
+                            self._start_task_heartbeat(session_key, websocket, agent_id, session_id)
 
 
 
@@ -3236,6 +3298,7 @@ class AgentCoordinator:
         session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
 
         self.stop_flags[session_key] = True
+            self._stop_task_heartbeat(session_key)
 
         logger.info(f"🛑 设置停止标志: {session_key}")
 

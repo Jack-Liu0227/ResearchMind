@@ -456,8 +456,12 @@ async def list_papers_from_csv(
             for field in fields:
                 value = paper.get(field)
                 # 特殊处理：截断过长的摘要
-                if field == 'abstract' and value and len(str(value)) > 300:
-                    simplified[field] = str(value)[:300] + '...'
+                if field == 'abstract' and value:
+                    simplified['abstract_full'] = value
+                    if len(str(value)) > 300:
+                        simplified[field] = str(value)[:300] + '...'
+                    else:
+                        simplified[field] = value
                 else:
                     simplified[field] = value
             simplified_papers.append(simplified)

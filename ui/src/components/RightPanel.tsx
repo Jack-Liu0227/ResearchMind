@@ -13,7 +13,7 @@ import { CrystalStructure, SessionFile } from '../types'
 import toast from 'react-hot-toast'
 import { resolveFileUrl } from '../utils/apiClient'
 import { downloadFile, copyToClipboard } from '../utils'
-import { getJournalInfo, resolvePaperViaOpenAlex, JournalInfo } from '../services/easyScholarService'
+import { getJournalInfo, resolvePaperViaOpenAlex, JournalInfo, getJournalNameFromDOI } from '../services/easyScholarService'
 import { API_CONFIG } from '../constants'
 import { wsService } from '../services/websocket'
 import BatchAnalysisPanel from './BatchAnalysisPanel'
@@ -62,6 +62,72 @@ const sanitizeRelativePath = (value?: string) => {
   // 移除前导的 ./ 和 /
   const withoutPrefix = normalized.replace(/^([./])+/, '')
   return withoutPrefix
+}
+
+const JOURNAL_CACHE_KEY = 'journalInfoCache:v1'
+const PAPER_JOURNAL_CACHE_PREFIX = 'paper:'
+
+const loadJournalCache = (): Record<string, { info: JournalInfo; savedAt: number }> => {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(JOURNAL_CACHE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+const saveJournalCache = (cache: Record<string, { info: JournalInfo; savedAt: number }>) => {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(JOURNAL_CACHE_KEY, JSON.stringify(cache))
+  } catch {
+    // Ignore storage write errors.
+  }
+}
+
+const normalizeJournalKey = (name?: string) => (name || '').trim().toLowerCase()
+
+const normalizePaperKeyPart = (value?: string) => (value || '').trim().toLowerCase()
+
+const buildPaperCacheKey = (paper: any): string => {
+  const doi = normalizePaperKeyPart(paper?.doi)
+  if (doi) return `${PAPER_JOURNAL_CACHE_PREFIX}doi:${doi}`
+  const paperId = normalizePaperKeyPart(paper?.paper_id || paper?.id)
+  if (paperId) return `${PAPER_JOURNAL_CACHE_PREFIX}id:${paperId}`
+  const url = normalizePaperKeyPart(paper?.url)
+  if (url) return `${PAPER_JOURNAL_CACHE_PREFIX}url:${url}`
+  const title = normalizePaperKeyPart(paper?.title)
+  const published = normalizePaperKeyPart(paper?.published || paper?.publication_date)
+  return `${PAPER_JOURNAL_CACHE_PREFIX}title:${title}|${published}`
+}
+
+const getCachedJournalInfo = (journalName?: string): JournalInfo | null => {
+  const key = normalizeJournalKey(journalName)
+  if (!key) return null
+  const cache = loadJournalCache()
+  return cache[key]?.info || null
+}
+
+const getCachedJournalInfoByKey = (cacheKey: string): JournalInfo | null => {
+  if (!cacheKey) return null
+  const cache = loadJournalCache()
+  return cache[cacheKey]?.info || null
+}
+
+const setCachedJournalInfo = (journalName: string, info: JournalInfo) => {
+  const key = normalizeJournalKey(journalName)
+  if (!key) return
+  const cache = loadJournalCache()
+  cache[key] = { info, savedAt: Date.now() }
+  saveJournalCache(cache)
+}
+
+const setCachedJournalInfoByKey = (cacheKey: string, info: JournalInfo) => {
+  if (!cacheKey) return
+  const cache = loadJournalCache()
+  cache[cacheKey] = { info, savedAt: Date.now() }
+  saveJournalCache(cache)
 }
 
 const normalizeDownloadPath = (value: string): string => {
@@ -1394,6 +1460,9 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
   const [loadingJournal, setLoadingJournal] = useState(false)
   const [journalInfo, setJournalInfo] = useState<JournalInfo | null>(null)
   const [journalInfoFetched, setJournalInfoFetched] = useState(false)  // 标记是否已尝试获取
+  const [resolvedCitations, setResolvedCitations] = useState<number | null>(null)
+  const [resolvedJournalName, setResolvedJournalName] = useState<string | null>(null)
+  const paperCacheKey = buildPaperCacheKey(paper)
 
   // 获取详细信息（直接使用 paper 对象中的数据）
   const fetchDetails = async () => {
@@ -1409,19 +1478,19 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
     setLoadingDetails(true)
     try {
       setDetailedInfo({
-        fullAbstract: paper.abstract || '暂无摘要',
+        fullAbstract: paper.abstract_full || paper.abstract || '暂无摘要',
         authors: paper.authors || [],
         published: paper.published || paper.publication_date || '未知',
         categories: paper.categories || [],
         doi: paper.doi,
-        citations: paper.citation_count ?? paper.citations ?? paper.cited_by_count ?? 0
+        citations: resolvedCitations ?? paper.citation_count ?? paper.citations ?? paper.cited_by_count ?? null
       })
       console.log('✅ 文献详细信息加载成功')
     } catch (error: any) {
       console.error('❌ 加载文献详细信息失败:', error)
       // 失败时也设置基本信息
       setDetailedInfo({
-        fullAbstract: paper.abstract || '暂无摘要',
+        fullAbstract: paper.abstract_full || paper.abstract || '暂无摘要',
         authors: paper.authors || [],
         published: paper.published || paper.publication_date || '未知'
       })
@@ -1433,113 +1502,146 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
   // 🆕 获取期刊信息（通过 EasyScholar API）
   const fetchJournalInfo = async (silent = false) => {
     if (journalInfo || loadingJournal || journalInfoFetched) return
+    setLoadingJournal(true)
 
-    // 🔍 调试：打印文献的所有字段
-    console.log('🔍 [调试] 文献数据完整字段:', {
-      paper_id: paper.paper_id,
-      title: paper.title,
-      journal_name: paper.journal_name,
-      source: paper.source,
-      url: paper.url,
-      doi: paper.doi,
-      all_fields: Object.keys(paper)
-    })
-
-    // 🆕 特殊来源处理：arXiv 预印本
-    if (paper.source === 'arxiv' || paper.url?.includes('arxiv.org')) {
-      console.log('📄 [期刊信息] 检测到 arXiv 预印本，跳过期刊信息获取')
-      setJournalInfoFetched(true)
-      return
-    }
-
-    // 🆕 特殊来源处理：Tavily 网页搜索（智能识别）
-    // 注意：Tavily 来源的期刊信息提取已经在 extractJournalNameFromURL() 中实现
-    // 这里不需要特殊处理，直接跳过到通用逻辑
-    if (paper.source === 'tavily' || paper.source === 'tavily_academic') {
-      console.log('🔍 [Tavily] 检测到 Tavily 来源，将使用通用期刊信息提取逻辑')
-    }
-
-    // 尝试从文献信息中提取期刊名称
-    let journalName = paper.journal_name
-    let extractionMethod = 'journal_name 字段'
-
-    console.log('🔍 [期刊信息] 初始期刊名称:', journalName, '来源:', paper.source)
-
-    // 如果没有期刊名称，尝试从其他字段提取
-    if (!journalName && paper.source) {
-      // 过滤掉数据源名称（不是期刊名称）
-      const dataSources = ['semantic_scholar', 'tavily_academic', 'tavily', 'arxiv', 'pubmed', 'google_scholar', 'cnki', 'upload']
-      const sourceLower = paper.source.toLowerCase()
-
-      // 只有当 source 不是数据源名称时，才使用它作为期刊名称
-      if (!dataSources.includes(sourceLower)) {
-        journalName = paper.source
-        extractionMethod = 'source 字段'
-        console.log('📚 [期刊信息] 从 source 字段提取期刊名称:', journalName)
-      } else {
-        console.log('⚠️ [期刊信息] source 字段是数据源名称，跳过:', paper.source)
-      }
-    }
-
-    // 如果还是没有，尝试从 URL 提取（改进版：支持 DOI 提取和 Semantic Scholar API）
-    if (!journalName && paper.url) {
-      console.log('🔍 [提取] 尝试从 URL 提取期刊名称:', paper.url)
-      console.log('🔍 [提取] 传递参数:', {
-        url: paper.url,
-        paper_id: paper.paper_id,
-        source: paper.source,
-        doi: paper.doi
-      })
-      setLoadingJournal(true)
-
-      try {
-        // 动态导入 extractJournalNameFromURL 函数
-        const { extractJournalNameFromURL } = await import('../services/easyScholarService')
-
-        // 传递额外参数：paper_id、source 和 doi
-        const extractedName = await extractJournalNameFromURL(
-          paper.url,
-          paper.paper_id,  // Semantic Scholar Paper ID
-          paper.source,    // 数据源
-          paper.doi        // DOI（如果有）
-        )
-
-        if (extractedName) {
-          journalName = extractedName
-          extractionMethod = 'URL 提取（通过 DOI/CrossRef/Semantic Scholar API）'
-          console.log('✅ [提取] 从 URL 提取期刊名称成功:', journalName)
-        } else {
-          console.warn('⚠️ [提取] extractJournalNameFromURL 返回空值')
-        }
-      } catch (error) {
-        console.error('❌ [提取] 从 URL 提取期刊名称失败:', error)
-      } finally {
+    try {
+      const paperCacheKey = buildPaperCacheKey(paper)
+      const cachedByPaper = getCachedJournalInfoByKey(paperCacheKey)
+      if (cachedByPaper) {
+        setJournalInfo(cachedByPaper)
+        setJournalInfoFetched(true)
         setLoadingJournal(false)
+        return
       }
-    }
-
-    if (!journalName) {
-      console.warn('⚠️ [期刊信息] 无法获取期刊名称，已尝试的字段:', {
+      const cached = getCachedJournalInfo(paper.journal_name)
+      if (cached) {
+        setJournalInfo(cached)
+        setJournalInfoFetched(true)
+        setLoadingJournal(false)
+        return
+      }
+      // ?? ????????????
+      console.log('?? [??] ????????:', {
+        paper_id: paper.paper_id,
+        title: paper.title,
         journal_name: paper.journal_name,
         source: paper.source,
-        url: paper.url
+        url: paper.url,
+        doi: paper.doi,
+        all_fields: Object.keys(paper)
       })
 
-      if (!silent) {
-        toast.error('无法获取期刊名称（缺少 journal_name、source 或可解析的 URL）')
+      // ???? OpenAlex ????????????
+      const openalex = await resolvePaperViaOpenAlex({ doi: paper.doi || detailedInfo?.doi, title: paper?.title })
+      if (openalex?.cited_by_count !== undefined) {
+        setResolvedCitations(openalex.cited_by_count)
       }
-      setJournalInfoFetched(true)
-      return
-    }
+      if (!resolvedJournalName && openalex?.journal_name) {
+        setResolvedJournalName(openalex.journal_name)
+      }
 
-    console.log('📚 [期刊信息] 期刊名称:', journalName, '（来源:', extractionMethod, '）')
+      const isArxivPreprint = paper.source === 'arxiv' || paper.url?.includes('arxiv.org')
+      if (isArxivPreprint) {
+        console.log('?? [????] ??? arXiv ????????????')
+      }
 
-    setLoadingJournal(true)
-    try {
-      // 优先通过 OpenAlex 获取被引数与期刊基础信息
-      const openalex = await resolvePaperViaOpenAlex({ doi: detailedInfo?.doi, title: paper?.title })
+      // ?? ???????Tavily ??????????
+      // ???Tavily ???????????? extractJournalNameFromURL() ???
+      // ???????????????????
+      if (paper.source === 'tavily' || paper.source === 'tavily_academic') {
+        console.log('?? [Tavily] ??? Tavily ????????????????')
+      }
+
+      // ??????????????
+      let journalName = paper.journal_name
+      let extractionMethod = 'journal_name ??'
+
+      console.log('?? [????] ??????:', journalName, '??:', paper.source)
+
+      // ??????????????????
+      if (!journalName && paper.source) {
+        // ????????????????
+        const dataSources = ['semantic_scholar', 'tavily_academic', 'tavily', 'arxiv', 'pubmed', 'google_scholar', 'cnki', 'upload']
+        const sourceLower = paper.source.toLowerCase()
+
+        // ??? source ???????????????????
+        if (!dataSources.includes(sourceLower)) {
+          journalName = paper.source
+          extractionMethod = 'source ??'
+          console.log('?? [????] ? source ????????:', journalName)
+        } else {
+          console.log('?? [????] source ???????????:', paper.source)
+        }
+      }
+
+      // ?????????? URL ????????? DOI ??? Semantic Scholar API?
+      if (!journalName && paper.url) {
+        console.log('?? [??] ??? URL ??????:', paper.url)
+        console.log('?? [??] ????:', {
+          url: paper.url,
+          paper_id: paper.paper_id,
+          source: paper.source,
+          doi: paper.doi
+        })
+
+        try {
+          // ???? extractJournalNameFromURL ??
+          const { extractJournalNameFromURL } = await import('../services/easyScholarService')
+
+          // ???????paper_id?source ? doi
+          const extractedName = await extractJournalNameFromURL(
+            paper.url,
+            paper.paper_id,  // Semantic Scholar Paper ID
+            paper.source,    // ???
+            paper.doi        // DOI?????
+          )
+
+          if (extractedName) {
+            journalName = extractedName
+            extractionMethod = 'URL ????? DOI/CrossRef/Semantic Scholar API?'
+            console.log('? [??] ? URL ????????:', journalName)
+          } else {
+            console.warn('?? [??] extractJournalNameFromURL ????')
+          }
+        } catch (error) {
+          console.error('? [??] ? URL ????????:', error)
+        }
+      }
+
+      if (!journalName && openalex?.journal_name) {
+        journalName = openalex.journal_name
+        extractionMethod = 'OpenAlex ??'
+      }
+
+      if (!journalName && (paper.doi || detailedInfo?.doi)) {
+        try {
+          const resolved = await getJournalNameFromDOI(paper.doi || detailedInfo?.doi)
+          if (resolved) {
+            journalName = resolved
+            extractionMethod = 'DOI -> CrossRef'
+          }
+        } catch (error) {
+          console.error('? [DOI] ? DOI ????????:', error)
+        }
+      }
+
+      if (!journalName) {
+        console.warn('?? [????] ???????????????:', {
+          journal_name: paper.journal_name,
+          source: paper.source,
+          url: paper.url
+        })
+
+        if (!silent) {
+          toast.error('??????????? journal_name?source ????? URL?')
+        }
+        return
+      }
+
+      console.log('?? [????] ????:', journalName, '???:', extractionMethod, '?')
+
       let info = null as any
-      // EasyScholar 仅用于分区等本地化补充
+      // EasyScholar ???????????
       const easy = await getJournalInfo(journalName)
       if (openalex || easy) {
         info = {
@@ -1549,42 +1651,51 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
         }
       }
 
-      console.log('📡 [API] getJournalInfo 返回值:', info)
-      console.log('📡 [API] 返回值类型:', typeof info)
-      console.log('📡 [API] 返回值详情:', JSON.stringify(info, null, 2))
+      console.log('?? [API] getJournalInfo ???:', info)
+      console.log('?? [API] ?????:', typeof info)
+      console.log('?? [API] ?????:', JSON.stringify(info, null, 2))
 
       if (info) {
-        console.log('✅ [API] 期刊信息获取成功:', info)
-        console.log('✅ [API] 设置 journalInfo 状态...')
+        console.log('? [API] ????????:', info)
+        console.log('? [API] ?? journalInfo ??...')
         setJournalInfo(info)
-        console.log('✅ [API] journalInfo 状态已设置')
+        console.log('? [API] journalInfo ?????')
+        const cacheName = info.journal_name || journalName
+        if (cacheName) {
+          setCachedJournalInfo(cacheName, info)
+        }
+        setCachedJournalInfoByKey(paperCacheKey, info)
         if (!silent) {
-          toast.success(`期刊信息获取成功（${extractionMethod}）`)
+          toast.success(`?????????${extractionMethod}?`)
         }
       } else {
-        console.warn('⚠️ [API] 未找到期刊信息，期刊名称:', journalName)
+        console.warn('?? [API] ????????????:', journalName)
         if (!silent) {
-          toast.error(`未找到期刊信息：${journalName}`)
+          toast.error(`????????${journalName}`)
         }
       }
     } catch (error) {
-      console.error('❌ [API] 获取期刊信息失败:', error)
+      console.error('? [API] ????????:', error)
       if (!silent) {
-        toast.error(`获取期刊信息失败: ${error instanceof Error ? error.message : '未知错误'}`)
+        toast.error(`????????: ${error instanceof Error ? error.message : '????'}`)
       }
     } finally {
       setLoadingJournal(false)
       setJournalInfoFetched(true)
-      console.log('🏁 [API] 期刊信息获取流程结束')
+      console.log('?? [API] ??????????')
     }
   }
 
-  // 🆕 组件加载时自动获取期刊信息（不需要等待展开）
   useEffect(() => {
     if (!journalInfoFetched && !journalInfo) {
       fetchJournalInfo(true)  // 静默获取，不显示 toast
     }
   }, [])
+
+  useEffect(() => {
+    if (resolvedCitations === null) return
+    setDetailedInfo((prev: any) => (prev ? { ...prev, citations: resolvedCitations } : prev))
+  }, [resolvedCitations])
 
   // 🔍 监听 journalInfo 状态变化
   useEffect(() => {
@@ -1614,8 +1725,25 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
     )
   }
 
-  const citationCount = detailedInfo?.citations ?? paper.citation_count ?? paper.citations ?? paper.cited_by_count ?? 0
-  const journalLabel = paper.journal_name || journalInfo?.journal_name || ''
+  useEffect(() => {
+    if (!journalInfo) return
+    const cacheName = journalInfo.journal_name || paper.journal_name || resolvedJournalName
+    if (cacheName) {
+      setCachedJournalInfo(cacheName, journalInfo)
+    }
+    setCachedJournalInfoByKey(paperCacheKey, journalInfo)
+  }, [journalInfo, paper.journal_name, paperCacheKey, resolvedJournalName])
+
+  const toNumberOrNull = (value: any): number | null => {
+    if (value === null || value === undefined || value === '') return null
+    const num = Number(value)
+    return Number.isFinite(num) ? num : null
+  }
+
+  const citationCount = toNumberOrNull(
+    resolvedCitations ?? detailedInfo?.citations ?? paper.citation_count ?? paper.citations ?? paper.cited_by_count
+  )
+  const journalLabel = paper.journal_name || journalInfo?.journal_name || resolvedJournalName || ''
   const impactFactorValue = journalInfo?.impact_factor ?? journalInfo?.five_year_impact_factor
   const impactFactorLabel = impactFactorValue !== undefined ? `IF ${impactFactorValue.toFixed(1)}` : 'IF --'
   const quartileLabel = journalInfo?.jcr_quartile
@@ -1623,18 +1751,22 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
     : journalInfo?.cas_quartile
       ? `中科院 ${journalInfo.cas_quartile}`
       : '分区 --'
+  const abstractText = expanded ? (paper.abstract_full || paper.abstract) : paper.abstract
+  const abstractLength = (paper.abstract_full || paper.abstract || '').length
 
   return (
     <div
       className={`
-        border rounded-lg overflow-hidden transition-all duration-200
+        group relative overflow-hidden rounded-2xl border transition-all duration-200
         ${selected
-          ? 'border-blue-500 bg-gradient-to-br from-blue-50 to-white shadow-md'
-          : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm'
+          ? 'border-blue-400/70 bg-gradient-to-br from-blue-50 via-white to-sky-50 shadow-[0_12px_30px_rgba(37,99,235,0.12)]'
+          : 'border-slate-200/80 bg-white/90 hover:border-blue-300/70 hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)]'
         }
       `}
     >
-      <div className="p-3">
+      <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-blue-200/20 blur-2xl" />
+      <div className="pointer-events-none absolute -left-10 -bottom-12 h-28 w-28 rounded-full bg-emerald-200/20 blur-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      <div className="relative p-3">
         <div className="flex items-start gap-2">
           {/* 序号 + 复选框 */}
           <div className="flex-shrink-0 flex items-center gap-1.5">
@@ -1732,12 +1864,12 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
             </div>
 
             {/* 摘要（可展开） */}
-            {paper.abstract && (
+            {abstractText && (
               <div className="mb-2">
                 <p className={`text-[11px] text-gray-600 leading-relaxed ${expanded ? '' : 'line-clamp-2'}`}>
-                  {paper.abstract}
+                  {abstractText}
                 </p>
-                {paper.abstract.length > 100 && (
+                {abstractLength > 100 && (
                   <button
                     onClick={() => {
                       setExpanded(!expanded)
@@ -1758,7 +1890,7 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
               <div className="flex items-center gap-1.5 flex-wrap">
                 {/* Open Access 标签 */}
                 {paper.pdf_url && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-medium rounded">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-semibold rounded-full ring-1 ring-emerald-200/70 shadow-sm">
                     <FileText className="w-2.5 h-2.5" />
                     Open Access
                   </span>
@@ -1766,29 +1898,30 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
 
                 {/* 相关性评分 */}
                 {paper.score !== null && paper.score !== undefined && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-medium rounded">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 text-[10px] font-semibold rounded-full ring-1 ring-amber-200/70 shadow-sm">
                     ⭐ {paper.score.toFixed(2)}
                   </span>
                 )}
 
                 {/* 引用数 */}
-                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-medium rounded">
-                  📊 被引 {citationCount}
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-violet-50 text-violet-700 text-[10px] font-semibold rounded-full ring-1 ring-violet-200/70 shadow-sm">
+                  <BarChart3 className="w-2.5 h-2.5" />
+                  Cited {citationCount === null ? '--' : citationCount}
                 </span>
 
                 {/* 影响因子 */}
-                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded border border-blue-200">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded-full ring-1 ring-blue-200/70 shadow-sm">
                   {impactFactorLabel}
                 </span>
 
                 {/* 期刊分区 */}
-                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-semibold rounded border border-purple-200">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-50 text-purple-700 text-[10px] font-semibold rounded-full ring-1 ring-purple-200/70 shadow-sm">
                   {quartileLabel}
                 </span>
 
                 {/* Top 期刊标识 - 温和的金色 */}
                 {journalInfo?.cas_top && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-semibold rounded border border-amber-200">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 text-[10px] font-semibold rounded-full ring-1 ring-amber-200/70 shadow-sm">
                     <Award className="w-2.5 h-2.5" />
                     TOP
                   </span>
@@ -1799,7 +1932,7 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
                   // arXiv 预印本标识
                   if (paper.source === 'arxiv' || paper.url?.includes('arxiv.org')) {
                     return (
-                      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-medium rounded">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-orange-50 text-orange-700 text-[10px] font-semibold rounded-full ring-1 ring-orange-200/70 shadow-sm">
                         📄 预印本 (arXiv)
                       </span>
                     )
@@ -1832,13 +1965,13 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
 
                     if (publisher) {
                       return (
-                        <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-teal-100 text-teal-700 text-[10px] font-medium rounded">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-teal-50 text-teal-700 text-[10px] font-semibold rounded-full ring-1 ring-teal-200/70 shadow-sm">
                           📚 学术来源 ({publisher})
                         </span>
                       )
                     } else {
                       return (
-                        <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] font-medium rounded">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-50 text-slate-600 text-[10px] font-semibold rounded-full ring-1 ring-slate-200/70 shadow-sm">
                           🌐 网页来源 (Tavily)
                         </span>
                       )
@@ -1850,7 +1983,7 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
 
                 {/* 🆕 加载中提示 */}
                 {loadingJournal && !journalInfo && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-medium rounded">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-50 text-slate-500 text-[10px] font-semibold rounded-full ring-1 ring-slate-200/70 shadow-sm">
                     <div className="animate-spin rounded-full h-2 w-2 border border-gray-400 border-t-transparent"></div>
                     获取期刊信息中...
                   </span>
@@ -1864,7 +1997,7 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
                         setJournalInfoFetched(false)
                         fetchJournalInfo(false)
                       }}
-                      className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-medium rounded hover:bg-orange-200 transition-colors"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-orange-50 text-orange-700 text-[10px] font-semibold rounded-full ring-1 ring-orange-200/70 shadow-sm hover:bg-orange-100 transition-colors"
                       title="点击重试获取期刊信息"
                     >
                       <RefreshCw className="w-2.5 h-2.5" />
@@ -1874,7 +2007,7 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
 
                 {/* 🆕 无法获取期刊名称的提示 */}
                 {!loadingJournal && !journalInfo && journalInfoFetched && !paper.journal_name && !paper.source && !paper.url && (
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-medium rounded" title="文献数据中缺少期刊名称、来源或 URL 字段">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-50 text-slate-500 text-[10px] font-semibold rounded-full ring-1 ring-slate-200/70 shadow-sm" title="文献数据中缺少期刊名称、来源或 URL 字段">
                     <AlertCircle className="w-2.5 h-2.5" />
                     无期刊信息
                   </span>

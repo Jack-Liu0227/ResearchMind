@@ -232,9 +232,31 @@ def _process_single_file(
             pdf_bytes = file_bytes or target_path.read_bytes()
             zotero_metadata = _fetch_zotero_metadata(pdf_bytes, filename)
 
+    extracted_doi = _extract_doi_from_text(text_content)
+    merged_metadata: Dict[str, Any] = dict(zotero_metadata or {})
+    if extracted_doi and not merged_metadata.get("doi"):
+        merged_metadata["doi"] = extracted_doi
+
+    openalex_metadata: Optional[Dict[str, Any]] = None
+    if not merged_metadata.get("title") or not merged_metadata.get("abstract") or not merged_metadata.get("journal_name"):
+        openalex_metadata = _resolve_openalex_metadata(
+            doi=merged_metadata.get("doi"),
+            title=merged_metadata.get("title") or Path(filename).stem,
+        )
+        if openalex_metadata:
+            for key in ["title", "abstract", "authors", "doi", "journal_name", "published", "url"]:
+                if not merged_metadata.get(key) and openalex_metadata.get(key):
+                    merged_metadata[key] = openalex_metadata[key]
+
     summary_text = _summarize_text(text_content)
-    if zotero_metadata and zotero_metadata.get("abstract"):
-        summary_text = zotero_metadata["abstract"]
+    extracted_abstract = merged_metadata.get("abstract") or _extract_abstract_from_text(text_content)
+    if extracted_abstract:
+        summary_text = extracted_abstract
+
+    citation_count = _resolve_openalex_citation_count(
+        doi=merged_metadata.get("doi"),
+        title=merged_metadata.get("title"),
+    )
 
     paper_id = _generate_upload_paper_id(session_id, filename, order, text_content)
     published = datetime.now().strftime("%Y-%m-%d")
@@ -242,21 +264,22 @@ def _process_single_file(
 
     raw_entry = {
         "paper_id": paper_id,
-        "title": (zotero_metadata or {}).get("title") or Path(filename).stem or paper_id,
-        "authors": (zotero_metadata or {}).get("authors") or file_data.get("authors", []),
+        "title": merged_metadata.get("title") or Path(filename).stem or paper_id,
+        "authors": merged_metadata.get("authors") or file_data.get("authors", []),
         "abstract": summary_text,
         "summary": summary_text,
         "content": text_content,
         "full_text": text_content,
-        "url": (zotero_metadata or {}).get("url") or relative_path,
+        "url": merged_metadata.get("url") or relative_path,
         "pdf_url": "",
-        "published": (zotero_metadata or {}).get("published") or published,
+        "published": merged_metadata.get("published") or published,
         "source": "upload",
         "categories": file_data.get("categories", []),
         "score": file_data.get("score"),
-        "doi": (zotero_metadata or {}).get("doi") or "",
-        "journal_name": (zotero_metadata or {}).get("journal_name") or "",
+        "doi": merged_metadata.get("doi") or "",
+        "journal_name": merged_metadata.get("journal_name") or "",
         "uploaded_at": datetime.now().isoformat(),
+        "citation_count": citation_count,
         "upload_metadata": {
             "filename": filename,
             "saved_path": relative_path,
@@ -265,6 +288,7 @@ def _process_single_file(
             "session_id": session_id,
             "topic": topic,
             "zotero": zotero_metadata or {},
+            "openalex": openalex_metadata or {},
         },
     }
 
@@ -336,6 +360,126 @@ def _fetch_zotero_metadata(file_bytes: bytes, filename: str) -> Optional[Dict[st
     return _parse_zotero_item(items[0])
 
 
+def _resolve_openalex_citation_count(doi: Optional[str], title: Optional[str]) -> Optional[int]:
+    if not doi and not title:
+        return None
+
+    try:
+        import httpx  # type: ignore
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("OpenAlex resolve requires httpx", error=str(exc))
+        return None
+
+    try:
+        if doi:
+            clean_doi = doi.lower().replace("https://doi.org/", "").replace("http://doi.org/", "")
+            url = f"https://api.openalex.org/works/doi:{clean_doi}"
+        else:
+            params = httpx.QueryParams({"search": title, "per_page": 1})
+            url = f"https://api.openalex.org/works?{params}"
+
+        with httpx.Client(timeout=httpx.Timeout(8.0, connect=5.0, read=8.0)) as client:
+            response = client.get(url, headers={"Accept": "application/json"})
+            response.raise_for_status()
+            data = response.json()
+    except Exception as exc:
+        logger.warning("OpenAlex citation resolve failed", error=str(exc), doi=doi, title=title)
+        return None
+
+    if not data:
+        return None
+
+    if doi:
+        cited_by_count = data.get("cited_by_count")
+    else:
+        results = data.get("results") or []
+        cited_by_count = results[0].get("cited_by_count") if results else None
+
+    try:
+        return int(cited_by_count) if cited_by_count is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _abstract_from_inverted_index(index: Optional[Dict[str, List[int]]]) -> str:
+    if not index:
+        return ""
+    max_pos = 0
+    for positions in index.values():
+        if positions:
+            max_pos = max(max_pos, max(positions))
+    words: List[str] = [""] * (max_pos + 1)
+    for token, positions in index.items():
+        for pos in positions:
+            if 0 <= pos < len(words):
+                words[pos] = token
+    return " ".join(word for word in words if word)
+
+
+def _resolve_openalex_metadata(doi: Optional[str], title: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not doi and not title:
+        return None
+
+    try:
+        import httpx  # type: ignore
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("OpenAlex resolve requires httpx", error=str(exc))
+        return None
+
+    try:
+        if doi:
+            clean_doi = doi.lower().replace("https://doi.org/", "").replace("http://doi.org/", "")
+            url = f"https://api.openalex.org/works/doi:{clean_doi}"
+            params = None
+        else:
+            params = httpx.QueryParams({"search": title, "per_page": 1})
+            url = f"https://api.openalex.org/works?{params}"
+
+        with httpx.Client(timeout=httpx.Timeout(8.0, connect=5.0, read=8.0)) as client:
+            response = client.get(url, headers={"Accept": "application/json"})
+            response.raise_for_status()
+            data = response.json()
+    except Exception as exc:
+        logger.warning("OpenAlex metadata resolve failed", error=str(exc), doi=doi, title=title)
+        return None
+
+    if not data:
+        return None
+
+    record = data if doi else (data.get("results") or [None])[0]
+    if not record:
+        return None
+
+    authors = []
+    for author in record.get("authorships") or []:
+        author_name = (author.get("author") or {}).get("display_name")
+        if author_name:
+            authors.append(author_name)
+
+    abstract = _abstract_from_inverted_index(record.get("abstract_inverted_index"))
+
+    host = record.get("host_venue") or {}
+    primary = record.get("primary_location") or {}
+    primary_source = primary.get("source") or {}
+    journal_name = (
+        host.get("display_name")
+        or primary_source.get("display_name")
+        or primary_source.get("host_organization_name")
+        or host.get("publisher")
+        or ""
+    )
+
+    return {
+        "title": record.get("display_name") or "",
+        "abstract": abstract,
+        "authors": authors,
+        "doi": record.get("doi") or "",
+        "journal_name": journal_name,
+        "published": record.get("publication_date") or record.get("publication_year") or "",
+        "url": record.get("id") or record.get("primary_location", {}).get("landing_page_url") or "",
+    }
+
+
 def _parse_zotero_item(item: Dict[str, Any]) -> Dict[str, Any]:
     creators = item.get("creators") or []
     authors: List[str] = []
@@ -386,6 +530,16 @@ def _looks_like_base64(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9+/=\r\n]+", stripped))
 
 
+def _extract_doi_from_text(text: str) -> Optional[str]:
+    if not text:
+        return None
+    match = re.search(r"\b10\.\d{4,9}/[^\s\"<>]+", text)
+    if not match:
+        return None
+    doi = match.group(0).rstrip(".,;)")
+    return doi or None
+
+
 def _generate_upload_paper_id(session_id: str, filename: str, order: int, content: str) -> str:
     digest = hashlib.md5(f"{session_id}:{filename}:{order}:{content[:200]}".encode("utf-8", errors="ignore")).hexdigest()
     return f"upload_{digest[:12]}"
@@ -396,6 +550,25 @@ def _summarize_text(text: str, limit: int = 1500) -> str:
     if len(cleaned) > limit:
         return cleaned[:limit] + "... (truncated)"
     return cleaned
+
+
+def _extract_abstract_from_text(text: str) -> Optional[str]:
+    if not text:
+        return None
+    normalized = " ".join(text.split())
+    if len(normalized) < 200:
+        return None
+    patterns = [
+        r"(?:^|\b)abstract[:\s-]+(.+?)(?:\bkeywords\b|\bintroduction\b|$)",
+        r"(?:^|\b)摘要[:\s-]+(.+?)(?:\b关键词\b|\b引言\b|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            candidate = match.group(1).strip()
+            if len(candidate) >= 120:
+                return candidate
+    return None
 
 
 def _extract_text_from_binary(data: bytes, filename: str, mime_type: Optional[str]) -> str:

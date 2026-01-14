@@ -137,14 +137,14 @@ def read_papers_from_csv(csv_file_path: str) -> List[Dict[str, Any]]:
                     paper['journal_name'] = paper.pop('JournalName')
                 elif key == 'CitationCount':
                     citation_count = paper.pop('CitationCount')
-                    # 转换为整数
+                    # Convert to int when present; keep None for empty values.
                     if citation_count and str(citation_count).strip():
                         try:
                             paper['citation_count'] = int(citation_count)
                         except (ValueError, TypeError):
-                            paper['citation_count'] = 0
+                            paper['citation_count'] = None
                     else:
-                        paper['citation_count'] = 0
+                        paper['citation_count'] = None
                 elif key == 'Score':
                     score = paper.pop('Score')
                     # 转换为浮点数

@@ -24,7 +24,6 @@ const Sidebar: React.FC = () => {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
 
-  // 过滤并按创建时间倒序排列（最新的在最前面）
   const filteredSessions = sessions
     .filter(session =>
       session.title.toLowerCase().includes(searchTerm.toLowerCase())
@@ -37,58 +36,55 @@ const Sidebar: React.FC = () => {
 
   const handleSaveData = () => {
     forceSave()
-    toast.success('数据已保存')
+    toast.success('Data saved.')
   }
 
   const handleCreateSession = () => {
-    // 使用设置中的默认智能体，如果没有则使用当前智能体
     const agentId = settings.defaultAgent || currentAgent?.id
     if (agentId) {
-      // 创建新会话时，当前会话的消息已经通过 addMessage 保存了
-      // 所以直接创建新会话即可
-      const newSession = createSession('新对话', agentId)
+      const newSession = createSession('New chat', agentId)
       setCurrentSession(newSession)
-      console.log('创建新会话:', newSession.id, '使用智能体:', agentId, '当前会话数:', sessions.length + 1)
+      console.log('Created new session:', newSession.id)
     }
   }
 
   const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    console.log('尝试删除会话:', sessionId)
-    if (confirm('确定要删除这个对话吗？')) {
+    console.log('Deleting session:', sessionId)
+    if (confirm('Delete this conversation?')) {
       try {
         deleteSession(sessionId)
-        console.log('会话删除成功:', sessionId)
+        console.log('Session deleted:', sessionId)
       } catch (error) {
-        console.error('删除会话失败:', error)
+        console.error('Failed to delete session:', error)
       }
     }
   }
 
   const handleDeleteAllSessions = () => {
-    if (confirm('确定要清除所有会话吗？此操作不可恢复！')) {
+    if (confirm('Clear all conversations? This cannot be undone.')) {
       try {
         deleteAllSessions()
-        console.log('所有会话已清除')
-        toast.success('所有会话已清除')
+        console.log('All conversations cleared')
+        toast.success('All conversations cleared.')
       } catch (error) {
-        console.error('清除会话失败:', error)
-        toast.error('清除会话失败')
+        console.error('Failed to clear conversations:', error)
+        toast.error('Failed to clear conversations.')
       }
     }
   }
 
   const handleClearSession = (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    console.log('尝试清除会话内容:', sessionId)
-    if (confirm('确定要清除这个会话的所有消息吗？')) {
+    console.log('Clearing messages in session:', sessionId)
+    if (confirm('Clear all messages in this conversation?')) {
       try {
         clearSession(sessionId)
-        console.log('会话内容已清除:', sessionId)
-        toast.success('会话内容已清除')
+        console.log('Session cleared:', sessionId)
+        toast.success('Conversation cleared.')
       } catch (error) {
-        console.error('清除会话内容失败:', error)
-        toast.error('清除会话内容失败')
+        console.error('Failed to clear session:', error)
+        toast.error('Failed to clear conversation.')
       }
     }
   }
@@ -114,25 +110,23 @@ const Sidebar: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col">
-      {/* 头部 */}
       <div className="p-4 border-b border-white/10">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-800">对话历史</h2>
+          <h2 className="text-lg font-semibold text-gray-800">Conversations</h2>
           <button
             onClick={handleSaveData}
             className="p-1.5 bg-white/50 hover:bg-white text-gray-600 rounded-lg transition-colors shadow-sm"
-            title="手动保存数据"
+            title="Save data"
           >
             <Save className="w-4 h-4" />
           </button>
         </div>
 
-        {/* 搜索框 */}
         <div className="relative group">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 group-hover:text-primary-500 transition-colors" />
           <input
             type="text"
-            placeholder="搜索对话..."
+            placeholder="Search conversations..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-white/40 border border-white/40 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:bg-white/60 transition-all text-sm placeholder-gray-400"
@@ -140,36 +134,39 @@ const Sidebar: React.FC = () => {
         </div>
       </div>
 
-      {/* 对话列表 */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {filteredSessions.length === 0 ? (
           <div className="p-4 text-center text-gray-500">
             <MessageSquare className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-            <p className="text-sm">暂无对话记录</p>
-            <p className="text-xs text-gray-400 mt-1">
-              点击"新对话"开始聊天
-            </p>
+            <p className="text-sm">No conversations yet</p>
+            <p className="text-xs text-gray-400 mt-1">Click "New chat" to start.</p>
+            <button
+              onClick={handleCreateSession}
+              className="mt-3 w-full p-3 rounded-lg border-2 border-dashed border-primary-300 hover:border-primary-500 hover:bg-primary-50 transition-colors flex items-center justify-center gap-2 text-primary-600 font-medium"
+              disabled={!currentAgent}
+            >
+              <Plus className="w-5 h-5" />
+              New chat
+            </button>
           </div>
         ) : (
           <div className="p-2 space-y-1">
-            {/* 新建对话按钮 - 放在列表最前面 */}
             <button
               onClick={handleCreateSession}
               className="w-full p-3 rounded-lg border-2 border-dashed border-primary-300 hover:border-primary-500 hover:bg-primary-50 transition-colors flex items-center justify-center gap-2 text-primary-600 font-medium"
               disabled={!currentAgent}
             >
               <Plus className="w-5 h-5" />
-              新建对话
+              New chat
             </button>
 
-            {/* 清除所有会话按钮 */}
             {sessions.length > 0 && (
               <button
                 onClick={handleDeleteAllSessions}
                 className="w-full p-2 rounded-lg border border-red-300 hover:border-red-500 hover:bg-red-50 transition-colors flex items-center justify-center gap-2 text-red-600 text-sm"
               >
                 <Trash2 className="w-4 h-4" />
-                清除所有会话
+                Clear all conversations
               </button>
             )}
 
@@ -203,13 +200,13 @@ const Sidebar: React.FC = () => {
                         onClick={() => handleSaveEdit(session.id)}
                         className="btn btn-primary btn-sm text-xs"
                       >
-                        保存
+                        Save
                       </button>
                       <button
                         onClick={handleCancelEdit}
                         className="btn btn-secondary btn-sm text-xs"
                       >
-                        取消
+                        Cancel
                       </button>
                     </div>
                   </div>
@@ -227,15 +224,14 @@ const Sidebar: React.FC = () => {
                               addSuffix: true,
                               locale: zhCN
                             })
-                            : '刚刚'
+                            : 'just now'
                           }
                         </div>
                         <p className={`text-xs mt-1 ${currentSession?.id === session.id ? 'text-blue-200' : 'text-gray-400'}`}>
-                          {session.messages.length} 条消息
+                          {session.messages.length} messages
                         </p>
                       </div>
 
-                      {/* 操作按钮 */}
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
                         <button
                           onClick={(e) => handleEditSession(session, e)}
@@ -243,7 +239,7 @@ const Sidebar: React.FC = () => {
                               ? 'hover:bg-white/20 text-white'
                               : 'hover:bg-gray-200 text-gray-500'
                             }`}
-                          title="重命名"
+                          title="Rename"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
@@ -253,7 +249,7 @@ const Sidebar: React.FC = () => {
                               ? 'hover:bg-white/20 text-white'
                               : 'hover:bg-yellow-100 text-yellow-600'
                             }`}
-                          title="清除内容"
+                          title="Clear messages"
                         >
                           <Eraser className="w-3.5 h-3.5" />
                         </button>
@@ -263,7 +259,7 @@ const Sidebar: React.FC = () => {
                               ? 'hover:bg-white/20 text-white'
                               : 'hover:bg-red-100 text-red-600'
                             }`}
-                          title="删除会话"
+                          title="Delete"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

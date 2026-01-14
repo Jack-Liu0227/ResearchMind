@@ -1,4 +1,4 @@
-import React from 'react'
+﻿import React from 'react'
 
 type BadgeProps = {
   children: React.ReactNode
@@ -7,18 +7,18 @@ type BadgeProps = {
 }
 
 const colorMap: Record<NonNullable<BadgeProps['color']>, string> = {
-  blue: 'bg-blue-50 text-blue-700 ring-blue-200',
-  indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
-  purple: 'bg-purple-50 text-purple-700 ring-purple-200',
-  rose: 'bg-rose-50 text-rose-700 ring-rose-200',
-  gray: 'bg-gray-50 text-gray-700 ring-gray-200',
-  emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  blue: 'bg-blue-50 text-blue-700 ring-blue-200/70 shadow-sm',
+  indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-200/70 shadow-sm',
+  purple: 'bg-purple-50 text-purple-700 ring-purple-200/70 shadow-sm',
+  rose: 'bg-rose-50 text-rose-700 ring-rose-200/70 shadow-sm',
+  gray: 'bg-slate-50 text-slate-700 ring-slate-200/70 shadow-sm',
+  emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200/70 shadow-sm',
 }
 
 const Badge: React.FC<BadgeProps> = ({ children, color = 'gray', title }) => (
   <span
     title={title}
-    className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ring-1 ring-inset ${colorMap[color]} mr-2 mb-1`}
+    className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold ring-1 ring-inset ${colorMap[color]} mr-2 mb-1`}
   >
     {children}
   </span>
@@ -51,7 +51,7 @@ export type JournalInfoCardProps = {
 }
 
 const SkeletonRow: React.FC<{ width?: string }> = ({ width = 'w-40' }) => (
-  <div className={`h-3 ${width} bg-gray-200/70 rounded animate-pulse`} />
+  <div className={`h-3 ${width} bg-slate-200/70 rounded animate-pulse`} />
 )
 
 const JournalInfoCard: React.FC<JournalInfoCardProps> = ({
@@ -81,9 +81,9 @@ const JournalInfoCard: React.FC<JournalInfoCardProps> = ({
 }) => {
   if (loading) {
     return (
-      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 h-5 w-56 bg-gray-200/70 rounded animate-pulse" />
-        <div className="flex flex-wrap gap-x-2 gap-y-2 mb-3">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-3 h-5 w-56 bg-slate-200/70 rounded animate-pulse" />
+        <div className="flex flex-wrap gap-x-2 gap-y-2 mb-4">
           <SkeletonRow width="w-20" />
           <SkeletonRow width="w-24" />
           <SkeletonRow width="w-16" />
@@ -103,22 +103,32 @@ const JournalInfoCard: React.FC<JournalInfoCardProps> = ({
   const hasMeta = issn || eissn || publisher || country
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="relative overflow-hidden rounded-2xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-blue-50/40 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
+      <div className="pointer-events-none absolute -right-20 -top-16 h-48 w-48 rounded-full bg-blue-200/20 blur-3xl" />
+      <div className="pointer-events-none absolute -left-12 -bottom-16 h-40 w-40 rounded-full bg-emerald-200/20 blur-3xl" />
+
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="text-sm text-gray-500 mb-1">期刊</div>
-          <div className="text-lg font-semibold text-gray-900">
+      <div className="relative z-10 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-xs uppercase tracking-[0.2em] text-slate-400 mb-1">期刊</div>
+          <div className="text-lg font-semibold text-slate-900 leading-snug">
             {journalName || 'Unknown Journal'}
           </div>
           {sources.length > 0 && (
-            <div className="mt-1 text-xs text-gray-500">数据来源：{sources.join(' · ')}</div>
+            <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-slate-600">
+              <span className="text-slate-400">数据来源</span>
+              {sources.map((source) => (
+                <span key={source} className="px-2 py-0.5 rounded-full bg-white/80 ring-1 ring-slate-200/70 shadow-sm">
+                  {source}
+                </span>
+              ))}
+            </div>
           )}
         </div>
         <div className="text-right">
           {typeof citedBy === 'number' && (
-            <div className="text-sm text-gray-700">
-              <span className="text-gray-500 mr-1">被引</span>
+            <div className="text-sm text-slate-700">
+              <span className="text-slate-400 mr-1">被引</span>
               <span className="font-semibold">{citedBy}</span>
             </div>
           )}
@@ -127,7 +137,7 @@ const JournalInfoCard: React.FC<JournalInfoCardProps> = ({
               href={`https://doi.org/${doi.replace(/^https?:\/\/doi\.org\//i, '')}`}
               target="_blank"
               rel="noreferrer"
-              className="block text-xs text-blue-600 hover:text-blue-700 mt-1"
+              className="block text-[11px] text-blue-600 hover:text-blue-700 mt-1"
               title="打开 DOI"
             >
               {doi.replace(/^https?:\/\/doi\.org\//i, '')}
@@ -138,7 +148,7 @@ const JournalInfoCard: React.FC<JournalInfoCardProps> = ({
 
       {/* Metrics */}
       {(hasIF || hasQuartile) && (
-        <div className="mt-3 flex flex-wrap items-center">
+        <div className="relative z-10 mt-4 flex flex-wrap items-center">
           {typeof impactFactor === 'number' && (
             <Badge color="blue" title="影响因子">
               IF {impactFactor.toFixed(2)}
@@ -164,7 +174,7 @@ const JournalInfoCard: React.FC<JournalInfoCardProps> = ({
 
       {/* Indexing */}
       {hasIndexing && (
-        <div className="mt-3">
+        <div className="relative z-10 mt-3 flex flex-wrap">
           {sci && <Badge>SCI</Badge>}
           {ssci && <Badge>SSCI</Badge>}
           {ei && <Badge>EI</Badge>}
@@ -177,23 +187,27 @@ const JournalInfoCard: React.FC<JournalInfoCardProps> = ({
 
       {/* Meta */}
       {hasMeta && (
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-700">
+        <div className="relative z-10 mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-slate-700">
           {issn && (
-            <div>
-              <span className="text-gray-500 mr-2">ISSN</span>
+            <div className="rounded-lg bg-white/70 px-3 py-2 ring-1 ring-slate-200/70 shadow-sm">
+              <span className="text-slate-400 mr-2">ISSN</span>
               <span className="font-medium">{issn}</span>
-              {eissn && <span className="ml-2 text-gray-500">E-ISSN <span className="font-medium text-gray-700">{eissn}</span></span>}
+              {eissn && (
+                <span className="ml-2 text-slate-500">
+                  E-ISSN <span className="font-medium text-slate-700">{eissn}</span>
+                </span>
+              )}
             </div>
           )}
           {publisher && (
-            <div>
-              <span className="text-gray-500 mr-2">出版社</span>
+            <div className="rounded-lg bg-white/70 px-3 py-2 ring-1 ring-slate-200/70 shadow-sm">
+              <span className="text-slate-400 mr-2">出版商</span>
               <span className="font-medium">{publisher}</span>
             </div>
           )}
           {country && (
-            <div>
-              <span className="text-gray-500 mr-2">国家/地区</span>
+            <div className="rounded-lg bg-white/70 px-3 py-2 ring-1 ring-slate-200/70 shadow-sm">
+              <span className="text-slate-400 mr-2">国家/地区</span>
               <span className="font-medium">{country}</span>
             </div>
           )}
@@ -204,4 +218,3 @@ const JournalInfoCard: React.FC<JournalInfoCardProps> = ({
 }
 
 export default JournalInfoCard
-

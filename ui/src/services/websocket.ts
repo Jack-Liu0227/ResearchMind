@@ -62,13 +62,14 @@ class WebSocketService {
   // 心跳配置 (仅用于保活，不用于断开检测)
   private heartbeatInterval: number | null = null
   private readonly HEARTBEAT_INTERVAL = 20000 // 20秒发送一次Ping保活 (配合后端的25s间隔)
+  private readonly WATCHDOG_CLOSE_ON_TIMEOUT = false
 
   // 🔧 优化：请求去重 - 跟踪待处理的消息
   private pendingMessages = new Set<string>() // 存储消息内容的哈希
 
   // 🔧 优化：上次收到消息的时间戳 (用于看门狗检测僵尸连接)
   private lastMessageTime: number = Date.now()
-  private readonly WATCHDOG_TIMEOUT = 120000 // 120秒 (2分钟) 无消息才视为僵尸连接
+  private readonly WATCHDOG_TIMEOUT = 1200000 // 1200秒 (20分钟) 无消息才视为僵尸连接
 
   constructor(url?: string) {
     this.url = url || API_CONFIG.WS_URL
@@ -119,6 +120,7 @@ class WebSocketService {
           const wasReconnect = this.reconnectAttempts > 0
           this.isConnecting = false
           this.reconnectAttempts = 0
+          this.pendingMessages.clear()
           this.lastMessageTime = Date.now() // 重置心跳计时
           this.notifyConnectionHandlers(true)
 
@@ -159,6 +161,7 @@ class WebSocketService {
         this.ws.onclose = (event) => {
           console.log('WebSocket disconnected:', event.code, event.reason)
           this.isConnecting = false
+          this.pendingMessages.clear()
           this.notifyConnectionHandlers(false)
 
           // 停止心跳
@@ -219,9 +222,11 @@ class WebSocketService {
               const now = Date.now()
               // 🐕 看门狗检查
               if (now - this.lastMessageTime > this.WATCHDOG_TIMEOUT) {
-                console.warn(`🐕 Watchdog: Connection dead (no data for ${now - this.lastMessageTime}ms). Reconnecting...`)
-                if (this.ws) this.ws.close(4000, 'Watchdog timeout');
-                return;
+                console.warn(`?? Watchdog: Connection idle for ${now - this.lastMessageTime}ms.`)
+                if (this.WATCHDOG_CLOSE_ON_TIMEOUT && this.ws) {
+                  this.ws.close(4000, 'Watchdog timeout')
+                  return
+                }
               }
               // 发送 Ping
               this.send({ type: 'ping', data: { timestamp: now } });
@@ -236,8 +241,10 @@ class WebSocketService {
           if (this.isConnected) {
             const now = Date.now();
             if (now - this.lastMessageTime > this.WATCHDOG_TIMEOUT) {
-              if (this.ws) this.ws.close(4000, 'Watchdog timeout');
-              return;
+              if (this.WATCHDOG_CLOSE_ON_TIMEOUT && this.ws) {
+                this.ws.close(4000, 'Watchdog timeout')
+                return
+              }
             }
             this.send({ type: 'ping', data: { timestamp: now } });
           }

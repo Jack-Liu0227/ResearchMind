@@ -59,6 +59,7 @@ def normalize_paper_fields(paper: Dict[str, Any], source: str = None) -> Dict[st
         'id',  # 保留原始 ID
         'summary',  # 保留摘要的别名
         'journal_name',
+        'journal_name',
     ]
 
     for field in optional_fields:

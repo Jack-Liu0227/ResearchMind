@@ -1090,9 +1090,9 @@ const MessageList: React.FC<MessageListProps> = React.memo(({ messages, onRegene
           <div className="h-full flex items-center justify-center">
             <div className="text-center text-gray-500">
               <Bot className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-              <h3 className="text-lg font-medium mb-2">开始新对话</h3>
+              <h3 className="text-lg font-medium mb-2">Start a new chat</h3>
               <p className="text-sm">
-                选择一个智能体，然后输入您的问题开始对话
+                Select an agent, then enter your question to begin.
               </p>
             </div>
           </div>

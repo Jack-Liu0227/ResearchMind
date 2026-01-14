@@ -760,6 +760,25 @@ const ChatPage: React.FC = () => {
                 })
               }
             }
+            if ((toolExecutionData.toolName === 'ingest_uploaded_papers' ||
+              toolExecutionData.toolName === 'ingest_uploaded_documents') &&
+              toolExecutionData.output.csv_file_path &&
+              toolExecutionData.output.total_papers_in_csv) {
+              const sessionId = toolExecutionData.output.session_id || toolExecutionData.sessionId || currentSession?.id || 'default'
+              const csvPath = normalizePapersCsvPath(toolExecutionData.output.csv_file_path)
+              if (csvPath) {
+                setPapersData(
+                  csvPath,
+                  sessionId,
+                  toolExecutionData.output.total_papers_in_csv
+                )
+                console.log('Set uploaded papers data into store:', {
+                  csvPath: csvPath,
+                  sessionId: sessionId,
+                  count: toolExecutionData.output.total_papers_in_csv
+                })
+              }
+            }
           }
         } else {
           // 创建新的工具执行消息
@@ -814,6 +833,25 @@ const ChatPage: React.FC = () => {
                   toolExecutionData.output.total_papers_in_csv
                 )
                 console.log('📚 设置文献数据到 store:', {
+                  csvPath: csvPath,
+                  sessionId: sessionId,
+                  count: toolExecutionData.output.total_papers_in_csv
+                })
+              }
+            }
+            if ((toolExecutionData.toolName === 'ingest_uploaded_papers' ||
+              toolExecutionData.toolName === 'ingest_uploaded_documents') &&
+              toolExecutionData.output.csv_file_path &&
+              toolExecutionData.output.total_papers_in_csv) {
+              const sessionId = toolExecutionData.output.session_id || toolExecutionData.sessionId || currentSession?.id || 'default'
+              const csvPath = normalizePapersCsvPath(toolExecutionData.output.csv_file_path)
+              if (csvPath) {
+                setPapersData(
+                  csvPath,
+                  sessionId,
+                  toolExecutionData.output.total_papers_in_csv
+                )
+                console.log('Set uploaded papers data into store:', {
                   csvPath: csvPath,
                   sessionId: sessionId,
                   count: toolExecutionData.output.total_papers_in_csv
@@ -964,6 +1002,24 @@ const ChatPage: React.FC = () => {
         // 处理批量分析完成
         console.log('✅ [批量分析] 分析完成:', message.data)
 
+        const storeState = useAppStore.getState()
+        const pendingToolMessage = storeState.messages.find(
+          (m) =>
+            m.type === 'tool_execution' &&
+            m.toolExecution?.toolName === 'batch_paper_analysis' &&
+            m.toolExecution?.status === 'pending'
+        )
+        if (pendingToolMessage) {
+          storeState.updateMessage(pendingToolMessage.id, {
+            toolExecution: {
+              ...pendingToolMessage.toolExecution,
+              status: 'success',
+              output: message.data
+            },
+            metadata: message.data || {}
+          })
+        }
+
         toast.success(message.data.message || '批量分析已完成！', {
           duration: 5000,
           icon: '✅'
@@ -971,6 +1027,23 @@ const ChatPage: React.FC = () => {
       } else if ((message.type as any) === 'analysis_error' && message.data) {
         // 处理批量分析错误
         console.error('❌ [批量分析] 分析失败:', message.data)
+
+        const storeState = useAppStore.getState()
+        const pendingToolMessage = storeState.messages.find(
+          (m) =>
+            m.type === 'tool_execution' &&
+            m.toolExecution?.toolName === 'batch_paper_analysis' &&
+            m.toolExecution?.status === 'pending'
+        )
+        if (pendingToolMessage) {
+          storeState.updateMessage(pendingToolMessage.id, {
+            toolExecution: {
+              ...pendingToolMessage.toolExecution,
+              status: 'error',
+              error: message.data?.error || '??????'
+            }
+          })
+        }
 
         toast.error(message.data.error || '批量分析失败', {
           duration: 6000,
@@ -1033,6 +1106,7 @@ const ChatPage: React.FC = () => {
         toast.success('重新连接成功')
       } else {
         toast.error('连接已断开')
+        historyRequestRef.current = null
         // 🆕 连接断开时，设置超时后自动清除加载状态，避免卡住
         setTimeout(() => {
           const currentLoading = useAppStore.getState()
