@@ -112,6 +112,16 @@ class WebSocketService {
         }
         wsUrl = `${wsUrl}/${this.clientId}`
 
+        if (typeof window !== 'undefined') {
+          console.log('?? WebSocket window.location:', {
+            href: window.location.href,
+            origin: window.location.origin,
+            host: window.location.host,
+            protocol: window.location.protocol,
+          })
+        }
+
+
         console.log(`🔌 连接 WebSocket (无限重连模式): ${wsUrl}`)
         this.ws = new WebSocket(wsUrl)
 
@@ -159,7 +169,14 @@ class WebSocketService {
         }
 
         this.ws.onclose = (event) => {
-          console.log('WebSocket disconnected:', event.code, event.reason)
+          console.log('WebSocket disconnected:', event.code, event.reason, 'clean:', event.wasClean)
+          if (typeof window !== 'undefined') {
+            console.log('?? WebSocket close context:', {
+              visibility: document.visibilityState,
+              online: navigator.onLine,
+              readyState: this.ws?.readyState,
+            })
+          }
           this.isConnecting = false
           this.pendingMessages.clear()
           this.notifyConnectionHandlers(false)

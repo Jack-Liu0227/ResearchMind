@@ -38,6 +38,7 @@ NC='\033[0m'
 # 路径配置
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 LOG_DIR="${PROJECT_ROOT}/../data/logs"
+REDIS_DATA_DIR="${PROJECT_ROOT}/../data/redis"
 
 # 重启配置
 MAX_RESTART_ATTEMPTS=3          # 最大重启尝试次数
@@ -209,6 +210,89 @@ check_dependencies() {
         exit 1
     fi
     log_success "python3 可用: $(python3 --version)"
+}
+
+check_redis_service() {
+    log_info "Checking Redis service..."
+
+    local redis_host="${REDIS_HOST:-127.0.0.1}"
+    local redis_port="${REDIS_PORT:-6379}"
+    local redis_conf="${PROJECT_ROOT}/redis.conf"
+
+    if ! command -v redis-server >/dev/null 2>&1 && ! command -v redis-cli >/dev/null 2>&1; then
+        log_warning "Redis not found. Attempting to install..."
+
+        if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -y || { log_error "apt-get update failed"; return 1; }
+            sudo apt-get install -y redis-server || { log_error "apt-get install redis-server failed"; return 1; }
+        elif command -v dnf >/dev/null 2>&1; then
+            sudo dnf install -y redis || { log_error "dnf install redis failed"; return 1; }
+        elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y redis || { log_error "yum install redis failed"; return 1; }
+        elif command -v pacman >/dev/null 2>&1; then
+            sudo pacman -Sy --noconfirm redis || { log_error "pacman install redis failed"; return 1; }
+        elif command -v zypper >/dev/null 2>&1; then
+            sudo zypper -n install redis || { log_error "zypper install redis failed"; return 1; }
+        else
+            log_error "No supported package manager found to install Redis."
+            return 1
+        fi
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        if ! systemctl is-active --quiet redis && ! systemctl is-active --quiet redis-server; then
+            sudo systemctl enable --now redis >/dev/null 2>&1 || true
+            sudo systemctl enable --now redis-server >/dev/null 2>&1 || true
+        fi
+
+        if systemctl is-active --quiet redis || systemctl is-active --quiet redis-server; then
+            log_success "Redis service is running (systemd)."
+        else
+            log_warning "Redis service is not running (systemd)."
+        fi
+    elif command -v service >/dev/null 2>&1; then
+        sudo service redis-server start >/dev/null 2>&1 || sudo service redis start >/dev/null 2>&1 || true
+    else
+        log_warning "No service manager found to start Redis."
+    fi
+
+    local ping_ok=false
+    if command -v redis-cli >/dev/null 2>&1; then
+        if redis-cli -h "$redis_host" -p "$redis_port" ping >/dev/null 2>&1; then
+            log_success "Redis ping OK (${redis_host}:${redis_port})."
+            ping_ok=true
+        else
+            log_warning "Redis ping failed (${redis_host}:${redis_port})."
+        fi
+    fi
+
+    if [ "$ping_ok" != "true" ] && command -v redis-server >/dev/null 2>&1; then
+        log_warning "Redis not responding, attempting to start local redis-server..."
+        mkdir -p "$REDIS_DATA_DIR"
+
+        if [ -f "$redis_conf" ]; then
+            nohup redis-server "$redis_conf" \
+                --dir "$REDIS_DATA_DIR" \
+                --bind "$redis_host" \
+                --port "$redis_port" \
+                > "${LOG_DIR}/redis.log" 2>&1 &
+        else
+            nohup redis-server \
+                --dir "$REDIS_DATA_DIR" \
+                --bind "$redis_host" \
+                --port "$redis_port" \
+                > "${LOG_DIR}/redis.log" 2>&1 &
+        fi
+
+        sleep 1
+        if command -v redis-cli >/dev/null 2>&1; then
+            if redis-cli -h "$redis_host" -p "$redis_port" ping >/dev/null 2>&1; then
+                log_success "Redis started locally (${redis_host}:${redis_port})."
+            else
+                log_warning "Redis still not responding after local start."
+            fi
+        fi
+    fi
 }
 
 install_dependencies() {
@@ -714,6 +798,7 @@ wait_forever() {
 # -----------------------------------------------------------------------------
 print_banner
 check_dependencies
+check_redis_service
 load_config
 prepare_workspace
 install_dependencies

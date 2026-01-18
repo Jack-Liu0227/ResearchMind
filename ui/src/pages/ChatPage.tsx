@@ -779,6 +779,12 @@ const ChatPage: React.FC = () => {
                 })
               }
             }
+            if (toolExecutionData.toolName === 'batch_paper_analysis' ||
+              toolExecutionData.toolName === 'generate_research_report') {
+              setIsLoading(false)
+              setLoadingMessage('')
+              toast.dismiss('agent-processing-toast')
+            }
           }
         } else {
           // 创建新的工具执行消息
@@ -1002,6 +1008,10 @@ const ChatPage: React.FC = () => {
         // 处理批量分析完成
         console.log('✅ [批量分析] 分析完成:', message.data)
 
+        setIsLoading(false)
+        setLoadingMessage('')
+        toast.dismiss('agent-processing-toast')
+
         const storeState = useAppStore.getState()
         const pendingToolMessage = storeState.messages.find(
           (m) =>
@@ -1028,6 +1038,10 @@ const ChatPage: React.FC = () => {
         // 处理批量分析错误
         console.error('❌ [批量分析] 分析失败:', message.data)
 
+        setIsLoading(false)
+        setLoadingMessage('')
+        toast.dismiss('agent-processing-toast')
+
         const storeState = useAppStore.getState()
         const pendingToolMessage = storeState.messages.find(
           (m) =>
@@ -1053,6 +1067,10 @@ const ChatPage: React.FC = () => {
         // 处理报告生成完成
         console.log('✅ [报告生成] 生成完成:', message.data)
 
+        setIsLoading(false)
+        setLoadingMessage('')
+        toast.dismiss('agent-processing-toast')
+
         toast.success(message.data.message || '研究报告生成完成！', {
           duration: 5000,
           icon: '📄'
@@ -1060,6 +1078,10 @@ const ChatPage: React.FC = () => {
       } else if ((message.type as any) === 'report_error' && message.data) {
         // 处理报告生成错误
         console.error('❌ [报告生成] 生成失败:', message.data)
+
+        setIsLoading(false)
+        setLoadingMessage('')
+        toast.dismiss('agent-processing-toast')
 
         toast.error(message.data.error || '报告生成失败', {
           duration: 6000,

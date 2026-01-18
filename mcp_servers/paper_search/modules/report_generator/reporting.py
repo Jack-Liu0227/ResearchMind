@@ -425,8 +425,21 @@ class ResearchReportGenerator:
                 try:
                     # 使用 asyncio 包装同步的 completion 调用，并添加超时控制
                     loop = asyncio.get_event_loop()
-                    response = await asyncio.wait_for(
-                        loop.run_in_executor(
+                    if ANALYSIS_TIMEOUT > 0:
+                        response = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None,
+                                lambda: completion(
+                                    model=self.model,
+                                    messages=[{"role": "user", "content": analysis_prompt}],
+                                    temperature=0.3,
+                                    max_tokens=LLM_ANALYSIS_MAX_TOKENS  # 🔧 使用环境变量配置
+                                )
+                            ),
+                            timeout=ANALYSIS_TIMEOUT
+                        )
+                    else:
+                        response = await loop.run_in_executor(
                             None,
                             lambda: completion(
                                 model=self.model,
@@ -434,9 +447,7 @@ class ResearchReportGenerator:
                                 temperature=0.3,
                                 max_tokens=LLM_ANALYSIS_MAX_TOKENS  # 🔧 使用环境变量配置
                             )
-                        ),
-                        timeout=ANALYSIS_TIMEOUT
-                    )
+                        )
 
                     # 安全地处理响应对象
                     analysis_text = ""

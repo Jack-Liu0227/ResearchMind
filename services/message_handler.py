@@ -97,6 +97,9 @@ class MessageHandler:
         if not agent_id:
             await self.send_error(websocket, "Please select an agent first")
             return
+        if not session_id:
+            await self.send_error(websocket, "Session ID is required")
+            return
 
         logger.info(f"💬 [Client:{client_id}] [Agent:{agent_id}] Message: {content[:100]}...")
 
@@ -141,6 +144,9 @@ class MessageHandler:
 
         if not agent_id:
             await self.send_error(websocket, "Please select an agent first")
+            return
+        if not session_id:
+            await self.send_error(websocket, "Session ID is required")
             return
 
         await agent_coordinator.process_chat_message(

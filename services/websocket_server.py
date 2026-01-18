@@ -9,6 +9,7 @@ import logging
 import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime
+import time
 
 import websockets
 from websockets.server import serve
@@ -76,8 +77,8 @@ class WebSocketServer:
             server_config.WEBSOCKET_HOST,
             server_config.WEBSOCKET_PORT,
             max_size=50 * 1024 * 1024,  # 50MB - 支持大文件上传（base64 编码后会增大约 33%）
-            ping_interval=15,  # 每 15 秒发送 ping (保持连接活跃，应对更积极的防火墙)
-            ping_timeout=300,  # 300 秒 (5分钟) 内未收到 pong 才断开，大幅容忍网络延迟或客户端卡顿
+            ping_interval=None,  # Disable server-initiated pings to avoid disconnects during long tasks.
+            ping_timeout=None,
         ):
             logger.info("✅ Server started, waiting for connections...")
             logger.info(f"📦 Max message size: 50MB (supports ~37MB original files after base64 encoding)")
@@ -109,6 +110,17 @@ class WebSocketServer:
             logger.info(f"🆕 Generated new client_id: {client_id}")
         else:
             logger.info(f"📦 Using client_id from URL: {client_id}")
+        try:
+            headers = websocket.request_headers
+            logger.info("?? WS headers: origin=%s host=%s ua=%s xff=%s xfp=%s",
+                        headers.get('Origin'),
+                        headers.get('Host'),
+                        headers.get('User-Agent'),
+                        headers.get('X-Forwarded-For'),
+                        headers.get('X-Forwarded-Proto'))
+        except Exception as e:
+            logger.warning("Failed to read WS headers: %s", e)
+
 
         self.connected_clients[client_id] = websocket
         self.client_sessions[client_id] = {
@@ -116,7 +128,9 @@ class WebSocketServer:
             "path": path,
             "authenticated": False,
             "authenticated_user_id": None,
-            "user": None
+            "user": None,
+            "active_session_id": None,
+            "last_message_ts": time.time(),
         }
 
         logger.info(f"✅ Client connected: {client_id}")
@@ -133,9 +147,25 @@ class WebSocketServer:
             # Send agents list
             await self.message_handler.send_agent_list(websocket)
             
+            session_required_types = {
+                "chat",
+                "message",
+                "chat_with_attachments",
+                "get_history",
+                "recover_session",
+                "stop_response",
+            }
+            auto_create_types = {
+                "chat",
+                "message",
+                "chat_with_attachments",
+            }
+
             # Handle messages
             async for message in websocket:
                 try:
+                    if client_id in self.client_sessions:
+                        self.client_sessions[client_id]["last_message_ts"] = time.time()
                     # 🔒 添加消息大小检查，防止解析超大消息导致内存溢出
                     if len(message) > 50 * 1024 * 1024:  # 50MB
                         logger.error(f"❌ Message too large from client {client_id}: {len(message)} bytes")
@@ -144,22 +174,41 @@ class WebSocketServer:
 
                     data = json.loads(message)
 
-                    # Extract or create session_id
-                    session_id = data.get("sessionId") or data.get("session_id")
+                    message_type = data.get("type")
+                    incoming_session_id = data.get("sessionId") or data.get("session_id")
+                    session_id = incoming_session_id
+                    client_state = self.client_sessions.get(client_id, {})
+                    active_session_id = client_state.get("active_session_id")
 
-                    # If no session_id provided, generate a proper session_id (not default_xxx)
                     if not session_id:
-                        # 🔧 修复：生成正确格式的 session_id，不使用 default 前缀
-                        import time
-                        import random
-                        import string
-                        timestamp = int(time.time() * 1000)
-                        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-                        session_id = f"session_{timestamp}_{random_id}"
-                        logger.info(f"🆕 Generated new session_id: {session_id}")
+                        if active_session_id:
+                            session_id = active_session_id
+                        elif message_type in auto_create_types:
+                            # Create a new session only for chat-like messages.
+                            import random
+                            import string
+                            timestamp = int(time.time() * 1000)
+                            random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                            session_id = f"session_{timestamp}_{random_id}"
+                            if client_id in self.client_sessions:
+                                self.client_sessions[client_id]["active_session_id"] = session_id
+                            logger.info(f"🆕 Generated new session_id: {session_id}")
+                        elif message_type in session_required_types:
+                            await self.message_handler.send_message(websocket, "status", {
+                                "status": "warning",
+                                "message": "No active session. Start a chat to create one.",
+                            })
+                            continue
 
-                    # Ensure session exists
-                    if not SessionManager.get_session(session_id):
+                    if session_id and message_type in session_required_types:
+                        if client_id in self.client_sessions:
+                            self.client_sessions[client_id]["active_session_id"] = session_id
+
+                    if session_id:
+                        data["sessionId"] = session_id
+
+                    # Ensure session exists for session-bound messages
+                    if session_id and message_type in session_required_types and not SessionManager.get_session(session_id):
                         agent_id = data.get("agentId") or data.get("agent_id")
                         SessionManager.create_session(
                             session_id=session_id,
@@ -169,25 +218,13 @@ class WebSocketServer:
                         )
                         logger.info(f"🆕 Auto-created session: {session_id}")
 
-                    # 🔒 使用 asyncio.wait_for 添加超时保护，防止消息处理卡死
-                    import asyncio
-                    try:
-                        await asyncio.wait_for(
-                            self.message_handler.handle_message(
-                                client_id=client_id,
-                                websocket=websocket,
-                                data=data,
-                                agent_coordinator=self.agent_coordinator,
-                                session_id=session_id  # Pass session_id
-                            ),
-                            timeout=600.0  # 10 分钟超时（适应长时间计算任务）
-                        )
-                    except asyncio.TimeoutError:
-                        logger.error(f"❌ Message handling timeout for client {client_id}, session {session_id}")
-                        await self.message_handler.send_error(
-                            websocket,
-                            "处理超时（10分钟），请稍后重试或减小任务规模"
-                        )
+                    await self.message_handler.handle_message(
+                        client_id=client_id,
+                        websocket=websocket,
+                        data=data,
+                        agent_coordinator=self.agent_coordinator,
+                        session_id=session_id  # Pass session_id
+                    )
                 except json.JSONDecodeError as e:
                     logger.error(f"❌ Invalid JSON message from client {client_id}: {e}")
                     # 🔒 记录错误到监控器
@@ -229,6 +266,14 @@ class WebSocketServer:
         except Exception as e:
             logger.error(f"❌ Client error: {e}", exc_info=True)
         finally:
+            try:
+                last_ts = None
+                if client_id in self.client_sessions:
+                    last_ts = self.client_sessions[client_id].get("last_message_ts")
+                idle_secs = time.time() - last_ts if last_ts else None
+                logger.info(f"???? WS closed: {client_id} (code: {websocket.close_code}, reason: {websocket.close_reason}, idle_secs: {idle_secs})")
+            except Exception:
+                pass
             # Cleanup
             if client_id in self.connected_clients:
                 del self.connected_clients[client_id]

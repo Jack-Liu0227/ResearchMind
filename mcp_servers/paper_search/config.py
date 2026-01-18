@@ -98,10 +98,10 @@ ensure_data_directories()
 MAX_CONCURRENT_FETCH = int(os.getenv('MAX_CONCURRENT_FETCH', '10'))
 
 # 分析论文的最大并发数
-MAX_CONCURRENT_ANALYSIS = int(os.getenv('MAX_CONCURRENT_ANALYSIS', '5'))
+MAX_CONCURRENT_ANALYSIS = int(os.getenv('MAX_CONCURRENT_ANALYSIS', '10'))
 
 # 批量分析的最大并发数（使用 Semaphore 控制）
-MAX_CONCURRENT_BATCH_ANALYSIS = int(os.getenv('MAX_CONCURRENT_BATCH_ANALYSIS', '5'))
+MAX_CONCURRENT_BATCH_ANALYSIS = int(os.getenv('MAX_CONCURRENT_BATCH_ANALYSIS', '10'))
 
 
 # ==================== 超时配置 ====================
@@ -228,8 +228,8 @@ def validate_config():
     # 检查超时
     if FETCH_TIMEOUT < 5:
         issues.append("FETCH_TIMEOUT should be >= 5 seconds")
-    if ANALYSIS_TIMEOUT < 30:
-        issues.append("ANALYSIS_TIMEOUT should be >= 30 seconds")
+    if ANALYSIS_TIMEOUT != 0 and ANALYSIS_TIMEOUT < 30:
+        issues.append("ANALYSIS_TIMEOUT should be >= 30 seconds or 0 to disable")
     
     # 检查内容长度
     if REPORT_CONTENT_MAX_LENGTH < 1000:
@@ -250,4 +250,3 @@ def validate_config():
 
 # 启动时验证配置
 validate_config()
-

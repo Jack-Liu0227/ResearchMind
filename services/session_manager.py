@@ -41,6 +41,7 @@ class SessionManager:
     IMAGES_DIR = BASE_DATA_DIR / "images"
     METADATA_DIR = BASE_DATA_DIR / "metadata"
     HISTORY_DIR = BASE_DATA_DIR / "history"  # 🆕 聊天历史记录
+    HISTORY_SUMMARY_DIR = BASE_DATA_DIR / "history_summary"
 
     # Session registry
     _sessions: Dict[str, Dict[str, Any]] = {}
@@ -71,7 +72,7 @@ class SessionManager:
                 
                 # 只创建核心目录（metadata, history）
                 # structures 和 images 目录在 create_session 时按需创建，避免空目录
-                for directory in [cls.METADATA_DIR, cls.HISTORY_DIR]:
+                for directory in [cls.METADATA_DIR, cls.HISTORY_DIR, cls.HISTORY_SUMMARY_DIR]:
                     if not directory.exists():
                         directory.mkdir(parents=True, exist_ok=True)
                 
@@ -463,6 +464,38 @@ class SessionManager:
         except Exception as e:
             logger.error(f"❌ Failed to load session history: {e}")
             return []
+
+    @classmethod
+    def save_history_summary(cls, session_id: str, summary: Dict[str, Any]) -> Optional[Path]:
+        """
+        Save a truncated-history summary to disk.
+
+        Args:
+            session_id: Session ID
+            summary: Summary payload to persist
+
+        Returns:
+            Path to the summary file or None on failure
+        """
+        try:
+            if not cls.HISTORY_SUMMARY_DIR.exists():
+                cls.HISTORY_SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            summary_file = cls.HISTORY_SUMMARY_DIR / f"{session_id}_{timestamp}.json"
+            temp_file = summary_file.with_suffix('.tmp')
+
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False, default=str)
+
+            if temp_file.exists():
+                temp_file.replace(summary_file)
+
+            logger.info(f"Saved history summary for session {session_id} to {summary_file}")
+            return summary_file
+        except Exception as e:
+            logger.error(f"Failed to save history summary for {session_id}: {e}", exc_info=True)
+            return None
 
 
 # Initialize on module import

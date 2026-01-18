@@ -299,6 +299,65 @@ class AgentCoordinator:
 
         return restored_history
 
+    def _persist_history_snapshot(self, session_id: Optional[str], session: Any) -> None:
+        if not session_id:
+            return
+        try:
+            from .hybrid_session_manager import HybridSessionManager
+
+            session_events = getattr(session, 'events', None) or []
+            if session_events:
+                HybridSessionManager.save_history(session_id, session_events)
+        except Exception as e:
+            logger.warning(f"Failed to persist history snapshot for {session_id}: {e}")
+
+    def _extract_event_text(self, event: Any, max_len: int = 200) -> Dict[str, Any]:
+        parts = []
+        for part in getattr(event, 'parts', []) or []:
+            text = getattr(part, 'text', None)
+            if text:
+                parts.append(text)
+        combined = " ".join(parts).strip()
+        if max_len and len(combined) > max_len:
+            combined = combined[:max_len] + "..."
+        return {
+            "role": getattr(event, 'role', None),
+            "text": combined
+        }
+
+    def _archive_truncated_history(
+        self,
+        session_id: Optional[str],
+        session_key: str,
+        removed_events: List[Any],
+        kept_count: int,
+        reason: str
+    ) -> None:
+        if not session_id or not removed_events:
+            return
+        try:
+            from .session_manager import SessionManager
+
+            sample_events = []
+            if removed_events:
+                head = removed_events[:3]
+                tail = removed_events[-3:] if len(removed_events) > 3 else []
+                sample_events = head + tail
+
+            summary = {
+                "session_id": session_id,
+                "session_key": session_key,
+                "reason": reason,
+                "removed_count": len(removed_events),
+                "kept_count": kept_count,
+                "created_at": datetime.now().isoformat(),
+                "samples": [self._extract_event_text(ev) for ev in sample_events]
+            }
+
+            SessionManager.save_history_summary(session_id, summary)
+        except Exception as e:
+            logger.warning(f"Failed to archive truncated history for {session_id}: {e}")
+
 
 
     async def process_chat_message(
@@ -357,6 +416,10 @@ class AgentCoordinator:
 
                 await MessageHandler.send_error(websocket, f"Unknown agent: {agent_id}")
 
+                return
+
+            if not session_id:
+                await MessageHandler.send_error(websocket, "Session ID is required")
                 return
 
 
@@ -441,7 +504,12 @@ class AgentCoordinator:
 
                 logger.warning(f"⚠️ Session {session_key} has {message_count} messages. Truncating history...")
 
-                await self._truncate_session_history(session_key, websocket)
+                await self._truncate_session_history(
+                    session_key,
+                    websocket,
+                    session_id=session_id,
+                    reason="max_limit"
+                )
 
                 message_count = self.session_message_counts.get(session_key, 0)
 
@@ -453,7 +521,13 @@ class AgentCoordinator:
 
                 logger.warning(f"⚠️ Session {session_key} has {message_count} messages. Auto-clearing to avoid overflow...")
 
-                await self._truncate_session_history(session_key, websocket, target_count=8)
+                await self._truncate_session_history(
+                    session_key,
+                    websocket,
+                    target_count=8,
+                    session_id=session_id,
+                    reason="auto_clear"
+                )
 
                 message_count = self.session_message_counts.get(session_key, 0)
 
@@ -824,7 +898,6 @@ class AgentCoordinator:
                                     'mime_type': att.get('mime_type', 'application/octet-stream')
 
                                 })
-            self._stop_task_heartbeat(session_key)
 
                                 logger.info(f"💾 Saved base64 file: {original_filename} -> {file_path.name} ({len(file_bytes)} bytes)")
 
@@ -974,197 +1047,84 @@ class AgentCoordinator:
 
             # Google ADK API: run_async() 需息user_id, session_id 息new_message 参数
 
-            # 🔒 添加超时保护，防息LLM 调用卡死
 
             import asyncio
 
             event_count = 0
 
+            async def process_events():
+                nonlocal event_count
+                async for event in runner.run_async(
+                    user_id=client_id,
+                    session_id=session.id,
+                    new_message=user_message
+                ):
+                    # Check stop flag
+                    if self.should_stop(session_key):
+                        logger.info(f"Stop flag detected, aborting {session_key}")
+                        self.clear_stop_flag(session_key)
+                        await MessageHandler.send_message(
+                            websocket,
+                            "status",
+                            {
+                                "status": "stopped",
+                                "message": "Stopped"
+                            }
+                        )
+                        return
 
+                    event_count += 1
+                    logger.info(f"🔍 [Event {event_count}] Type: {type(event).__name__}")
+                    logger.info(f"🔍 [Event {event_count}] Attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
 
-            try:
+                    await self._handle_agent_event(event, agent_id, websocket, client_id, session_id)
+                    self._persist_history_snapshot(session_id, session)
 
-                # 使用 asyncio.wait_for 为整个事件流添加超时息5 分钟息
+            await process_events()
 
-                async def process_events():
-
-                    nonlocal event_count
-
-                    async for event in runner.run_async(
-
-                        user_id=client_id,
-
-                        session_id=session.id,
-
-                        new_message=user_message
-
-                    ):
-
-                        # 🆕 检查停止标息
-
-                        if self.should_stop(session_key):
-
-                            logger.info(f"🛑 检测到停止标志，中断处息 {session_key}")
-
-                            self.clear_stop_flag(session_key)
-
-                            await MessageHandler.send_message(
-
-                                websocket,
-
-                                "status",
-
-                                {
-
-                                    "status": "stopped",
-
-                                    "message": "已停止响应"
-
-                                }
-
-                            )
-
-                            return
-
-
-
-                        event_count += 1
-
-                        logger.info(f"🔍 [Event {event_count}] Type: {type(event).__name__}")
-
-                        logger.info(f"🔍 [Event {event_count}] Attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
-
-
-
-                        # 🔒 为每个事件处理添加超时保护（5 分钟息
-
-                        try:
-
-                            await asyncio.wait_for(
-
-                                self._handle_agent_event(event, agent_id, websocket, client_id, session_id),
-
-                                timeout=1200.0  # 20 分钟
-
-                            )
-
-                        except asyncio.TimeoutError:
-
-                            logger.error(f"息Event handling timeout for event {event_count}")
-
-                            await MessageHandler.send_error(
-
-                                websocket,
-
-                                f"事件处理超时（事息{event_count}），继续处理下一个事息.."
-
-                            )
-
-
-
-                await asyncio.wait_for(process_events(), timeout=1200.0)  # 20 分钟总超时
-
-
-
-            except asyncio.TimeoutError:
-
-                logger.error(f"息Agent processing timeout after {event_count} events")
-
-                await MessageHandler.send_error(
-
-                    websocket,
-
-                    "Agent 处理超时（20分钟），请稍后重试或减小任务规模"
-
-                )
-
-                return
-
-
-
-            logger.info(f"息Agent {agent_id} completed - processed {event_count} events")
-
-
+            logger.info(f"Agent {agent_id} completed - processed {event_count} events")
 
             # 获取会话的统计数据（使用隔离上下文）
-
             from .user_billing_config import get_billing_context_manager
 
             context_manager = get_billing_context_manager()
 
-
-
             # 使用 session_id 获取隔离的统计上下文
-
             billing_session_key = session_id or 'unknown'
-
             context = context_manager.get_context(billing_session_key)
 
-
-
             # 息ConversationBillingContext 获取统计信息
-
             session_usage = {
-
                 'total_tokens': 0,
-
                 'total_photons_charged': 0,
-
                 'requests_count': 0,
-
                 'feature_charges': []
-
             }
 
-
-
             if context:
-
                 # 从隔离上下文获取统计数据
-
                 snapshot = context.get_snapshot()
-
                 session_usage = {
-
                     'total_tokens': snapshot['total_tokens'],
-
                     'total_photons_charged': snapshot['total_photons_charged'],
-
                     'requests_count': snapshot['request_count'],
-
                     'feature_charges': snapshot.get('feature_charges', [])
-
                 }
-
-
 
             logger.info(f"📊 [统计] 会话累计: {session_usage.get('total_tokens', 0)} tokens (仅供参息 | 已扣息 {session_usage.get('total_photons_charged', 0)} 光子 | 请求次数: {session_usage.get('requests_count', 0)}")
 
-
-
             # 发送完成状态（包含统计信息息
-
             billing_data = {
-
                 "session_total_tokens": session_usage.get('total_tokens', 0),  # Token 统计（仅供参考）
-
                 "session_total_photons": session_usage.get('total_photons_charged', 0),  # 🔧 修复：字段名改为 session_total_photons（前端期望的字段名）
-
                 "requests_count": session_usage.get('requests_count', 0),
-
                 "model_name": os.getenv('MODEL_USE', 'qwen-plus'),
-
                 "feature_charges": session_usage.get('feature_charges', []),  # 功能扣费明细
-
                 "charged": session_usage.get('total_photons_charged', 0) > 0,  # 🆕 是否已扣费（光子息> 0息
-
                 "billing_source": "Cookie"  # 🆕 计费来源
-
             }
 
             logger.info(f"📤 [WebSocket] 准备发息complete 状态，统计数据: {billing_data}")
-
-
 
             await MessageHandler.send_message(websocket, "status", {
                 "status": "complete",
@@ -1175,15 +1135,12 @@ class AgentCoordinator:
 
             try:
                 session_events = getattr(session, 'events', None) or []
-
                 if session_events:
                     stable_key = f"{session_id or 'default'}"
                     HybridSessionManager.save_history(stable_key, session_events)
                     logger.info(f"Saved {len(session_events)} events for {stable_key}")
             except Exception as e:
                 logger.error(f"Failed to save history for {session_id or 'default'}: {e}")
-
-                
 
             logger.info(f"息Agent {agent_id} completed")
 
@@ -1257,7 +1214,12 @@ class AgentCoordinator:
 
                 # 截断历史
 
-                await self._truncate_session_history(session_key, websocket)
+                await self._truncate_session_history(
+                    session_key,
+                    websocket,
+                    session_id=session_id,
+                    reason="context_window_exceeded"
+                )
 
 
 
@@ -1362,7 +1324,9 @@ class AgentCoordinator:
 
         websocket: Any,
 
-        target_count: Optional[int] = None
+        target_count: Optional[int] = None,
+        session_id: Optional[str] = None,
+        reason: str = "truncate"
 
     ) -> None:
 
@@ -1413,6 +1377,7 @@ class AgentCoordinator:
                 # Keep system message (first) + recent messages
 
                 keep_count = keep_target - 1  # -1 for system message
+                removed_events: List[Any] = []
 
 
 
@@ -1422,6 +1387,10 @@ class AgentCoordinator:
 
                     if hasattr(session, 'events'):
 
+                        if keep_count > 0:
+                            removed_events = history[1:-keep_count]
+                        else:
+                            removed_events = history[1:]
                         session.events = [history[0]] + history[-keep_count:]
 
                 else:
@@ -1430,6 +1399,10 @@ class AgentCoordinator:
 
                     if hasattr(session, 'events'):
 
+                        if keep_target > 0:
+                            removed_events = history[:-keep_target]
+                        else:
+                            removed_events = history[:]
                         session.events = history[-keep_target:]
 
 
@@ -1445,6 +1418,8 @@ class AgentCoordinator:
                 # Update message count
 
                 self.session_message_counts[session_key] = len(new_history)
+                self._archive_truncated_history(session_id, session_key, removed_events, len(new_history), reason)
+                self._persist_history_snapshot(session_id, session)
 
 
 
@@ -3298,7 +3273,7 @@ class AgentCoordinator:
         session_key = f"{client_id}_{agent_id}_{session_id or 'default'}"
 
         self.stop_flags[session_key] = True
-            self._stop_task_heartbeat(session_key)
+        self._stop_task_heartbeat(session_key)
 
         logger.info(f"🛑 设置停止标志: {session_key}")
 
