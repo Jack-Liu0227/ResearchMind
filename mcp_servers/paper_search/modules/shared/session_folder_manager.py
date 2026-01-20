@@ -8,6 +8,7 @@ import os
 import json
 import uuid
 import sys
+import re
 from datetime import datetime
 from typing import Dict, Optional
 from pathlib import Path
@@ -31,6 +32,22 @@ PAPER_DIR = str(papers_root())
 
 # 确保目录存在
 ensure_dirs(SESSION_DATA_DIR, PAPER_DIR)
+
+
+def _is_valid_session_id(session_id: Optional[str]) -> bool:
+    """
+    验证 session_id 是否有效
+
+    🔧 放宽验证规则：支持多种 session_id 格式
+    - 标准格式: session_{timestamp}_{random_id}
+    - 简化格式: session_{任意字符串}
+    - 数字格式: 纯数字时间戳
+    """
+    if not session_id or not isinstance(session_id, str):
+        return False
+    # 🔧 修复：只要是非空字符串即可，不强制要求特定格式
+    return bool(session_id.strip())
+
 
 
 class SessionFolderManager:
@@ -84,7 +101,11 @@ class SessionFolderManager:
         Returns:
             文件夹路径
         """
-        # 如果会话已有文件夹，直接返回
+        # 🔧 修复：移除严格的 session_id 格式验证，支持各种格式的 session_id
+        # 原因：前端和后端生成的 session_id 格式可能不一致，导致文件保存路径分散
+        if not session_id or not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError(f"Invalid session_id: {session_id}")
+
         if session_id in self.session_folders:
             folder_path = self.session_folders[session_id]
             logger.info(f"Using existing folder for session {session_id}: {folder_path}")
@@ -117,31 +138,19 @@ class SessionFolderManager:
         """
         生成文件夹名称
 
-        统一使用 session_{timestamp}_{random_id} 格式
-        例如: session_1763305049955_zs3m2y8m
+        🔧 直接使用传入的 session_id 作为文件夹名（移除严格的格式验证）
+        原因：前端和后端生成的 session_id 格式可能不一致，应该灵活支持各种格式
 
         Args:
-            session_id: 会话ID
+            session_id: 会话ID（任意格式）
             topic: 主题（可选，不用于文件夹命名）
 
         Returns:
             文件夹名称
         """
-        import time
-        import random
-        import string
-
-        # 检查 session_id 是否已经是 session_{timestamp}_{id} 格式
-        if session_id.startswith('session_'):
-            # 已经是正确格式，直接使用
-            folder_name = session_id
-        else:
-            # 生成新的 session 格式文件夹名
-            timestamp = int(time.time() * 1000)  # 毫秒级时间戳
-            random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-            folder_name = f"session_{timestamp}_{random_id}"
-
-            logger.info(f"Generated session folder name: {folder_name} for session_id: {session_id}")
+        # 🔧 修复：直接使用 session_id 作为文件夹名，不进行格式验证
+        # 清理非法字符以避免文件系统错误
+        folder_name = self._sanitize_filename(session_id)
 
         return folder_name
     
@@ -156,10 +165,13 @@ class SessionFolderManager:
             清理后的文件名
         """
         import re
-        # 移除非法字符
+        # 🔧 修复：不要合并下划线，保持 session_id 的原始格式
+        # 原因：session_{timestamp}_{random_id} 格式包含多个下划线，不应该被合并
+        
+        # 移除文件系统非法字符
         filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        # 移除多余的空格和下划线
-        filename = re.sub(r'[\s_]+', '_', filename)
+        # 只移除多余的空格（转换为单个下划线）
+        filename = re.sub(r'\s+', '_', filename)
         # 移除首尾的下划线
         filename = filename.strip('_')
         return filename

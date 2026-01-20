@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 from urllib.parse import urlparse
 from dotenv import load_dotenv
+import re
 
 
 # Load environment variables from .env file
@@ -128,7 +129,7 @@ def get_download_url(file_path: str) -> str:
     return result
 from typing import List, Dict, Any, Optional
 
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 import structlog
 
 # Suppress PyPDF2 warnings about unknown widths
@@ -178,6 +179,159 @@ from modules.unified_tools import (
 
 logger = structlog.get_logger(__name__)
 
+import multiprocessing
+import traceback
+import asyncio
+import sys
+
+# Worker functions for process isolation
+def _batch_analysis_worker(queue, kwargs):
+    """
+    Worker process for batch analysis to isolate crashes and heavy compute.
+    """
+    import sys
+    import asyncio
+    from pathlib import Path
+    import os
+    
+    # Setup paths to ensure modules can be imported
+    current_dir = Path(__file__).resolve().parent
+    root_dir = current_dir.parent.parent
+    
+    # Add potential service paths (replicating simulation server logic)
+    services_path = root_dir / "services"
+    shared_path = root_dir / "shared"
+    mcp_shared_path = root_dir / "mcp_servers" / "shared"
+    modules_path = current_dir / "modules"
+    
+    for path in [root_dir, services_path, shared_path, mcp_shared_path, modules_path, current_dir]:
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+            
+    try:
+        # Import implementation inside worker
+        # Re-import to ensure fresh state
+        from modules import batch_paper_analysis as batch_paper_analysis_impl
+        
+        # Create an async forwarder for progress
+        async def async_forwarder(data):
+            queue.put(('progress', data))
+            
+        # Add the progress callback to kwargs
+        kwargs['progress_callback'] = async_forwarder
+        
+        # Run the async function
+        result = asyncio.run(batch_paper_analysis_impl(**kwargs))
+        queue.put(('result', result))
+        
+    except Exception as e:
+        queue.put(('error', f"Worker Error: {str(e)}"))
+        queue.put(('traceback', traceback.format_exc()))
+
+def _report_generation_worker(queue, kwargs):
+    """
+    Worker process for report generation to isolate crashes and heavy compute.
+    """
+    import sys
+    import asyncio
+    from pathlib import Path
+    
+    # Setup paths
+    current_dir = Path(__file__).resolve().parent
+    root_dir = current_dir.parent.parent
+    services_path = root_dir / "services"
+    shared_path = root_dir / "shared"
+    mcp_shared_path = root_dir / "mcp_servers" / "shared"
+    modules_path = current_dir / "modules"
+    
+    for path in [root_dir, services_path, shared_path, mcp_shared_path, modules_path, current_dir]:
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+            
+    try:
+        # Import implementation inside worker
+        from modules import generate_research_report_with_data_collection
+        
+        # Create an async forwarder for progress
+        async def async_forwarder(data):
+            queue.put(('progress', data))
+            
+        # Add the progress callback to kwargs
+        kwargs['progress_callback'] = async_forwarder
+        
+        # Run the async function
+        result = asyncio.run(generate_research_report_with_data_collection(**kwargs))
+        queue.put(('result', result))
+        
+    except Exception as e:
+        queue.put(('error', f"Worker Error: {str(e)}"))
+        queue.put(('traceback', traceback.format_exc()))
+
+async def _run_process_with_progress(worker_func, kwargs, progress_callback=None):
+    """
+    Run a worker function in a separate process and handle progress updates.
+    """
+    queue = multiprocessing.Queue()
+    
+    # Start process
+    p = multiprocessing.Process(target=worker_func, args=(queue, kwargs))
+    p.start()
+    
+    try:
+        # Loop while process is alive or queue has items
+        while True:
+            # Check for messages (non-blocking)
+            while not queue.empty():
+                try:
+                    msg = queue.get_nowait()
+                    msg_type = msg[0]
+                    data = msg[1]
+                    
+                    if msg_type == 'progress':
+                        if progress_callback:
+                            await progress_callback(data)
+                    elif msg_type == 'result':
+                        p.join()
+                        return data
+                    elif msg_type == 'error':
+                        # Check if traceback follows
+                        tb = ""
+                        try:
+                            # Try to get next message if it's traceback
+                             # But we need to be careful not to block or steal other messages if it's not traceback
+                             # The worker guarantees traceback follows error immediately
+                            if not queue.empty():
+                                next_msg = queue.get_nowait()
+                                if next_msg[0] == 'traceback':
+                                    tb = next_msg[1]
+                        except:
+                            pass
+                        p.join()
+                        raise RuntimeError(f"{data}\n{tb}")
+                except Exception as e:
+                    # Queue empty or other error
+                    if isinstance(e, RuntimeError): raise e
+                    break
+            
+            if not p.is_alive():
+                # Process finished but no result?
+                if not queue.empty():
+                    continue # Check queue one last time
+                break
+                
+            # Yield control
+            await asyncio.sleep(0.1)
+            
+        p.join()
+        # If we got here and didn't return, something is wrong
+        raise RuntimeError("Process terminated without returning a result (possibly crashed)")
+        
+    except Exception as e:
+        if p.is_alive():
+            p.terminate()
+            p.join()
+        raise e
+
 
 # ============================================================================
 # 全局状态存储：文献选择管理
@@ -185,6 +339,64 @@ logger = structlog.get_logger(__name__)
 
 # 会话级别的文献选择状态
 _paper_selections: Dict[str, Dict[str, Any]] = {}
+_invalid_session_attempts: Dict[str, int] = {}
+_INVALID_SESSION_LIMIT = 3
+
+
+def _is_valid_session_id(session_id: Optional[str]) -> bool:
+    """
+    验证 session_id 是否有效
+
+    🔧 放宽验证规则：支持多种 session_id 格式
+    - 标准格式: session_{timestamp}_{random_id}
+    - 简化格式: session_{任意字符串}
+    - 数字格式: 纯数字时间戳
+    """
+    if not session_id or not isinstance(session_id, str):
+        return False
+    # 🔧 修复：只要是非空字符串即可，不强制要求特定格式
+    return bool(session_id.strip())
+
+
+def _validate_session_id_or_error(session_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    验证 session_id 格式。如果无效则返回错误字典，否则返回 None。
+
+    🔧 放宽验证规则：只要是非空字符串即可
+    """
+    if not _is_valid_session_id(session_id):
+        return sanitize_tool_response({
+            "status": "error",
+            "error": "invalid_session_id",
+            "message": "session_id must be a non-empty string"
+        })
+    return None
+
+
+def _get_mcp_session_key(ctx: Optional[Context]) -> Optional[str]:
+    if not ctx:
+        return None
+    try:
+        return ctx.session_id
+    except Exception:
+        return None
+
+
+def _record_invalid_session(ctx: Optional[Context]) -> bool:
+    session_key = _get_mcp_session_key(ctx)
+    if not session_key:
+        return False
+    count = _invalid_session_attempts.get(session_key, 0) + 1
+    _invalid_session_attempts[session_key] = count
+    return count >= _INVALID_SESSION_LIMIT
+
+
+def _reset_invalid_session(ctx: Optional[Context]) -> None:
+    session_key = _get_mcp_session_key(ctx)
+    if not session_key:
+        return
+    _invalid_session_attempts.pop(session_key, None)
+
 
 
 def _get_or_create_selection(session_id: str) -> Dict[str, Any]:
@@ -894,8 +1106,10 @@ async def search_papers(
     sources: List[str] = None,
     max_results: int = 3,
     session_id: str = None,
+    sessionId: str = None,
     expand_query: bool = False,
-    num_expanded_queries: int = 3
+    num_expanded_queries: int = 3,
+    ctx: Context = None
 ) -> Dict[str, Any]:
     """
     统一的文献搜索接口（多源搜索）
@@ -930,19 +1144,30 @@ async def search_papers(
         - message: 消息
     """
     logger.info("Unified search", query=query, sources=sources, max_results=max_results, session_id=session_id, expand_query=expand_query)
+    session_id = session_id or sessionId
 
-    # 如果没有提供 session_id，生成一个唯一的 session_id
     if not session_id:
-        import time
-        import random
-        import string
+        should_stop = _record_invalid_session(ctx)
+        error_payload = {
+            "status": "error",
+            "error": "missing_session_id",
+            "message": "session_id is required for search_papers.",
+        }
+        if should_stop:
+            error_payload["should_stop"] = True
+            error_payload["message"] = "session_id is required for search_papers. Stopping repeated calls."
+        return sanitize_tool_response(error_payload)
 
-        # 统一使用 session_{timestamp}_{random_id} 格式
-        timestamp = int(time.time() * 1000)  # 毫秒级时间戳
-        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        session_id = f"session_{timestamp}_{random_id}"
+    validation_error = _validate_session_id_or_error(session_id)
+    if validation_error:
+        should_stop = _record_invalid_session(ctx)
+        if should_stop:
+            validation_error["should_stop"] = True
+            validation_error["message"] = "session_id is invalid. Stopping repeated calls."
+        return validation_error
 
-        logger.info(f"Generated unique session_id: {session_id} for query: {query}")
+    _reset_invalid_session(ctx)
+
 
     # 处理多个检索词（支持分隔符：逗号、分号、换行符）
     import re
@@ -1220,15 +1445,16 @@ async def search_arxiv_papers(
         - categories: ArXiv categories
         - source: 'arxiv'
     """
-    # 🆕 如果没有提供 session_id，生成一个唯一的 session_id
     if not session_id:
-        import time
-        import random
-        import string
-        timestamp = int(time.time() * 1000)
-        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        session_id = f"session_{timestamp}_{random_id}"
-        logger.info(f"Generated unique session_id: {session_id} for ArXiv search: {topic}")
+        return sanitize_tool_response({
+            "status": "error",
+            "error": "missing_session_id",
+            "message": "session_id is required for search_arxiv_papers."
+        })
+
+    validation_error = _validate_session_id_or_error(session_id)
+    if validation_error:
+        return validation_error
 
     return search_arxiv_papers_impl(topic=topic, max_results=max_results, session_id=session_id)
 
@@ -1888,12 +2114,18 @@ async def batch_paper_analysis(
         except Exception as e:
             logger.warning(f"发送进度更新失败: {str(e)}")
 
-    # 执行批量分析（带进度追踪 + 综合总结）
-    result = await batch_paper_analysis_impl(
-        papers=papers,
-        progress_callback=progress_callback,
-        generate_summary=True,  # 🆕 启用综合总结
-        topic=topic  # 🆕 传递研究主题
+    # 执行批量分析（带进度追踪 + 综合总结 - 使用进程隔离）
+    # Use worker process to avoid blocking main loop and handle crashes
+    worker_kwargs = {
+        'papers': papers,
+        'generate_summary': True,
+        'topic': topic
+    }
+    
+    result = await _run_process_with_progress(
+        worker_func=_batch_analysis_worker,
+        kwargs=worker_kwargs,
+        progress_callback=progress_callback
     )
 
     # 保存总结到 Markdown 文件
@@ -2273,11 +2505,17 @@ async def generate_research_report(
             except Exception as e:
                 logger.warning(f"发送进度更新失败: {str(e)}")
 
-        result = await generate_research_report_with_data_collection(
-            papers_info=papers_info,
-            topic=topic,
-            papers_analysis=papers_analysis,
-            progress_callback=progress_callback  # 🆕 传递回调
+        # Use worker process to avoid blocking main loop and handle crashes
+        worker_kwargs = {
+            'papers_info': papers_info,
+            'topic': topic,
+            'papers_analysis': papers_analysis,
+        }
+        
+        result = await _run_process_with_progress(
+            worker_func=_report_generation_worker,
+            kwargs=worker_kwargs,
+            progress_callback=progress_callback
         )
 
         # 保存报告到 Markdown 文件

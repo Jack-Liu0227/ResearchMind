@@ -6,6 +6,7 @@ Handles WebSocket connections and client management.
 
 import json
 import logging
+import os
 import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -72,17 +73,33 @@ class WebSocketServer:
         logger.info("Press Ctrl+C to stop server")
         logger.info("=" * 60)
 
+        ping_interval = os.getenv("RESEARCHMIND_WS_PING_INTERVAL", "20")
+        ping_timeout = os.getenv("RESEARCHMIND_WS_PING_TIMEOUT", "60")
+        try:
+            ping_interval_value = int(ping_interval)
+        except ValueError:
+            ping_interval_value = 20
+        try:
+            ping_timeout_value = int(ping_timeout)
+        except ValueError:
+            ping_timeout_value = 60
+
+        if ping_interval_value <= 0:
+            ping_interval_value = None
+        if ping_timeout_value <= 0:
+            ping_timeout_value = None
+
         async with serve(
             self.handle_client,
             server_config.WEBSOCKET_HOST,
             server_config.WEBSOCKET_PORT,
             max_size=50 * 1024 * 1024,  # 50MB - 支持大文件上传（base64 编码后会增大约 33%）
-            ping_interval=None,  # Disable server-initiated pings to avoid disconnects during long tasks.
-            ping_timeout=None,
+            ping_interval=ping_interval_value,
+            ping_timeout=ping_timeout_value,
         ):
             logger.info("✅ Server started, waiting for connections...")
             logger.info(f"📦 Max message size: 50MB (supports ~37MB original files after base64 encoding)")
-            logger.info(f"💓 Heartbeat: ping every 15s, timeout 300s")
+            logger.info(f"💓 Heartbeat: ping interval {ping_interval_value}s, timeout {ping_timeout_value}s")
             import asyncio
             await asyncio.Future()  # Keep server running
     
@@ -155,11 +172,6 @@ class WebSocketServer:
                 "recover_session",
                 "stop_response",
             }
-            auto_create_types = {
-                "chat",
-                "message",
-                "chat_with_attachments",
-            }
 
             # Handle messages
             async for message in websocket:
@@ -183,20 +195,10 @@ class WebSocketServer:
                     if not session_id:
                         if active_session_id:
                             session_id = active_session_id
-                        elif message_type in auto_create_types:
-                            # Create a new session only for chat-like messages.
-                            import random
-                            import string
-                            timestamp = int(time.time() * 1000)
-                            random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-                            session_id = f"session_{timestamp}_{random_id}"
-                            if client_id in self.client_sessions:
-                                self.client_sessions[client_id]["active_session_id"] = session_id
-                            logger.info(f"🆕 Generated new session_id: {session_id}")
                         elif message_type in session_required_types:
                             await self.message_handler.send_message(websocket, "status", {
                                 "status": "warning",
-                                "message": "No active session. Start a chat to create one.",
+                                "message": "No active session. Provide a sessionId to continue.",
                             })
                             continue
 

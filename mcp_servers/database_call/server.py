@@ -199,7 +199,12 @@ async def materials_project_query_tool(
                 'total_magnetization': doc.total_magnetization if hasattr(doc, 'total_magnetization') else 0.0,
                 'is_stable': doc.is_stable if hasattr(doc, 'is_stable') else False,
                 'theoretical': doc.theoretical if hasattr(doc, 'theoretical') else True,
-                'cifContent': cif_text  # Unified field name - CIF contains all structure info
+                'cifContent': cif_text,  # Unified field name - CIF contains all structure info
+                # 🔧 修复：添加 source 字段，确保前端能正确显示来源
+                'source': {
+                    'database': 'MP',
+                    'materialId': doc.material_id if hasattr(doc, 'material_id') else 'Unknown'
+                }
             }
             raw_structures.append(raw_structure)
             
@@ -400,7 +405,12 @@ async def get_oqmd_phases(
                         "stability": entry.get("stability", "N/A")
                     },
                     "source URL": f"https://oqmd.org/materials/entry/{entry.get('entry_id', 'N/A')}",
-                    "cifContent": cif_text  # Unified field name
+                    "cifContent": cif_text,  # Unified field name
+                    # 🔧 修复：添加 source 字段
+                    "source": {
+                        "database": "OQMD",
+                        "materialId": entry.get("entry_id", "N/A")
+                    }
                 }
                 extracted.append(simplified)
 
@@ -544,7 +554,12 @@ async def search_cod_by_formula(
                 "cell_volume": entry.get('vol', 'N/A'),
                 "cell_measurement_temperature": entry.get('celltemp', 'N/A'),
                 "source URL": f"https://www.crystallography.net/cod/{entry.get('codid', 'N/A')}.html",
-                "source_doi": entry.get('doi', 'N/A')
+                "source_doi": entry.get('doi', 'N/A'),
+                # 🔧 修复：添加 source 字段
+                "source": {
+                    "database": "COD",
+                    "materialId": entry.get('codid', 'N/A')
+                }
             }
             results.append(simplified_entry)
 
@@ -985,6 +1000,11 @@ async def get_aflow_data(
                 "volume": structure_info.get("volume", "N/A"),
                 "natoms": structure_info.get("natoms", "N/A"),
                 "positions_fractional": positions if positions else []
+            }
+            # 🔧 修复：添加 source 字段
+            material_record["source"] = {
+                "database": "AFLOW",
+                "materialId": material.get("auid", "N/A")
             }
             extracted.append(material_record)
             

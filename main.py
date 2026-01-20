@@ -62,6 +62,7 @@ try:
     from agents.deep_research_agent.agent import root_agent as deep_research_agent
     from agents.database_agent.agent import root_agent as database_agent
     from agents.simulation_agent.agent import root_agent as simulation_agent
+    from agents.experiment_plan_agent.agent import root_agent as experiment_plan_agent
     from agents.agent import research_coordinator
     logger.info("✅ Agents imported successfully")
 except ImportError as e:
@@ -101,6 +102,7 @@ async def main():
         "deep_research_agent": deep_research_agent,
         "database_agent": database_agent,
         "simulation_agent": simulation_agent,
+        "experiment_plan_agent": experiment_plan_agent,
     }
 
     # Initialize agent coordinator

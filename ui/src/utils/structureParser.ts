@@ -6,6 +6,16 @@
 import { CrystalStructure, Atom } from '../types'
 import { parseCIF, isValidCIF } from './cifParser'
 
+function normalizeElementSymbol(raw: string): string {
+  const match = raw.match(/[A-Z][a-z]?/)
+  return match ? match[0] : raw
+}
+
+function normalizeFormula(raw: string): string {
+  const tokens = raw.match(/[A-Z][a-z]?\d*/g)
+  return tokens ? tokens.join('') : raw
+}
+
 /**
  * 从文本中提取晶体结构数据
  * 支持 Materials Project, OQMD, COD 等数据库的输出格式
@@ -60,8 +70,8 @@ function parseMaterialsProjectFormat(text: string): CrystalStructure | null {
 
     // 提取化学式
     if (line.includes('化学式') || line.includes('Formula')) {
-      const match = line.match(/[:：]\s*([A-Za-z0-9]+)/)
-      if (match) formula = match[1]
+      const match = line.match(/[:：]\s*([A-Za-z0-9+\-()]+)/)
+      if (match) formula = normalizeFormula(match[1])
     }
 
     // 提取空间群
@@ -95,14 +105,14 @@ function parseMaterialsProjectFormat(text: string): CrystalStructure | null {
         if (!atomLine || atomLine.startsWith('**') || atomLine.startsWith('---')) break
 
         // 匹配格式: Na (0.0, 0.0, 0.0) 或 Na 0.0 0.0 0.0
-        const match1 = atomLine.match(/([A-Z][a-z]?)\s*\(([0-9.\-]+),\s*([0-9.\-]+),\s*([0-9.\-]+)\)/)
-        const match2 = atomLine.match(/([A-Z][a-z]?)\s+([0-9.\-]+)\s+([0-9.\-]+)\s+([0-9.\-]+)/)
-        const match3 = atomLine.match(/([A-Z][a-z]?)\s*\[([0-9.\-]+),\s*([0-9.\-]+),\s*([0-9.\-]+)\]/)
+        const match1 = atomLine.match(/([A-Z][a-z]?(?:[0-9]*[+-]|[+-][0-9]*)?)\s*\(([0-9.\-]+),\s*([0-9.\-]+),\s*([0-9.\-]+)\)/)
+        const match2 = atomLine.match(/([A-Z][a-z]?(?:[0-9]*[+-]|[+-][0-9]*)?)\s+([0-9.\-]+)\s+([0-9.\-]+)\s+([0-9.\-]+)/)
+        const match3 = atomLine.match(/([A-Z][a-z]?(?:[0-9]*[+-]|[+-][0-9]*)?)\s*\[([0-9.\-]+),\s*([0-9.\-]+),\s*([0-9.\-]+)\]/)
 
         const match = match1 || match2 || match3
         if (match) {
           atoms.push({
-            element: match[1],
+            element: normalizeElementSymbol(match[1]),
             position: [parseFloat(match[2]), parseFloat(match[3]), parseFloat(match[4])],
             charge: 0
           })
@@ -148,8 +158,8 @@ function parseGenericFormat(text: string): CrystalStructure | null {
   const atoms: Atom[] = []
 
   // 尝试提取化学式
-  const formulaMatch = text.match(/([A-Z][a-z]?[0-9]*)+/)
-  if (formulaMatch) formula = formulaMatch[0]
+  const formulaTokens = text.match(/[A-Z][a-z]?\d*/g)
+  if (formulaTokens) formula = formulaTokens.join('')
 
   // 尝试提取晶格参数
   const latticeMatch = text.match(/a\s*=\s*([0-9.]+).*b\s*=\s*([0-9.]+).*c\s*=\s*([0-9.]+)/)
@@ -161,10 +171,10 @@ function parseGenericFormat(text: string): CrystalStructure | null {
 
   // 尝试提取原子坐标
   for (const line of lines) {
-    const atomMatch = line.match(/([A-Z][a-z]?)\s+([0-9.\-]+)\s+([0-9.\-]+)\s+([0-9.\-]+)/)
+    const atomMatch = line.match(/([A-Z][a-z]?(?:[0-9]*[+-]|[+-][0-9]*)?)\s+([0-9.\-]+)\s+([0-9.\-]+)\s+([0-9.\-]+)/)
     if (atomMatch) {
       atoms.push({
-        element: atomMatch[1],
+        element: normalizeElementSymbol(atomMatch[1]),
         position: [parseFloat(atomMatch[2]), parseFloat(atomMatch[3]), parseFloat(atomMatch[4])],
         charge: 0
       })

@@ -140,7 +140,8 @@ def get_session_path(session_id: str, data_type: str = "papers") -> Path:
         return base / "simulation" / session_id / "relaxed"
     elif data_type == "generated_structures":
         return base / "simulation" / session_id / "generated"
+    elif data_type in ("database", "database_structures"):
+        return base / "simulation" / session_id / "database"
     else:
         # 通用路径
         return base / data_type / session_id
-

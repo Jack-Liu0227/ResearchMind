@@ -250,55 +250,51 @@ class TavilySearchSource(SearchSource):
         return is_tavily_available()
 
 
-class GoogleScholarSearchSource(SearchSource):
-    """Google Scholar 搜索源"""
-    
+class SemanticScholarSearchSource(SearchSource):
+    """Semantic Scholar 搜索源"""
+
     def __init__(self):
-        super().__init__("google_scholar")
-    
+        super().__init__("semantic_scholar")
+
     async def search(
         self,
         query: str,
         max_results: int = 5,
         **kwargs
     ) -> List[PaperResult]:
-        """执行 Google Scholar 搜索"""
-        from .google_scholar import search_google_scholar_keywords
-        
+        """执行 Semantic Scholar 搜索"""
+        from .semantic_scholar import search_semantic_scholar_papers
+
         try:
-            # 调用现有的 Google Scholar 搜索函数
-            scholar_results = await search_google_scholar_keywords(query, max_results)
-            
+            semantic_results = await search_semantic_scholar_papers(query, max_results)
             results = []
-            for item in scholar_results:
-                # 转换为标准格式
+            for item in semantic_results:
                 result = PaperResult(
-                    paper_id=item.get('bib', {}).get('title', ''),  # 使用标题作为 ID
-                    title=item.get('bib', {}).get('title', ''),
-                    authors=item.get('bib', {}).get('author', '').split(' and '),
-                    abstract=item.get('bib', {}).get('abstract', ''),
-                    url=item.get('pub_url', ''),
-                    published=item.get('bib', {}).get('pub_year', ''),
-                    source='google_scholar',
+                    paper_id=item.get('paper_id') or item.get('id', '') or item.get('title', ''),
+                    title=item.get('title', ''),
+                    authors=item.get('authors', []),
+                    abstract=item.get('abstract', ''),
+                    url=item.get('url', ''),
+                    published=item.get('published', ''),
+                    source='semantic_scholar',
                     metadata={
-                        'num_citations': item.get('num_citations', 0),
-                        'citedby_url': item.get('citedby_url', '')
+                        'doi': item.get('doi', ''),
+                        'journal_name': item.get('journal_name', ''),
+                        'categories': item.get('categories', []),
+                        'citation_count': item.get('citation_count', 0),
+                        'external_ids': item.get('external_ids', {}),
+                        'pdf_url': item.get('pdf_url', ''),
                     }
                 )
                 results.append(result)
-            
             return results
         except Exception as e:
-            logger.error(f"Google Scholar search failed: {e}")
+            logger.error(f"Semantic Scholar search failed: {e}")
             return []
-    
+
     def is_available(self) -> bool:
-        """检查 Google Scholar 是否可用"""
-        try:
-            from scholarly import scholarly
-            return True
-        except ImportError:
-            return False
+        """Semantic Scholar 允许无 key 访问"""
+        return True
 
 
 # ============================================================================
@@ -311,7 +307,7 @@ class SearchSourceFactory:
     _sources = {
         'arxiv': ArxivSearchSource,
         'tavily': TavilySearchSource,
-        'google_scholar': GoogleScholarSearchSource,
+        'semantic_scholar': SemanticScholarSearchSource,
     }
     
     @classmethod

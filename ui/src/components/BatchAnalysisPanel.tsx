@@ -10,6 +10,7 @@
 import React from 'react'
 import { FileText, Download } from 'lucide-react'
 import { wsService } from '../services/websocket'
+import { useAppStore } from '../store/useAppStore'
 import toast from 'react-hot-toast'
 
 interface BatchAnalysisPanelProps {
@@ -25,8 +26,28 @@ const BatchAnalysisPanel: React.FC<BatchAnalysisPanelProps> = ({
   selectedPaperIds,
   totalPapers
 }) => {
+  const currentAgent = useAppStore((state) => state.currentAgent)
+  const targetAgentId = currentAgent?.id === 'deep_research_agent' ? currentAgent.id : 'deep_research_agent'
+
+  const ensureWsConnected = async () => {
+    if (wsService.isConnected) {
+      return true
+    }
+
+    try {
+      await wsService.connect()
+      return wsService.isConnected
+    } catch (error) {
+      toast.error('WebSocket 未连接，请刷新页面或检查后端服务 (50003)')
+      return false
+    }
+  }
+
   // 批量分析
-  const handleBatchAnalysis = () => {
+  const handleBatchAnalysis = async () => {
+    if (!(await ensureWsConnected())) {
+      return
+    }
 
     // 构造消息
     const paperIdsJson = JSON.stringify(selectedPaperIds)
@@ -40,7 +61,7 @@ csv_file_path="${csvFilePath}"
 paper_ids=${paperIdsJson}
 session_id="${sessionId}"`
 
-    wsService.sendMessage(message, 'deep_research_agent', sessionId)
+    wsService.sendMessage(message, targetAgentId, sessionId)
     
     toast.success(
       selectedPaperIds.length === 0
@@ -50,7 +71,10 @@ session_id="${sessionId}"`
   }
 
   // 生成研究报告
-  const handleGenerateReport = () => {
+  const handleGenerateReport = async () => {
+    if (!(await ensureWsConnected())) {
+      return
+    }
 
     // 构造消息
     const paperIdsJson = JSON.stringify(selectedPaperIds)
@@ -66,7 +90,7 @@ paper_ids=${paperIdsJson}
 session_id="${sessionId}"
 topic="综合研究报告"`
 
-    wsService.sendMessage(message, 'deep_research_agent', sessionId)
+    wsService.sendMessage(message, targetAgentId, sessionId)
     
     toast.success(
       selectedPaperIds.length === 0
@@ -108,4 +132,3 @@ topic="综合研究报告"`
 }
 
 export default BatchAnalysisPanel
-

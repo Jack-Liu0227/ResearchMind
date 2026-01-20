@@ -413,11 +413,16 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
   } = useAppStore()
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(message.content)
-      toast.success('已复制到剪贴板')
-    } catch (error) {
-      toast.error('复制失败')
+    const success = await copyToClipboard(message.content)
+    if (success) {
+      toast.success('Copied to clipboard')
+      return
+    }
+    const manual = window.prompt('Copy this text', message.content || '')
+    if (manual !== null) {
+      toast('Press Ctrl+C to copy', { icon: 'i' })
+    } else {
+      toast.error('Copy failed')
     }
   }
 
@@ -425,17 +430,17 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onRegener
     try {
       const tableData = extractTableDataFromMarkdown(message.content)
       if (!tableData) {
-        toast.error('未找到表格数据')
+        toast.error('No table data found')
         return
       }
 
       const csv = convertTableToCSV(tableData)
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
       downloadFile(csv, `table_${timestamp}.csv`, 'text/csv;charset=utf-8;')
-      toast.success('表格已下载')
+      toast.success('Table downloaded')
     } catch (error) {
-      console.error('下载表格失败:', error)
-      toast.error('下载表格失败')
+      console.error('Table download failed:', error)
+      toast.error('Table download failed')
     }
   }
 

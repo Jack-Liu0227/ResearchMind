@@ -80,7 +80,11 @@ export const getPhononExamples = async (): Promise<ApiResponse> => {
 }
 
 // 文件上传 (统一端点)
-export const uploadFile = async (files: File | File[], type: string = 'structure'): Promise<ApiResponse> => {
+export const uploadFile = async (
+  files: File | File[],
+  type: string = 'structure',
+  sessionId?: string
+): Promise<ApiResponse> => {
   const formData = new FormData()
 
   // 支持单个文件或多个文件
@@ -92,10 +96,13 @@ export const uploadFile = async (files: File | File[], type: string = 'structure
 
   formData.append('type', type)
 
+  const params = sessionId ? { session_id: sessionId } : undefined
+
   return api.post('/api/upload', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
+    params,
   })
 }
 

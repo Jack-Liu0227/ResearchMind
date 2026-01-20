@@ -8,6 +8,7 @@ from typing import Optional
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models import LlmResponse, LlmRequest
 from google.genai import types
+from services.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,64 @@ def get_current_session_context():
         getattr(_thread_local, 'user_id', None),
         getattr(_thread_local, 'client_id', None)  # 🔧 返回 client_id
     )
+
+
+def _build_evidence_summary(session_id: str, max_len: int = 1200) -> str:
+    if not session_id or session_id == 'unknown':
+        return ""
+
+    evidence = SessionManager.load_evidence(session_id)
+    items = evidence.get("items", {}) if isinstance(evidence, dict) else {}
+    if not items:
+        return ""
+
+    lines = [f"Evidence summary (session_id={session_id}):"]
+
+    literature = items.get("literature", [])
+    if literature:
+        payload = literature[-1].get("payload", {}) if isinstance(literature[-1], dict) else {}
+        lines.append(
+            "literature: "
+            f"topic={payload.get('topic')}, "
+            f"total_papers={payload.get('total_papers_in_csv')}, "
+            f"csv={payload.get('csv_download_url')}, "
+            f"md={payload.get('md_download_url')}"
+        )
+
+    database = items.get("database", [])
+    if database:
+        payload = database[-1].get("payload", {}) if isinstance(database[-1], dict) else {}
+        structures = payload.get("structures", []) if isinstance(payload, dict) else []
+        if structures:
+            desc = []
+            for s in structures:
+                if not isinstance(s, dict):
+                    continue
+                formula = s.get("formula")
+                mid = s.get("id")
+                src = s.get("source")
+                desc.append(f"{formula or 'unknown'}({mid or 'id?'}, {src or 'source?'})")
+            if desc:
+                lines.append(f"database: structures={'; '.join(desc)}")
+
+    simulation = items.get("simulation", [])
+    if simulation:
+        payload = simulation[-1].get("payload", {}) if isinstance(simulation[-1], dict) else {}
+        tc = payload.get("thermal_conductivity") if isinstance(payload, dict) else None
+        kappa_val = None
+        if isinstance(tc, dict):
+            kappa_val = tc.get("value")
+        lines.append(
+            "simulation: "
+            f"kappa={kappa_val}, "
+            f"method={payload.get('method') if isinstance(payload, dict) else None}, "
+            f"results_csv={payload.get('results_file') if isinstance(payload, dict) else None}, "
+            f"phonon_dispersion_csv={payload.get('phonon_dispersion_csv') if isinstance(payload, dict) else None}, "
+            f"phonon_dos_csv={payload.get('phonon_dos_csv') if isinstance(payload, dict) else None}"
+        )
+
+    text = "\n".join(line for line in lines if line.strip())
+    return text[:max_len]
 
 
 # Import billing service
@@ -76,6 +135,34 @@ def trim_llm_request_context(
         
         if not contents:
             return None  # 允许请求继续
+
+        # Special handling: keep context compact for experiment plan agent
+        if agent_name == "experiment_plan_agent":
+            session_id, _, _ = get_current_session_context()
+            evidence_summary = _build_evidence_summary(session_id)
+
+            # Keep system messages + evidence summary + last user message
+            system_contents = [
+                c for c in contents
+                if hasattr(c, 'role') and c.role == 'system'
+            ]
+            last_user = next(
+                (c for c in reversed(contents) if getattr(c, 'role', None) in ['user', 'human']),
+                None
+            )
+
+            trimmed_contents = list(system_contents)
+            if evidence_summary:
+                trimmed_contents.append(types.Content(
+                    role='system',
+                    parts=[types.Part(text=evidence_summary)]
+                ))
+            if last_user:
+                trimmed_contents.append(last_user)
+
+            if trimmed_contents:
+                llm_request.contents = trimmed_contents
+            return None
         
         # 估算总token数
         total_tokens = 0

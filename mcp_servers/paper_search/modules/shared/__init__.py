@@ -54,7 +54,7 @@ from .search_source import (
     SearchSource,
     ArxivSearchSource,
     TavilySearchSource,
-    GoogleScholarSearchSource,
+    SemanticScholarSearchSource,
     SearchSourceFactory,
 )
 
@@ -105,7 +105,7 @@ __all__ = [
     'SearchSource',
     'ArxivSearchSource',
     'TavilySearchSource',
-    'GoogleScholarSearchSource',
+    'SemanticScholarSearchSource',
     'SearchSourceFactory',
 
     # 字段映射

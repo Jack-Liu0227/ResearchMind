@@ -42,6 +42,7 @@ class SessionManager:
     METADATA_DIR = BASE_DATA_DIR / "metadata"
     HISTORY_DIR = BASE_DATA_DIR / "history"  # 🆕 聊天历史记录
     HISTORY_SUMMARY_DIR = BASE_DATA_DIR / "history_summary"
+    EVIDENCE_DIR = BASE_DATA_DIR / "evidence"
 
     # Session registry
     _sessions: Dict[str, Dict[str, Any]] = {}
@@ -70,9 +71,9 @@ class SessionManager:
                 if not cls.BASE_DATA_DIR.exists():
                     cls.BASE_DATA_DIR.mkdir(exist_ok=True)
                 
-                # 只创建核心目录（metadata, history）
+                # 只创建核心目录（metadata, history, evidence）
                 # structures 和 images 目录在 create_session 时按需创建，避免空目录
-                for directory in [cls.METADATA_DIR, cls.HISTORY_DIR, cls.HISTORY_SUMMARY_DIR]:
+                for directory in [cls.METADATA_DIR, cls.HISTORY_DIR, cls.HISTORY_SUMMARY_DIR, cls.EVIDENCE_DIR]:
                     if not directory.exists():
                         directory.mkdir(parents=True, exist_ok=True)
                 
@@ -496,6 +497,57 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Failed to save history summary for {session_id}: {e}", exc_info=True)
             return None
+
+    @classmethod
+    def save_evidence(cls, session_id: str, evidence_type: str, payload: Dict[str, Any], max_items: int = 5) -> None:
+        """Persist compact evidence snippets for downstream agents."""
+        if not session_id or not evidence_type or payload is None:
+            return
+
+        try:
+            if not cls.EVIDENCE_DIR.exists():
+                cls.EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+
+            evidence_file = cls.EVIDENCE_DIR / f"{session_id}.json"
+            if evidence_file.exists():
+                try:
+                    with open(evidence_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            else:
+                data = {}
+
+            items = data.get("items", {})
+            entries = items.get(evidence_type, [])
+            entries.append({
+                "timestamp": datetime.now().isoformat(),
+                "payload": payload,
+            })
+            items[evidence_type] = entries[-max_items:]
+            data["items"] = items
+            data["updated_at"] = datetime.now().isoformat()
+
+            temp_file = evidence_file.with_suffix('.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+            if temp_file.exists():
+                temp_file.replace(evidence_file)
+        except Exception as e:
+            logger.warning(f"Failed to save evidence for {session_id}: {e}")
+
+    @classmethod
+    def load_evidence(cls, session_id: str) -> Dict[str, Any]:
+        """Load evidence snippets for a session."""
+        evidence_file = cls.EVIDENCE_DIR / f"{session_id}.json"
+        if not evidence_file.exists():
+            return {}
+        try:
+            with open(evidence_file, 'r', encoding='utf-8') as f:
+                return json.load(f) or {}
+        except Exception as e:
+            logger.warning(f"Failed to load evidence for {session_id}: {e}")
+            return {}
 
 
 # Initialize on module import

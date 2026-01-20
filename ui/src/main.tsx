@@ -46,27 +46,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         position="top-center"
         containerStyle={{
           zIndex: 99999,
+          top: 20
         }}
         toastOptions={{
-          duration: 4000,
-          style: {
-            background: '#363636',
-            color: '#fff',
-          },
-          success: {
-            duration: 3000,
-            iconTheme: {
-              primary: '#22c55e',
-              secondary: '#fff',
-            },
-          },
-          error: {
-            duration: 5000,
-            iconTheme: {
-              primary: '#ef4444',
-              secondary: '#fff',
-            },
-          },
+          duration: 3000,
+          className: 'shadow-lg border border-gray-100 rounded-xl backdrop-blur-sm bg-white/90',
         }}
       />
     </QueryClientProvider>

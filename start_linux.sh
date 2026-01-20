@@ -239,7 +239,8 @@ check_redis_service() {
         fi
     fi
 
-    if command -v systemctl >/dev/null 2>&1; then
+    # 检查 systemd 是否真正可用
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
         if ! systemctl is-active --quiet redis && ! systemctl is-active --quiet redis-server; then
             sudo systemctl enable --now redis >/dev/null 2>&1 || true
             sudo systemctl enable --now redis-server >/dev/null 2>&1 || true
@@ -251,6 +252,7 @@ check_redis_service() {
             log_warning "Redis service is not running (systemd)."
         fi
     elif command -v service >/dev/null 2>&1; then
+
         sudo service redis-server start >/dev/null 2>&1 || sudo service redis start >/dev/null 2>&1 || true
     else
         log_warning "No service manager found to start Redis."
@@ -370,41 +372,48 @@ force_release_port() {
 
     log_info "正在强制释放端口 $port..."
 
-    # 优先使用 lsof
+    local pids=""
+
+    # 尝试多种工具获取 PID
     if command -v lsof >/dev/null 2>&1; then
-        local pids=$(lsof -ti:$port 2>/dev/null || true)
-        if [ -n "$pids" ]; then
-            for pid in $pids; do
-                if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                    local cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
-                    log_warning "端口 $port 被 PID $pid ($cmd) 占用，正在终止..."
-                    kill -15 "$pid" 2>/dev/null || true
-                    sleep 0.5
-                    # 如果进程仍在运行，强制终止
-                    if kill -0 "$pid" 2>/dev/null; then
-                        log_warning "强制终止 PID $pid (端口 $port)"
-                        kill -9 "$pid" 2>/dev/null || true
-                    fi
-                    killed=true
+        pids=$(lsof -ti:$port 2>/dev/null || true)
+    fi
+    
+    if [ -z "$pids" ] && command -v fuser >/dev/null 2>&1; then
+        pids=$(fuser $port/tcp 2>/dev/null || true)
+    fi
+
+    if [ -z "$pids" ] && command -v ss >/dev/null 2>&1; then
+         # ss 输出格式: users:(("python",pid=123,fd=4))
+         pids=$(ss -lptn "sport = :$port" | grep -oP '(?<=pid=)[0-9]+' | sort -u || true)
+    fi
+
+    if [ -z "$pids" ] && command -v netstat >/dev/null 2>&1; then
+         # netstat 输出格式: tcp ... 123/python
+         pids=$(netstat -nlp | grep ":$port " | awk '{print $7}' | cut -d'/' -f1 | grep -oE '[0-9]+' | sort -u || true)
+    fi
+
+    if [ -n "$pids" ]; then
+        for pid in $pids; do
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                local cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+                log_warning "端口 $port 被 PID $pid ($cmd) 占用，正在终止..."
+                kill -15 "$pid" 2>/dev/null || true
+                sleep 0.5
+                # 如果进程仍在运行，强制终止
+                if kill -0 "$pid" 2>/dev/null; then
+                    log_warning "强制终止 PID $pid (端口 $port)"
+                    kill -9 "$pid" 2>/dev/null || true
                 fi
-            done
-        fi
-    # 备用方案：使用 fuser
-    elif command -v fuser >/dev/null 2>&1; then
-        local pids=$(fuser $port/tcp 2>/dev/null || true)
-        if [ -n "$pids" ]; then
-            for pid in $pids; do
-                if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                    log_warning "端口 $port 被 PID $pid 占用，正在终止..."
-                    kill -15 "$pid" 2>/dev/null || true
-                    sleep 0.5
-                    if kill -0 "$pid" 2>/dev/null; then
-                        log_warning "强制终止 PID $pid (端口 $port)"
-                        kill -9 "$pid" 2>/dev/null || true
-                    fi
-                    killed=true
-                fi
-            done
+                killed=true
+            fi
+        done
+    else
+        log_warning "无法获取占用端口 $port 的进程 PID (可能权限不足或工具缺失)"
+        # 尝试盲杀常见进程名作为最后手段
+        if [ "$port" == "${RESEARCHMIND_HTTP_PORT}" ] || [ "$port" == "${RESEARCHMIND_WS_PORT}" ]; then
+             log_warning "尝试盲杀可能的残留进程..."
+             pkill -9 -f "python main.py" 2>/dev/null || true
         fi
     fi
 
@@ -418,6 +427,7 @@ force_release_port() {
     fi
     return 0
 }
+
 
 kill_stale_processes() {
     log_info "清理陈旧进程和占用端口..."
@@ -544,6 +554,10 @@ start_mcp_service() {
     local host=$4
     local port=$5
     local is_restart=${6:-false}
+    
+    # 根据服务名生成 PID 文件名标识
+    local safe_name=$(echo "$service_name" | tr ' ' '_')
+    local pid_file="${LOG_DIR}/${safe_name}.pid"
 
     # 初始化重启计数（仅首次启动）
     if [ "$is_restart" != "true" ]; then
@@ -552,7 +566,7 @@ start_mcp_service() {
 
     log_info "正在启动 ${service_name} (${host}:${port})..."
 
-    # 仅在首次启动时检查并释放端口，重启时跳过（因为进程已崩溃，端口应该已释放）
+    # 端口清理逻辑
     if [ "$is_restart" != "true" ]; then
         if is_port_in_use "$port"; then
             log_warning "端口 $port 已被占用，尝试释放..."
@@ -562,7 +576,7 @@ start_mcp_service() {
             fi
         fi
     else
-        # 重启时，等待端口释放
+        # 重启时，等待端口释放，超时则强杀
         log_info "等待端口 $port 释放..."
         local wait_count=0
         while is_port_in_use "$port" && [ $wait_count -lt 10 ]; do
@@ -570,7 +584,8 @@ start_mcp_service() {
             wait_count=$((wait_count + 1))
         done
         if is_port_in_use "$port"; then
-            log_warning "端口 $port 仍被占用，但继续尝试启动..."
+            log_warning "端口 $port 仍被占用，执行强制清理..."
+            force_release_port "$port"
         fi
     fi
 
@@ -589,6 +604,7 @@ start_mcp_service() {
     local pid=$!
     popd >/dev/null
     register_pid "$pid"
+    echo "$pid" > "$pid_file"
 
     # 保存最后启动的服务 PID 到全局变量
     LAST_SERVICE_PID=$pid
@@ -598,29 +614,67 @@ start_mcp_service() {
     log_success "已触发 ${service_name} 启动 (PID ${pid})"
 }
 
+
 # 启动后端服务（带重启支持）
+# 参数 1（可选）：is_restart - 如果是重启则不强制释放端口
 start_backend() {
     local service_name="Backend"
+    local is_restart=${1:-false}
+    local pid_file="${LOG_DIR}/${service_name}.pid"
 
     # 初始化重启计数
-    SERVICE_RESTART_COUNT["$service_name"]=0
+    if [ "$is_restart" != "true" ]; then
+        SERVICE_RESTART_COUNT["$service_name"]=0
+    fi
 
     log_info "正在启动后端服务..."
     log_info "WebSocket 端点: ${RESEARCHMIND_WS_HOST}:${RESEARCHMIND_WS_PORT}"
     log_info "HTTP 端点:      ${RESEARCHMIND_HTTP_HOST}:${RESEARCHMIND_HTTP_PORT}"
 
-    # 检查端口是否可用
     local http_port="${RESEARCHMIND_HTTP_PORT}"
-    if is_port_in_use "$http_port"; then
-        log_warning "端口 $http_port 已被占用，尝试释放..."
-        if ! force_release_port "$http_port"; then
-            log_error "无法释放端口 $http_port，后端启动失败"
-            return 1
+    local ws_port="${RESEARCHMIND_WS_PORT}"
+    
+    # 辅助函数：检查并清理端口
+    check_and_clean_port() {
+        local port=$1
+        local restart_mode=$2
+        
+        if [ "$restart_mode" != "true" ]; then
+            # 首次启动：如有占用直接清理
+            if is_port_in_use "$port"; then
+                log_warning "端口 $port 已被占用，尝试释放..."
+                if ! force_release_port "$port"; then
+                    log_error "无法释放端口 $port，后端启动失败"
+                    return 1
+                fi
+            fi
+        else
+            # 重启模式：先等待自然释放，超时则强制清理
+            if is_port_in_use "$port"; then
+                log_info "等待端口 $port 释放..."
+                local wait_count=0
+                while is_port_in_use "$port" && [ $wait_count -lt 10 ]; do
+                    sleep 1
+                    wait_count=$((wait_count + 1))
+                done
+                if is_port_in_use "$port"; then
+                    log_warning "端口 $port 仍被占用，执行强制清理..."
+                    force_release_port "$port"
+                fi
+            fi
         fi
+        return 0
+    }
+
+    check_and_clean_port "$http_port" "$is_restart" || return 1
+    # 如果 WS 端口和 HTTP 端口不同，也要检查
+    if [ "$http_port" != "$ws_port" ]; then
+        check_and_clean_port "$ws_port" "$is_restart" || return 1
     fi
 
     # 在 Git Bash/Windows 环境下使用兼容模式
     if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || -n "${MSYSTEM-}" ]]; then
+
         log_info "检测到 Windows/Git Bash 环境，使用兼容模式启动..."
         unset VIRTUAL_ENV
         nohup uv run --no-project python main.py > "${LOG_DIR}/backend.log" 2>&1 &
@@ -630,6 +684,7 @@ start_backend() {
 
     local pid=$!
     register_pid "$pid"
+    echo "$pid" > "$pid_file"
 
     # 保存最后启动的服务 PID 到全局变量
     LAST_SERVICE_PID=$pid
@@ -642,6 +697,7 @@ start_backend() {
 # 启动前端服务（带重启支持）
 start_frontend() {
     local service_name="Frontend"
+    local pid_file="${LOG_DIR}/${service_name}.pid"
 
     # 初始化重启计数
     SERVICE_RESTART_COUNT["$service_name"]=0
@@ -655,10 +711,11 @@ start_frontend() {
         popd >/dev/null
     fi
 
-    # 检查端口是否可用
     local frontend_port="${VITE_FRONTEND_PORT}"
+    
+    # 强制清理端口（前端通常没有状态，重启时直接清理更安全）
     if is_port_in_use "$frontend_port"; then
-        log_warning "端口 $frontend_port 已被占用，尝试释放..."
+         log_warning "端口 $frontend_port 已被占用，尝试释放..."
         if ! force_release_port "$frontend_port"; then
             log_error "无法释放端口 $frontend_port，前端启动失败"
             return 1
@@ -666,11 +723,13 @@ start_frontend() {
     fi
 
     log_info "启动 Vite 开发服务器 (${VITE_FRONTEND_HOST}:${VITE_FRONTEND_PORT})..."
+
     pushd ui >/dev/null
     nohup npm run dev -- --host "${VITE_FRONTEND_HOST}" --port "${VITE_FRONTEND_PORT}" > "${LOG_DIR}/frontend.log" 2>&1 &
     local pid=$!
     popd >/dev/null
     register_pid "$pid"
+    echo "$pid" > "$pid_file"
 
     # 保存最后启动的服务 PID 到全局变量
     # 并行启动模式：不再在此处等待端口监听
@@ -678,19 +737,44 @@ start_frontend() {
     log_success "已触发前端启动 (PID ${pid})"
 }
 
+
 # ---------------------------- 服务监控与自动重启 -------------------------
 # 监控服务并在崩溃时重启
 monitor_service() {
     local service_name=$1
     local initial_pid=$2
     local restart_cmd=$3
+    local health_check_url=${4:-""}
     local current_pid=$initial_pid
+    
+    # 推断 PID 文件路径
+    local safe_name=$(echo "$service_name" | tr ' ' '_')
+    local pid_file="${LOG_DIR}/${safe_name}.pid"
 
     while true; do
         sleep 10
 
-        # 检查进程是否仍在运行
+        local needs_restart=false
+        
+        # 1. 基础进程检查
         if ! kill -0 "$current_pid" 2>/dev/null; then
+            log_warning "${service_name} (PID $current_pid) 进程已消失"
+            needs_restart=true
+        # 2. 主动健康检查（如果配置了 URL）
+        elif [ -n "$health_check_url" ]; then
+            if ! check_http_health_simple "$health_check_url"; then
+                log_warning "${service_name} 健康检查失败: $health_check_url"
+                # 重试一次以避免误报
+                sleep 3
+                if ! check_http_health_simple "$health_check_url"; then
+                    log_error "${service_name} 健康检查连续失败，判定为服务卡死"
+                    kill -9 "$current_pid" 2>/dev/null || true
+                    needs_restart=true
+                fi
+            fi
+        fi
+
+        if [ "$needs_restart" = true ]; then
             local restart_count=${SERVICE_RESTART_COUNT["$service_name"]:-0}
 
             if [ $restart_count -ge $MAX_RESTART_ATTEMPTS ]; then
@@ -703,19 +787,25 @@ monitor_service() {
             SERVICE_RESTART_COUNT["$service_name"]=$restart_count
 
             local delay=$((RESTART_DELAY_BASE * restart_count))
-            log_warning "${service_name} (PID $current_pid) 已崩溃，将在 ${delay} 秒后重启（尝试 ${restart_count}/${MAX_RESTART_ATTEMPTS}）"
-            log_restart "${service_name} 崩溃，PID: $current_pid，重启尝试: ${restart_count}/${MAX_RESTART_ATTEMPTS}"
+            log_warning "${service_name} 将在 ${delay} 秒后重启（尝试 ${restart_count}/${MAX_RESTART_ATTEMPTS}）"
+            log_restart "${service_name} 异常停止，PID: $current_pid，重启尝试: ${restart_count}/${MAX_RESTART_ATTEMPTS}"
 
             sleep $delay
 
             log_info "正在重启 ${service_name}..."
 
-            # 执行重启命令并获取新的 PID
+            # 执行重启命令
             eval "$restart_cmd"
 
             if [ $? -eq 0 ]; then
-                # 获取最新启动的进程 PID（从全局变量）
-                current_pid=$LAST_SERVICE_PID
+                # 优先从文件获取新 PID
+                sleep 2
+                if [ -f "$pid_file" ]; then
+                    current_pid=$(cat "$pid_file")
+                else
+                    current_pid=$LAST_SERVICE_PID
+                fi
+                
                 log_success "${service_name} 重启成功 (新 PID: $current_pid)"
                 log_restart "${service_name} 重启成功，新 PID: $current_pid"
                 # 重置重启计数
@@ -727,6 +817,18 @@ monitor_service() {
         fi
     done
 }
+
+check_http_health_simple() {
+    local url=$1
+    if command -v curl >/dev/null 2>&1; then
+        curl -sf "$url" >/dev/null 2>&1
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O /dev/null "$url" 2>&1
+    else
+        return 0 # 无法检查，默认认为健康
+    fi
+}
+
 
 print_summary() {
     echo -e "${GREEN}============================================================${NC}"
@@ -816,30 +918,29 @@ echo ""
 log_info "正在并行启动所有服务..."
 
 # 启动 Database MCP
-start_mcp_service "Database MCP" "database_call/server.py" "database.log" "${DATABASE_MCP_HOST}" "${DATABASE_MCP_PORT}" &
+start_mcp_service "Database MCP" "database_call/server.py" "database.log" "${DATABASE_MCP_HOST}" "${DATABASE_MCP_PORT}"
 log_info "已触发 Database MCP 启动..."
 
 # 启动 Paper Search MCP
-start_mcp_service "Paper Search MCP" "paper_search/server.py" "paper_search.log" "${PAPER_SEARCH_MCP_HOST}" "${PAPER_SEARCH_MCP_PORT}" &
+start_mcp_service "Paper Search MCP" "paper_search/server.py" "paper_search.log" "${PAPER_SEARCH_MCP_HOST}" "${PAPER_SEARCH_MCP_PORT}"
 log_info "已触发 Paper Search MCP 启动..."
 
 # 启动 Simulation MCP
-start_mcp_service "Simulation MCP" "simulation/server.py" "simulation.log" "${SIMULATION_MCP_HOST}" "${SIMULATION_MCP_PORT}" &
+start_mcp_service "Simulation MCP" "simulation/server.py" "simulation.log" "${SIMULATION_MCP_HOST}" "${SIMULATION_MCP_PORT}"
 log_info "已触发 Simulation MCP 启动..."
 
 # 启动后端
-start_backend &
+start_backend
 log_info "已触发后端服务启动..."
 
 # 启动前端
 sleep 2 # 前端稍微延后一点点，避免瞬间争抢过于激烈
-start_frontend &
+start_frontend
 log_info "已触发前端服务启动..."
 
-# 等待所有后台启动任务完成 (wait 仅等待当前 shell 的子进程，即上面的 & 任务)
-# 注意：这里的 wait 是等待启动脚本本身完成，而不是等待服务长期运行
-# 此处的子进程是 start_mcp_service 等函数调用
-wait
+# 由于改为顺序执行，不再需要 wait 等待子 Shell
+# 此时所有服务启动命令都已发出，且 PID 文件应已创建
+
 
 # 重新收集 PID（因为它们是在子 Shell/后台函数中启动的，变量无法回传）
 # 我们通过 .service_pids 文件来获取，或者通过端口反查
@@ -867,11 +968,6 @@ wait_for_port_listening "Frontend (Vite)" "${VITE_FRONTEND_HOST}" "${VITE_FRONTE
 
 
 # 从文件重新读取 PIDs 用于监控 (这需要之前的 start 函数确实写入了文件)
-# 注意：并行启动时，.service_pids 的写入顺序可能是不确定的
-# 下面的监控逻辑需要更健壮一点，或者我们不再依赖精确的 PID 变量
-# 而是依赖 Monitor 函数自己去查找 PID? 
-# 目前 Monitor 函数依赖传入的 PID。
-# 简便起见，我们通过端口反查 PID 来启动监控
 get_pid_by_port() {
     local port=$1
     local retry=0
@@ -892,29 +988,39 @@ get_pid_by_port() {
         fi
         
         retry=$((retry + 1))
+        rm -f .service_pids # 清除旧的 pid 记录，避免干扰
         sleep 1
     done
-    
-    # 如果还是获取不到，尝试从 .service_pids 文件读取
-    if [ -f .service_pids ]; then
-        # 返回最后一个非空的 PID（不太可靠，但总比没有好）
-        pid=$(tail -1 .service_pids 2>/dev/null)
-        if [ -n "$pid" ]; then
-            echo "$pid"
-            return 0
-        fi
-    fi
     
     echo ""
     return 1
 }
 
+get_service_pid() {
+    local service_name=$1
+    local port=$2
+    local safe_name=$(echo "$service_name" | tr ' ' '_')
+    local pid_file="${LOG_DIR}/${safe_name}.pid"
+
+    # 优先读取 PID 文件
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file")
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo "$pid"
+            return 0
+        fi
+    fi
+
+    # 回退到端口反查
+    get_pid_by_port "$port"
+}
+
 log_info "正在收集服务 PID..."
-database_pid=$(get_pid_by_port "${DATABASE_MCP_PORT}")
-paper_search_pid=$(get_pid_by_port "${PAPER_SEARCH_MCP_PORT}")
-simulation_pid=$(get_pid_by_port "${SIMULATION_MCP_PORT}")
-backend_pid=$(get_pid_by_port "${RESEARCHMIND_HTTP_PORT}")
-frontend_pid=$(get_pid_by_port "${VITE_FRONTEND_PORT}")
+database_pid=$(get_service_pid "Database MCP" "${DATABASE_MCP_PORT}")
+paper_search_pid=$(get_service_pid "Paper Search MCP" "${PAPER_SEARCH_MCP_PORT}")
+simulation_pid=$(get_service_pid "Simulation MCP" "${SIMULATION_MCP_PORT}")
+backend_pid=$(get_service_pid "Backend" "${RESEARCHMIND_HTTP_PORT}")
+frontend_pid=$(get_service_pid "Frontend" "${VITE_FRONTEND_PORT}")
 
 # 调试输出
 log_info "收集到的 PID:"
@@ -931,8 +1037,10 @@ log_info "启动日志已保存到: $STARTUP_LOG"
 log_info "重启日志将保存到: $RESTART_LOG"
 echo ""
 
-# 启动后台监控进程（仅监控成功获取到 PID 的服务）
+# 启动后台监控进程
 log_info "正在启动服务监控..."
+
+# MCP 服务监控 (通常不需要 HTTP 健康检查，因为 SSE 难以 curl)
 if [ -n "$database_pid" ]; then
     monitor_service "Database MCP" "$database_pid" "start_mcp_service 'Database MCP' 'database_call/server.py' 'database.log' '${DATABASE_MCP_HOST}' '${DATABASE_MCP_PORT}' 'true'" &
 else
@@ -951,13 +1059,16 @@ else
     log_warning "Simulation MCP PID 未获取到，跳过监控"
 fi
 
+# 后端监控
 if [ -n "$backend_pid" ]; then
-    monitor_service "Backend" "$backend_pid" "start_backend" &
+    monitor_service "Backend" "$backend_pid" "start_backend 'true'" &
 else
     log_warning "Backend PID 未获取到，跳过监控"
 fi
 
+# 前端监控
 if [ -n "$frontend_pid" ]; then
+    # 前端通常不做严格 HTTP 检查，因为开发服务器响应较慢，且 browser 才是客户端
     monitor_service "Frontend" "$frontend_pid" "start_frontend" &
 else
     log_warning "Frontend PID 未获取到，跳过监控"
@@ -972,6 +1083,6 @@ else
     wait_forever
 fi
 
-# 等待任何进程退出（包括 tail 进程）
-# 这允许 Ctrl+C 触发清理陷阱
+# 等待任何进程退出
 wait
+

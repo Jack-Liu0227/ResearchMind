@@ -5,6 +5,11 @@
 
 import { CrystalStructure, Atom } from '../types'
 
+function normalizeFormula(raw: string): string {
+  const tokens = raw.match(/[A-Z][a-z]?\d*/g)
+  return tokens ? tokens.join('') : raw
+}
+
 interface CIFData {
   cellLengthA?: number
   cellLengthB?: number
@@ -90,7 +95,7 @@ export function parseCIF(cifContent: string, useConventionalCell: boolean = true
     // 转换为 CrystalStructure 格式
     let structure: CrystalStructure = {
       id: `cif_${Date.now()}`,
-      formula: data.chemicalFormula || 'Unknown',
+      formula: normalizeFormula(data.chemicalFormula || 'Unknown'),
       spaceGroup: data.spaceGroup || 'P1',
       latticeParameters: {
         a: data.cellLengthA,

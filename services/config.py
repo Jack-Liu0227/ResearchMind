@@ -114,6 +114,11 @@ class AgentConfig:
             "icon": "🔬",
             "description": "结构生成、热导率、能量计算",
         },
+        "experiment_plan_agent": {
+            "name": "实验方案推荐",
+            "icon": "🧪",
+            "description": "结合文献、数据库与模拟结果，给出实验路径和验证方案",
+        },
     }
 
 

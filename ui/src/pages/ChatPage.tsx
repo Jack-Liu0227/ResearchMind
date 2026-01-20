@@ -48,6 +48,48 @@ const ChatPage: React.FC = () => {
   const pendingFileMetadataRef = useRef<any[]>([])
   const historyRequestRef = useRef<string | null>(null)
 
+  // 恢复上次会话
+  useEffect(() => {
+    if (!currentSession && sessions.length > 0) {
+      // 尝试从 sessionStorage 获取最后活跃的 session_id
+      const lastSessionId = sessionStorage.getItem('last_active_session_id')
+      let restoredSession = null
+
+      if (lastSessionId) {
+        restoredSession = sessions.find(s => s.id === lastSessionId)
+      }
+
+      // 如果没有记录或找不到，则使用最后一个会话
+      if (!restoredSession) {
+        restoredSession = sessions[sessions.length - 1]
+      }
+
+      console.log('🔄 Restoring session:', restoredSession.id)
+      setCurrentSession(restoredSession)
+    }
+  }, [currentSession, sessions, setCurrentSession])
+
+  // 记录当前会话 ID
+  useEffect(() => {
+    if (currentSession) {
+      sessionStorage.setItem('last_active_session_id', currentSession.id)
+    }
+  }, [currentSession])
+
+  // 🆕 确保连接后加载历史记录（解决刷新页面记录丢失问题）
+  useEffect(() => {
+    if (connected && currentSession?.id) {
+      console.log('🔄 [ChatPage] 连接已建立，请求同步历史记录:', currentSession.id)
+      wsService.send({ 
+        type: 'get_history', 
+        data: { 
+          sessionId: currentSession.id,
+          agentId: currentAgent?.id || currentSession.agentId
+        } 
+      })
+    }
+  }, [connected, currentSession?.id])
+
   const normalizePath = (input?: string): string | undefined => {
     if (!input) return undefined
     let value = input.trim().replace(/\\/g, '/')
@@ -347,7 +389,8 @@ const ChatPage: React.FC = () => {
             role: 'assistant' as const,
             timestamp: new Date(message.data.timestamp || Date.now()),
             agentId: message.data.agentId,
-            agentName: message.data.agentName,
+            // 🔧 修复：使用 getState() 获取最新 agentName，避免闭包导致的旧名称 ("文献研究助手")
+            agentName: useAppStore.getState().currentAgent?.name || message.data.agentName,
             type: (message.data.type || 'text') as 'text' | 'structure' | 'analysis' | 'error',
             metadata: message.data.metadata,
           }
@@ -1111,6 +1154,18 @@ const ChatPage: React.FC = () => {
           setIsLoading(false)
           setLoadingMessage('')
           toast.dismiss('agent-processing-toast')
+        }
+
+        const recoveredSessionId = message.data.sessionId
+        if (recoveredSessionId && historyRequestRef.current !== recoveredSessionId) {
+          wsService.send({
+            type: 'get_history',
+            data: {
+              sessionId: recoveredSessionId,
+              agentId: currentAgent?.id,
+            }
+          })
+          historyRequestRef.current = recoveredSessionId
         }
 
         toast.success('已恢复连接', { duration: 2000, icon: '🔄' })

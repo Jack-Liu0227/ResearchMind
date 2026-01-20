@@ -228,6 +228,14 @@ const defaultAgents: Agent[] = [
     capabilities: ['molecular_modeling', 'simulation', 'quantum_calculation'],
     status: 'active',
   },
+  {
+    id: 'experiment_plan_agent',
+    name: '实验方案推荐',
+    description: '结合文献、数据库与模拟结果，生成可执行的实验方案与验证路径。',
+    type: 'planning',
+    capabilities: ['experiment_design', 'validation_plan', 'risk_assessment'],
+    status: 'active',
+  },
 ]
 
 const fixRestoredSessions = (sessions: ChatSession[]): ChatSession[] =>
@@ -245,7 +253,7 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       agents: defaultAgents,
-      currentAgent: defaultAgents[0],
+      currentAgent: defaultAgents[2],  // 默认选择第三个 agent（仿真计算助手）
 
       sessions: [],
       currentSession: null,
@@ -291,7 +299,7 @@ export const useAppStore = create<AppState>()(
 
       setCurrentSession: (session) => {
         const state = get()
-        const { sessions, currentSession, currentSessionStructures, currentSessionPhononImages, currentSessionFiles, currentPapersCsvPath, currentPapersCount } = state
+        const { sessions, currentSession, currentSessionStructures, currentSessionPhononImages, currentSessionFiles, currentPapersCsvPath, currentPapersCount, agents } = state
 
         if (currentSession) {
           const idx = sessions.findIndex((s) => s.id === currentSession.id)
@@ -331,8 +339,19 @@ export const useAppStore = create<AppState>()(
         const restoredFiles = latest.files || []
         const restoredPhonon = latest.phononImages || []
 
+        // 🆕 切换会话时，自动切换到对应的 Agent
+        let nextAgent = state.currentAgent
+        if (latest.agentId) {
+          const targetAgent = agents.find(a => a.id === latest.agentId)
+          if (targetAgent) {
+            console.log(`🔄 Switching agent to match session: ${targetAgent.name} (${targetAgent.id})`)
+            nextAgent = targetAgent
+          }
+        }
+
         set({
           currentSession: latest,
+          currentAgent: nextAgent,
           messages: latest.messages || [],
           currentStructure: restoredStructures.slice(-1)[0] ?? null,
           currentSessionStructures: restoredStructures,
@@ -460,6 +479,42 @@ export const useAppStore = create<AppState>()(
 
       addToCurrentSessionStructures: (structure) => {
         const { currentSessionStructures, currentStructure } = get()
+        // 🔧 修复：只有结构完全相同时才去重
+        // 比较：ID、文件路径、来源+化学式+晶格参数
+        const isDuplicate = currentSessionStructures.some(s => {
+          // 1. 相同ID，直接去重
+          if (s.id === structure.id) return true
+          
+          // 2. 相同文件路径，直接去重
+          if (s.cif_file_path && structure.cif_file_path && s.cif_file_path === structure.cif_file_path) return true
+          
+          // 3. 不同来源，不去重（Upload vs Relaxed 应该都保留）
+          if (s.source?.database !== structure.source?.database) return false
+          
+          // 4. 相同来源，比较化学式和晶格参数
+          if (s.formula !== structure.formula) return false
+          
+          // 5. 比较晶格参数（忽略空间群差异，因为同一结构可能有不同对称性分析）
+          const lat1 = s.latticeParameters
+          const lat2 = structure.latticeParameters
+          if (lat1 && lat2) {
+            const tolerance = 0.01
+            // 所有晶格参数必须相同才算重复
+            if (Math.abs((lat1.a || 0) - (lat2.a || 0)) > tolerance) return false
+            if (Math.abs((lat1.b || 0) - (lat2.b || 0)) > tolerance) return false
+            if (Math.abs((lat1.c || 0) - (lat2.c || 0)) > tolerance) return false
+            if (Math.abs((lat1.alpha || 0) - (lat2.alpha || 0)) > tolerance) return false
+            if (Math.abs((lat1.beta || 0) - (lat2.beta || 0)) > tolerance) return false
+            if (Math.abs((lat1.gamma || 0) - (lat2.gamma || 0)) > tolerance) return false
+            // 晶格参数完全相同，认为是重复（即使空间群不同）
+            return true
+          }
+          
+          return false
+        })
+
+        if (isDuplicate) return
+
         const updatedStructures = [...currentSessionStructures, structure]
         set({ currentSessionStructures: updatedStructures })
 

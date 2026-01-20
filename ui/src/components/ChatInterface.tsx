@@ -346,10 +346,16 @@ const ChatInterface: React.FC = () => {
         attachments.push({ filename: file.name, content: fileContent })
 
         try {
-          const response = await uploadFile(file, 'structure')
+          const response = await uploadFile(file, 'structure', (sessionToUse || currentSession)?.id)
 
-          if (response.data?.success && response.data?.structures?.length > 0) {
-            const structure = response.data.structures[0]
+          // Fix: api.ts interceptor unwraps response.data, so response IS the data body.
+          // We check both direct access and .data access to be safe.
+          const respData = response as any
+          const isSuccess = respData.success || respData.data?.success
+          const structures = respData.structures || respData.data?.structures
+
+          if (isSuccess && structures?.length > 0) {
+            const structure = structures[0]
             setCurrentStructure(structure)
             addToCurrentSessionStructures(structure)
             toast.success(`Loaded structure: ${structure.formula}`)
@@ -370,7 +376,7 @@ const ChatInterface: React.FC = () => {
                 structure.cifFilename = file.name
                 structure.metadata = {
                   ...structure.metadata,
-                  originalFilename: file.name,
+                  filename: file.name,
                   conventionalStructure,
                 }
                 setCurrentStructure(structure)
@@ -381,7 +387,8 @@ const ChatInterface: React.FC = () => {
           }
         } catch (error) {
           console.error('CIF upload/parse failed:', error)
-          toast.error(`CIF processing failed: ${file.name}`)
+          const errorDetail = (error as any).response?.data?.detail || (error as any).message || 'Unknown error'
+          toast.error(`CIF processing failed: ${file.name}\n${errorDetail}`)
         }
       }
 
@@ -488,7 +495,7 @@ const ChatInterface: React.FC = () => {
         <MessageList messages={messages} onRegenerate={handleRegenerate} />
       </div>
 
-      <div className="flex-shrink-0 bg-transparent z-10 transition-all duration-300 ease-in-out p-2 sm:p-5 pb-24 sm:pb-5">
+      <div className="flex-shrink-0 bg-transparent z-10 transition-all duration-300 ease-in-out p-2 sm:p-5 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:pb-5">
         <div className="max-w-4xl mx-auto relative group">
           <div className="glass-panel border-t border-white/40 bg-white/60 shadow-2xl backdrop-blur-xl sm:rounded-2xl sm:border p-1.5 sm:p-3 transition-all hover:bg-white/70 hover:shadow-primary-500/10">
             <input

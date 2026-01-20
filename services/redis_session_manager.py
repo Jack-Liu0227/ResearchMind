@@ -78,6 +78,17 @@ class RedisSessionManager:
         # Expiration times
         self.SESSION_EXPIRE_SECONDS = 24 * 3600  # 24 hours
         self.HISTORY_EXPIRE_SECONDS = 7 * 24 * 3600  # 7 days
+
+        history_ttl = os.getenv("REDIS_HISTORY_TTL_SECONDS")
+        if history_ttl is not None:
+            try:
+                parsed_ttl = int(history_ttl)
+                if parsed_ttl <= 0:
+                    self.HISTORY_EXPIRE_SECONDS = None
+                else:
+                    self.HISTORY_EXPIRE_SECONDS = parsed_ttl
+            except ValueError:
+                logger.warning(f"Invalid REDIS_HISTORY_TTL_SECONDS: {history_ttl}")
     
     def _session_key(self, session_id: str) -> str:
         """Generate Redis key for session data"""
@@ -294,11 +305,15 @@ class RedisSessionManager:
             
             # Save to Redis as JSON
             history_key = self._history_key(session_id)
-            self.redis_client.setex(
-                history_key,
-                self.HISTORY_EXPIRE_SECONDS,
-                json.dumps(serialized_history)
-            )
+            payload = json.dumps(serialized_history)
+            if self.HISTORY_EXPIRE_SECONDS:
+                self.redis_client.setex(
+                    history_key,
+                    self.HISTORY_EXPIRE_SECONDS,
+                    payload
+                )
+            else:
+                self.redis_client.set(history_key, payload)
             
             # Update message count in session
             self.update_session(session_id, {"message_count": len(serialized_history)})

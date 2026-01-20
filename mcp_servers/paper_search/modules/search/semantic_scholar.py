@@ -31,6 +31,25 @@ MAX_RETRIES = 2
 RETRY_DELAY = 1
 
 
+def _simplify_query(query: str, max_terms: int = 8) -> str:
+    """
+    Simplify long queries for Semantic Scholar to improve recall.
+    """
+    import re
+
+    if not query:
+        return query
+
+    cleaned = re.sub(r"\([^)]*\)", " ", query)
+    cleaned = re.sub(r"\b(19|20)\d{2}\b", " ", cleaned)
+    cleaned = re.sub(r"[\"'“”‘’,;:]", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    tokens = cleaned.split()
+    if len(tokens) <= max_terms:
+        return cleaned
+    return " ".join(tokens[:max_terms])
+
+
 async def search_semantic_scholar_papers(
     query: str, 
     max_results: int = 5, 
@@ -99,6 +118,35 @@ async def search_semantic_scholar_papers(
                     normalized_paper = _normalize_semantic_scholar_paper(paper)
                     all_papers.append(normalized_paper)
         
+
+        # Special handling: fallback to simplified query when no results
+        if not all_papers:
+            simplified_query = _simplify_query(query)
+            if simplified_query and simplified_query != query:
+                logger.info(
+                    "Semantic Scholar fallback to simplified query",
+                    original=query,
+                    simplified=simplified_query
+                )
+
+                fallback_params = dict(params)
+                fallback_params["query"] = simplified_query
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        url,
+                        params=fallback_params,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT)
+                    ) as response:
+                        response.raise_for_status()
+                        fallback_data = await response.json()
+
+                        fallback_papers = fallback_data.get("data", [])
+                        for paper in fallback_papers[:max_results]:
+                            normalized_paper = _normalize_semantic_scholar_paper(paper)
+                            all_papers.append(normalized_paper)
+
         logger.info(
             "Semantic Scholar search completed",
             query=query,

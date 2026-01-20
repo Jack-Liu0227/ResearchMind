@@ -92,11 +92,21 @@ class DataProcessor:
     ) -> bool:
         """Process and send structure data"""
         try:
+            # 🆕 Debug: Log data keys before extraction
+            logger.info(f"🔍 [data_processor] Processing tool result for structures")
+            logger.info(f"🔍 [data_processor] Data keys: {list(data.keys())}")
+            if "frontend_structures" in data:
+                logger.info(f"🔍 [data_processor] Found frontend_structures: {len(data['frontend_structures'])} items")
+            
             # Extract structures using StructureConverter
             structures = StructureConverter.extract_structures_from_tool_result(data)
 
             if structures:
-                logger.info(f"🗄️ Preparing to send {len(structures)} structures")
+                logger.info(f"🗄️ [data_processor] Preparing to send {len(structures)} structures")
+                
+                # 🆕 Debug: Log structure details
+                for i, s in enumerate(structures):
+                    logger.info(f"  📦 Structure {i+1}: {s.get('formula', 'Unknown')} - source: {s.get('source', {}).get('database', 'N/A')}")
 
                 # Update session structure count
                 if session_id:
@@ -116,15 +126,15 @@ class DataProcessor:
 
                 # Determine database name for logging
                 db_name = DataProcessor._get_database_name(data)
-                logger.info(f"✅ [Database:{db_name}] Sent {len(structures)} structures (session: {session_id})")
+                logger.info(f"✅ [Database:{db_name}] Sent {len(structures)} structures via structure_data message (session: {session_id})")
 
                 return True
             else:
-                logger.debug("No structures found in tool result")
+                logger.debug("⚠️ [data_processor] No structures found in tool result")
                 return False
 
         except Exception as e:
-            logger.error(f"Failed to process structures: {e}")
+            logger.error(f"❌ [data_processor] Failed to process structures: {e}", exc_info=True)
             return False
     
     @staticmethod
@@ -140,6 +150,24 @@ class DataProcessor:
             images = ImageHandler.extract_images_from_tool_result(data)
 
             if images:
+                deduped = []
+                seen = set()
+                for img in images:
+                    if not isinstance(img, dict):
+                        continue
+                    url = img.get("url") or ""
+                    path = img.get("path") or ""
+                    key = url or path or str(img.get("filename") or img.get("name") or "")
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    deduped.append(img)
+
+                if not deduped:
+                    logger.debug("No unique images found in tool result")
+                    return False
+
+                images = deduped
                 logger.info(f"🖼️ Preparing to send {len(images)} images")
 
                 # Log image details
@@ -184,42 +212,96 @@ class DataProcessor:
             file_metadata = {}
 
             # Extract CSV download URL
-            if 'csv_download_url' in data:
-                file_metadata['csv_download_url'] = data['csv_download_url']
-                if 'csv_file_path' in data:
-                    file_metadata['csv_file_path'] = data['csv_file_path']
+            csv_download_url = data.get('csv_download_url')
+            csv_file_path = data.get('csv_file_path')
+            if not csv_download_url and csv_file_path:
+                csv_download_url = DataProcessor._build_download_url_from_path(csv_file_path)
+
+            if csv_download_url:
+                file_metadata['csv_download_url'] = csv_download_url
+                if csv_file_path:
+                    file_metadata['csv_file_path'] = csv_file_path
                     # 🔧 性能优化：只获取文件元数据，不读取完整内容
-                    csv_meta = DataProcessor._get_file_metadata(data['csv_file_path'])
+                    csv_meta = DataProcessor._get_file_metadata(csv_file_path)
                     if csv_meta:
                         file_metadata['csv_metadata'] = csv_meta
                         if csv_meta.get('is_large'):
                             logger.info(f"📄 Large CSV file detected ({csv_meta['size_kb']} KB), skipping inline content")
                         else:
                             # 只有小文件才内联读取
-                            inline_csv = DataProcessor._read_text_file(data['csv_file_path'])
+                            inline_csv = DataProcessor._read_text_file(csv_file_path)
                             if inline_csv is not None:
                                 file_metadata['csv_inline_content'] = inline_csv
-                logger.info(f"📄 Found CSV file: {data['csv_download_url']}")
+                logger.info(f"📄 Found CSV file: {csv_download_url}")
 
             # Extract MD download URL
-            if 'md_download_url' in data:
-                file_metadata['md_download_url'] = data['md_download_url']
-                if 'summary_file_path' in data:
-                    file_metadata['summary_file_path'] = data['summary_file_path']
+            md_download_url = data.get('md_download_url')
+            summary_file_path = data.get('summary_file_path')
+            report_file_path = data.get('report_file_path')
+            if not md_download_url:
+                md_candidate = summary_file_path or report_file_path
+                if md_candidate:
+                    md_download_url = DataProcessor._build_download_url_from_path(md_candidate)
+
+            if md_download_url:
+                file_metadata['md_download_url'] = md_download_url
+                if summary_file_path:
+                    file_metadata['summary_file_path'] = summary_file_path
                     # 🔧 性能优化：只获取文件元数据
-                    md_meta = DataProcessor._get_file_metadata(data['summary_file_path'])
+                    md_meta = DataProcessor._get_file_metadata(summary_file_path)
                     if md_meta and not md_meta.get('is_large'):
-                        inline_md = DataProcessor._read_text_file(data['summary_file_path'])
+                        inline_md = DataProcessor._read_text_file(summary_file_path)
                         if inline_md is not None:
                             file_metadata['md_inline_content'] = inline_md
-                elif 'report_file_path' in data:
-                    file_metadata['report_file_path'] = data['report_file_path']
-                    md_meta = DataProcessor._get_file_metadata(data['report_file_path'])
+                elif report_file_path:
+                    file_metadata['report_file_path'] = report_file_path
+                    md_meta = DataProcessor._get_file_metadata(report_file_path)
                     if md_meta and not md_meta.get('is_large'):
-                        inline_md = DataProcessor._read_text_file(data['report_file_path'])
+                        inline_md = DataProcessor._read_text_file(report_file_path)
                         if inline_md is not None:
                             file_metadata['md_inline_content'] = inline_md
-                logger.info(f"📄 Found MD file: {data['md_download_url']}")
+                logger.info(f"📄 Found MD file: {md_download_url}")
+
+            # Send generic CSV/MD files as file_data so the right panel can show them.
+            generic_files = []
+            if csv_download_url or csv_file_path:
+                csv_name = os.path.basename(csv_file_path) if csv_file_path else 'data.csv'
+                generic_files.append({
+                    "id": f"csv_{csv_name}_{int(datetime.now().timestamp() * 1000)}",
+                    "type": "csv",
+                    "name": Path(csv_name).stem,
+                    "downloadUrl": csv_download_url,
+                    "filePath": csv_file_path,
+                    "metadata": DataProcessor._get_file_metadata(csv_file_path) if csv_file_path else None,
+                    "createdAt": datetime.now().timestamp() * 1000,
+                    "extra": {
+                        "category": "analysis" if csv_name.startswith("analysis_results_") else "csv"
+                    }
+                })
+
+            md_path = summary_file_path or report_file_path
+            if md_download_url or md_path:
+                md_name = os.path.basename(md_path) if md_path else 'summary.md'
+                generic_files.append({
+                    "id": f"md_{md_name}_{int(datetime.now().timestamp() * 1000)}",
+                    "type": "md",
+                    "name": Path(md_name).stem,
+                    "downloadUrl": md_download_url,
+                    "filePath": md_path,
+                    "metadata": DataProcessor._get_file_metadata(md_path) if md_path else None,
+                    "createdAt": datetime.now().timestamp() * 1000,
+                    "extra": {
+                        "category": "analysis" if md_name.startswith("analysis_") else "md"
+                    }
+                })
+
+            if generic_files:
+                await DataProcessor._send_message(websocket, "file_data", {
+                    "files": generic_files,
+                    "agentId": agent_id,
+                    "sessionId": session_id,
+                    "timestamp": datetime.now().isoformat()
+                })
 
             # 🆕 处理热导率计算结果的 CSV 文件
             # 单个热导率计算
@@ -637,6 +719,59 @@ class DataProcessor:
                     else:
                         logger.info(f"⏭️ No phonon_dos_csv in result item {idx + 1}")
 
+            # 🆕 处理结构相关的 CIF 文件（generated/relaxed/database 等）
+            cif_paths = DataProcessor._collect_structure_file_paths(data)
+            if cif_paths:
+                files = []
+                seen = set()
+                max_files = 20
+                for path in cif_paths:
+                    if isinstance(path, Path):
+                        path = str(path)
+                    if not isinstance(path, str) or not path:
+                        continue
+
+                    normalized = path.replace('\\', '/')
+                    if normalized in seen:
+                        continue
+                    seen.add(normalized)
+
+                    if not normalized.lower().endswith('.cif'):
+                        continue
+                    if not os.path.exists(path):
+                        logger.warning(f"⚠️ CIF file not found: {path}")
+                        continue
+
+                    filename = os.path.basename(path)
+                    download_url = DataProcessor._build_download_url_from_path(path)
+                    category = DataProcessor._infer_structure_category(path)
+
+                    files.append({
+                        "id": f"cif_{filename}_{len(files)}",
+                        "type": "cif",
+                        "name": filename,
+                        "downloadUrl": download_url,
+                        "filePath": path,
+                        "metadata": DataProcessor._get_file_metadata(path),
+                        "createdAt": datetime.now().timestamp() * 1000,
+                        "extra": {
+                            "category": category
+                        }
+                    })
+                    if len(files) >= max_files:
+                        break
+
+                if files:
+                    file_data_message = {
+                        "files": files,
+                        "agentId": agent_id,
+                        "sessionId": session_id,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    logger.info(f"📤 [data_processor] Sending CIF file_data message: {len(files)} files")
+                    await DataProcessor._send_message(websocket, "file_data", file_data_message)
+                    logger.info(f"✅ [data_processor] Sent CIF file_data message")
+
             # If we found any file links, send them as metadata
             if file_metadata:
                 logger.info(f"📄 Sending file metadata: {file_metadata}")
@@ -659,6 +794,79 @@ class DataProcessor:
         except Exception as e:
             logger.error(f"Failed to process file links: {e}")
             return False
+
+    @staticmethod
+    def _build_download_url_from_path(file_path: str) -> Optional[str]:
+        """Convert a session_data path into a /api/download URL."""
+        if not file_path:
+            return None
+
+        normalized = str(file_path).replace('\\', '/')
+        if 'session_data/' not in normalized:
+            return None
+
+        relative_part = normalized.split('session_data/', 1)[1]
+        return f"/api/download/{relative_part}"
+
+    @staticmethod
+    def _infer_structure_category(file_path: str) -> str:
+        """Infer CIF category based on its session_data subdirectory."""
+        normalized = str(file_path).replace('\\', '/').lower()
+        if "/relaxed/" in normalized:
+            return "relaxed"
+        if "/generated/" in normalized:
+            return "generated"
+        if "/database/" in normalized:
+            return "database"
+        if "/cif/" in normalized:
+            return "cif"
+        return "structure"
+
+    @staticmethod
+    def _collect_structure_file_paths(data: Dict[str, Any]) -> List[str]:
+        """Collect CIF file paths from tool output payloads."""
+        paths: List[str] = []
+
+        def add_path(value: Any) -> None:
+            if not value:
+                return
+            if isinstance(value, Path):
+                paths.append(str(value))
+            elif isinstance(value, str):
+                paths.append(value)
+
+        # Direct fields
+        for key in ("cif_file_path", "relaxed_cif_file", "relaxed_cif_path", "generated_cif_file"):
+            add_path(data.get(key))
+
+        # Lists of paths
+        for key in ("cif_file_paths", "generated_files", "cif_paths"):
+            values = data.get(key)
+            if isinstance(values, list):
+                for item in values:
+                    add_path(item)
+
+        # Structures in top-level lists
+        for key in ("structures", "frontend_structures", "database_structures", "generated_structures"):
+            values = data.get(key)
+            if isinstance(values, list):
+                for item in values:
+                    if isinstance(item, dict):
+                        add_path(item.get("cif_file_path") or item.get("path") or item.get("file_path"))
+
+        # Nested results (relaxation outputs, batch jobs)
+        results = data.get("results")
+        if isinstance(results, list):
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                add_path(item.get("relaxed_cif_file"))
+                add_path(item.get("cif_file_path"))
+                frontend_structure = item.get("frontend_structure")
+                if isinstance(frontend_structure, dict):
+                    add_path(frontend_structure.get("cif_file_path"))
+
+        return paths
 
     @staticmethod
     def _get_database_name(data: Dict[str, Any]) -> str:

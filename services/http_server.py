@@ -655,7 +655,8 @@ class HTTPServer:
             session_id: Optional[str] = Query(None),
             topic: Optional[str] = Query(None),
             client_id: Optional[str] = Query(None),
-            user_message: Optional[str] = Form(None)
+            user_message: Optional[str] = Form(None),
+            request: Request = None
         ):
             """
             Unified upload endpoint supporting multiple file types
@@ -679,10 +680,10 @@ class HTTPServer:
                 # Handle CIF structure uploads
                 if len(files) == 1 and type == "structure":
                     # Single file upload
-                    return await upload_single_structure(files[0], user_message=user_message)
+                    return await upload_single_structure(files[0], user_message=user_message, request=request)
                 else:
                     # Multiple files upload
-                    return await upload_multiple_structures(files, user_message=user_message)
+                    return await upload_multiple_structures(files, user_message=user_message, request=request)
             elif type == "documents":
                 # Handle document uploads
                 return await upload_documents(
@@ -700,7 +701,8 @@ class HTTPServer:
         @self.app.post("/api/upload/structure", response_model=UploadResponse)
         async def upload_single_structure(
             file: UploadFile = File(...),
-            user_message: Optional[str] = Form(None)
+            user_message: Optional[str] = Form(None),
+            request: Request = None
         ):
             """
             Upload a single CIF file
@@ -791,9 +793,19 @@ class HTTPServer:
                     import uuid
                     default_session_id = f"upload_{uuid.uuid4().hex[:8]}"
                     
-                    # 尝试从查询参数或请求头获取 session_id
-                    # 这里我们使用一个通用的 uploads 目录
-                    cif_dir = session_data_root() / "simulation" / "uploads" / "cif"
+                    session_id = None
+                    if request:
+                        session_id = request.query_params.get("session_id") or request.query_params.get("sessionId")
+                        if not session_id:
+                            session_id = (
+                                request.headers.get("x-session-id")
+                                or request.headers.get("session_id")
+                                or request.headers.get("sessionid")
+                            )
+                    if not session_id:
+                        session_id = default_session_id
+
+                    cif_dir = session_data_root() / "simulation" / session_id / "cif"
                     cif_dir.mkdir(parents=True, exist_ok=True)
                     
                     # 生成唯一文件名（包含时间戳避免冲突）
@@ -975,7 +987,8 @@ class HTTPServer:
         @self.app.post("/api/upload/structures", response_model=UploadResponse)
         async def upload_multiple_structures(
             files: List[UploadFile] = File(...),
-            user_message: Optional[str] = Form(None)
+            user_message: Optional[str] = Form(None),
+            request: Request = None
         ):
             """
             Upload multiple CIF files
@@ -1003,6 +1016,18 @@ class HTTPServer:
                 structures = []
                 failed_files = []
                 total_files = len(files)
+                session_id_for_upload = None
+                if request:
+                    session_id_for_upload = request.query_params.get("session_id") or request.query_params.get("sessionId")
+                    if not session_id_for_upload:
+                        session_id_for_upload = (
+                            request.headers.get("x-session-id")
+                            or request.headers.get("session_id")
+                            or request.headers.get("sessionid")
+                        )
+                if not session_id_for_upload:
+                    import uuid
+                    session_id_for_upload = f"upload_{uuid.uuid4().hex[:8]}"
 
                 for file in files:
                     try:
@@ -1044,7 +1069,7 @@ class HTTPServer:
                             from utils.paths import session_data_root
                             from datetime import datetime
                             
-                            cif_dir = session_data_root() / "simulation" / "uploads" / "cif"
+                            cif_dir = session_data_root() / "simulation" / session_id_for_upload / "cif"
                             cif_dir.mkdir(parents=True, exist_ok=True)
                             
                             # 生成唯一文件名

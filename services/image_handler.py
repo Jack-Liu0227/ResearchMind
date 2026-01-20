@@ -126,8 +126,23 @@ class ImageHandler:
                             logger.info(f"✅ Added phonon DOS image: {image['url']}")
             
             # Method 4: Generic plot paths
+            # 🆕 Prevent duplicates: Track existing filenames
+            existing_filenames = set()
+            for img in images:
+                if img.get("url"):
+                    existing_filenames.add(img["url"].split("/")[-1])
+                if img.get("filename"):
+                    existing_filenames.add(img["filename"])
+
             for key in ["band_structure_path", "dos_path", "plot_path"]:
                 if key in result and result[key]:
+                    path_str = str(result[key])
+                    filename = Path(path_str).name
+                    
+                    if filename in existing_filenames:
+                        logger.info(f"⏭️ Skipping duplicate image from key '{key}': {filename}")
+                        continue
+
                     image = ImageHandler._create_generic_image(
                         result[key],
                         key.replace("_path", ""),
@@ -135,6 +150,7 @@ class ImageHandler:
                     )
                     if image:
                         images.append(image)
+                        existing_filenames.add(filename)
             
             logger.info(f"📊 Total images extracted: {len(images)}")
             

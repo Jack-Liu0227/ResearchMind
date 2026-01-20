@@ -14,6 +14,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 import structlog
+import multiprocessing
+import traceback
 
 # Setup paths
 current_dir = Path(__file__).resolve().parent
@@ -76,6 +78,127 @@ try:
     SESSION_MANAGER_AVAILABLE = True
 except ImportError:
     SESSION_MANAGER_AVAILABLE = False
+
+
+def _phonon_worker(queue, kwargs):
+    """
+    Worker process for phonon calculation to isolate crashes (SegFaults).
+    """
+    import sys
+    import traceback
+    from pathlib import Path
+    
+    # Recalculate paths in worker (spawn doesn't inherit globals)
+    current_dir = Path(__file__).resolve().parent
+    root_dir = current_dir.parent.parent
+    services_path = root_dir / "services"
+    shared_path = root_dir / "shared"
+    mcp_shared_path = root_dir / "mcp_servers" / "shared"
+    modules_path = current_dir / "modules"
+    crystallm_path = current_dir / "crystallm"
+    
+    for path in [services_path, shared_path, mcp_shared_path, modules_path, crystallm_path, current_dir]:
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+        
+    try:
+        # Re-import to ensure availability in child process
+        from mattersim_energy import calculate_phonon_impl
+        
+        result = calculate_phonon_impl(**kwargs)
+        queue.put(result)
+    except Exception as e:
+        queue.put({"success": False, "error": f"Worker Error: {str(e)}", "traceback": traceback.format_exc()})
+
+
+def _energy_worker(queue, args_tuple):
+    """Worker for single energy calculation"""
+    import sys
+    import traceback
+    from pathlib import Path
+    
+    # Recalculate paths in worker (spawn doesn't inherit globals)
+    current_dir = Path(__file__).resolve().parent
+    root_dir = current_dir.parent.parent
+    services_path = root_dir / "services"
+    shared_path = root_dir / "shared"
+    mcp_shared_path = root_dir / "mcp_servers" / "shared"
+    modules_path = current_dir / "modules"
+    crystallm_path = current_dir / "crystallm"
+    
+    for path in [services_path, shared_path, mcp_shared_path, modules_path, crystallm_path, current_dir]:
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    
+    try:
+        from mattersim_energy import calculate_energy_from_cif_impl
+        cif_content, filename, device = args_tuple
+        result = calculate_energy_from_cif_impl(cif_content, filename, device)
+        queue.put(result)
+    except Exception as e:
+        queue.put({"success": False, "error": f"Worker Error: {str(e)}", "traceback": traceback.format_exc()})
+
+
+def _relax_worker(queue, args_tuple):
+    """Worker for single relaxation"""
+    import sys
+    import traceback
+    from pathlib import Path
+    
+    # Recalculate paths in worker (spawn doesn't inherit globals)
+    current_dir = Path(__file__).resolve().parent
+    root_dir = current_dir.parent.parent
+    services_path = root_dir / "services"
+    shared_path = root_dir / "shared"
+    mcp_shared_path = root_dir / "mcp_servers" / "shared"
+    modules_path = current_dir / "modules"
+    crystallm_path = current_dir / "crystallm"
+    
+    for path in [services_path, shared_path, mcp_shared_path, modules_path, crystallm_path, current_dir]:
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    
+    try:
+        from mattersim_energy import relax_structure_impl
+        cif_content, filename, device, optimizer, filter_type, constrain_symmetry, max_steps, fmax = args_tuple
+        
+        result = relax_structure_impl(
+            cif_content, filename, device, optimizer, filter_type,
+            constrain_symmetry, max_steps, fmax
+        )
+        queue.put(result)
+    except Exception as e:
+        queue.put({"success": False, "error": f"Worker Error: {str(e)}", "traceback": traceback.format_exc()})
+
+
+def _kappa_worker(queue, kwargs):
+    """Worker for kappa batch calculation"""
+    import sys
+    import traceback
+    from pathlib import Path
+    
+    # Recalculate paths in worker (spawn doesn't inherit globals)
+    current_dir = Path(__file__).resolve().parent
+    root_dir = current_dir.parent.parent
+    services_path = root_dir / "services"
+    shared_path = root_dir / "shared"
+    mcp_shared_path = root_dir / "mcp_servers" / "shared"
+    modules_path = current_dir / "modules"
+    crystallm_path = current_dir / "crystallm"
+    kappa_lib_path = current_dir / "kappa_lib"  # 🆕 添加 kappa_lib 路径
+    
+    for path in [services_path, shared_path, mcp_shared_path, modules_path, crystallm_path, kappa_lib_path, current_dir]:
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    
+    try:
+        from cif_tools import calculate_kappa_from_cif_impl
+        result = calculate_kappa_from_cif_impl(**kwargs)
+        queue.put(result)
+    except Exception as e:
+        error_msg = f"Worker Error: {str(e)}"
+        tb = traceback.format_exc()
+        queue.put({"success": False, "error": error_msg, "traceback": tb})
 
 
 
@@ -291,6 +414,38 @@ app = FastMCP("simulation")
 generated_structures_cache: Dict[str, List[Any]] = {}
 
 
+import asyncio
+
+def _run_process_wrapper(target, args):
+    """
+    Helper to run a multiprocessing.Process and wait for it, 
+    designed to be called via asyncio.to_thread to avoid blocking the event loop.
+    Uses 'spawn' method to ensure isolate environment (safe for PyTorch/CUDA).
+    """
+    import traceback as tb
+    try:
+        ctx = multiprocessing.get_context("spawn")
+        p = ctx.Process(target=target, args=args)
+        p.start()
+        p.join(timeout=300)  # 5 min timeout
+        
+        if p.is_alive():
+            logger.error("Process timeout - terminating")
+            p.terminate()
+            p.join(timeout=5)
+            if p.is_alive():
+                p.kill()
+            return -1
+            
+        exitcode = p.exitcode
+        if exitcode != 0:
+            logger.error(f"Process exited with code {exitcode}")
+        return exitcode
+    except Exception as e:
+        logger.error(f"Process wrapper exception: {e}")
+        logger.error(f"Traceback: {tb.format_exc()}")
+        return 1
+
 @app.tool
 async def calculate_phonon(
     session_id: str,
@@ -352,34 +507,37 @@ async def calculate_phonon(
             
             if perform_relaxation:
                 try:
-                    logger.info(f"  ⚡ Relaxing: {r['filename']}")
-                    relax_result = relax_structure_impl(
-                        cif_content=r["content"],
-                        cif_filename=r["filename"],
-                        device=device,
-                        optimizer="BFGS",
-                        filter_type="ExpCellFilter",
-                        constrain_symmetry=True,
-                        max_steps=500,
-                        fmax=0.01
+                    logger.info(f"  ⚡ Relaxing inside phonon setup: {r['filename']}")
+                    # Use worker for relaxation inside phonon preparation (isolation)
+                    ctx_relax = multiprocessing.get_context("spawn")
+                    q_relax = ctx_relax.Queue()
+                    args_relax = (
+                        r["content"], r["filename"], device, "BFGS", "ExpCellFilter",
+                        True, 500, 0.01
                     )
                     
-                    # 🆕 Auto-retry logic for symmetry constraint failures
-                    if not relax_result.get("success"):
-                        error_msg = relax_result.get("error", "")
-                        if "deformation gradient" in error_msg or "symmetry" in error_msg:
-                            logger.info(f"  ⚠️ Symmetry constraint failed for {r['filename']}, retrying without constraints...")
-                            relax_result = relax_structure_impl(
-                                cif_content=r["content"],
-                                cif_filename=r["filename"],
-                                device=device,
-                                optimizer="BFGS",
-                                filter_type="ExpCellFilter",
-                                constrain_symmetry=False,
-                                max_steps=500,
-                                fmax=0.01
-                            )
+                    code = await asyncio.to_thread(_run_process_wrapper, _relax_worker, (q_relax, args_relax))
                     
+                    if code == 0 and not q_relax.empty():
+                        relax_result = q_relax.get()
+                        
+                        # Auto-retry without symmetry if needed
+                        if not relax_result.get("success"):
+                             err = relax_result.get("error", "")
+                             if "deformation gradient" in err or "symmetry" in err:
+                                 logger.info("  ⚠️ Retrying relaxation without symmetry constraints...")
+                                 ctx_retry = multiprocessing.get_context("spawn")
+                                 q_retry = ctx_retry.Queue()
+                                 args_retry = (
+                                    r["content"], r["filename"], device, "BFGS", "ExpCellFilter",
+                                    False, 500, 0.01
+                                 )
+                                 code_retry = await asyncio.to_thread(_run_process_wrapper, _relax_worker, (q_retry, args_retry))
+                                 if code_retry == 0 and not q_retry.empty():
+                                     relax_result = q_retry.get()
+                    else:
+                        relax_result = {"success": False, "error": f"Relaxation crashed inside phonon setup (code {code})"}
+
                     if relax_result.get("success"):
                         relaxed_name = f"relaxed_{r['filename']}"
                         relaxed_path = work_dir / relaxed_name
@@ -409,17 +567,39 @@ async def calculate_phonon(
 
         for i, cif_file in enumerate(ready_files, 1):
             try:
-                result = calculate_phonon_impl(
-                    cif_content=cif_file.read_text(encoding='utf-8'),
-                    cif_filename=cif_file.name,
-                    device=device,
-                    supercell_matrix=supercell_matrix or [2, 2, 2],
-                    amplitude=amplitude,
-                    find_prim=find_prim,
-                    output_dir=str(phonon_dir)
-                )
+                # 🆕 Use multiprocessing to isolate phonon calculation
+                # This prevents segmentation faults in MatterSim from crashing the main server
+                # and ensures memory is released after each calculation.
+                ctx = multiprocessing.get_context("spawn")
+                queue = ctx.Queue()
+                process_args = {
+                    "cif_content": cif_file.read_text(encoding='utf-8'),
+                    "cif_filename": cif_file.name,
+                    "device": device,
+                    "supercell_matrix": supercell_matrix or [2, 2, 2],
+                    "amplitude": amplitude,
+                    "find_prim": find_prim,
+                    "output_dir": str(phonon_dir)
+                }
+                
+                logger.info(f"  🚀 Starting worker process for {cif_file.name}...")
+                
+                # Execute sequentially but without blocking the async event loop
+                # This keeps the server responsive to heartbeats/pings during long calculations
+                exitcode = await asyncio.to_thread(_run_process_wrapper, _phonon_worker, (queue, process_args))
+                
+                if exitcode != 0:
+                    logger.error(f"  ❌ Phonon worker crashed with exit code {exitcode}")
+                    result = {"success": False, "error": f"Calculation crashed (Exit Code: {exitcode})"}
+                elif not queue.empty():
+                    result = queue.get()
+                else:
+                    logger.error("  ❌ Worker finished but returned no result")
+                    result = {"success": False, "error": "Calculation returned no result"}
 
                 if result.get("success"):
+
+
                     completed += 1
                     # Process images with CSV paths
                     url_prefix = f"/api/images/phonon/{session_id}/phonon_results/{result.get('structure_directory')}"
@@ -531,7 +711,25 @@ async def calculate_energy(
     for i, r in enumerate(resolved, 1):
         try:
             logger.info(f"  ⚡ Calculating energy {i}/{len(resolved)}: {r['filename']}")
-            result = calculate_energy_from_cif_impl(r["content"], r["filename"], device)
+            
+            # Use multiprocessing with spawn context
+            ctx = multiprocessing.get_context("spawn")
+            queue = ctx.Queue()
+            args = (r["content"], r["filename"], device)
+            
+            exitcode = await asyncio.to_thread(_run_process_wrapper, _energy_worker, (queue, args))
+            
+            if exitcode != 0 or queue.empty():
+                 error_msg = f"Calculation crashed (Exit Code: {exitcode})"
+                 if not queue.empty():
+                     worker_result = queue.get()
+                     if isinstance(worker_result, dict) and "error" in worker_result:
+                         error_msg = worker_result.get("error", error_msg)
+                         if "traceback" in worker_result:
+                             logger.error(f"Worker traceback: {worker_result['traceback']}")
+                 result = {"success": False, "error": error_msg}
+            else:
+                 result = queue.get()
             
             if result.get("success"):
                 completed += 1
@@ -543,6 +741,7 @@ async def calculate_energy(
             results.append(result)
 
         except Exception as e:
+
             failed += 1
             logger.error(f"❌ Error calculating energy for {r['filename']}: {e}")
             results.append({"success": False, "error": str(e), "filename": r["filename"]})
@@ -616,10 +815,27 @@ async def relax_structure(
         try:
             logger.info(f"  ⚡ Relaxing {i}/{len(resolved)}: {r['filename']} (path: {r.get('path')})")
 
-            result = relax_structure_impl(
+            # Use multiprocessing for relaxation with spawn context
+            ctx = multiprocessing.get_context("spawn")
+            queue = ctx.Queue()
+            args = (
                 r["content"], r["filename"], device, optimizer, filter_type,
                 constrain_symmetry, max_steps, fmax
             )
+            
+            exitcode = await asyncio.to_thread(_run_process_wrapper, _relax_worker, (queue, args))
+
+            if exitcode != 0 or queue.empty():
+                 error_msg = f"Relaxation crashed (Exit Code: {exitcode})"
+                 if not queue.empty():
+                     worker_result = queue.get()
+                     if isinstance(worker_result, dict) and "error" in worker_result:
+                         error_msg = worker_result.get("error", error_msg)
+                         if "traceback" in worker_result:
+                             logger.error(f"Worker traceback: {worker_result['traceback']}")
+                 result = {"success": False, "error": error_msg}
+            else:
+                 result = queue.get()
             
             # 🆕 Debug: Log result keys and success status
             logger.info(f"  📋 Relax result for {r['filename']}: success={result.get('success')}, "
@@ -631,10 +847,18 @@ async def relax_structure(
                 error_msg = result.get("error", "")
                 if "deformation gradient" in error_msg or "symmetry" in error_msg:
                     logger.info(f"  ⚠️ Symmetry constraint failed for {r['filename']}, retrying without constraints...")
-                    result = relax_structure_impl(
+                    
+                    # Retry in worker
+                    args_retry = (
                         r["content"], r["filename"], device, optimizer, filter_type,
-                        False, max_steps, fmax  # Retry with constrain_symmetry=False
+                        False, max_steps, fmax
                     )
+                    ctx_retry = multiprocessing.get_context("spawn")
+                    queue_retry = ctx_retry.Queue()
+                    await asyncio.to_thread(_run_process_wrapper, _relax_worker, (queue_retry, args_retry))
+                    
+                    if not queue_retry.empty():
+                        result = queue_retry.get()
 
             if result.get("success") and result.get("relaxed_cif_content"):
                 # Save relaxed structure
@@ -751,6 +975,13 @@ async def relax_structure(
 
     # 🆕 提取所有成功的 frontend_structure 到顶层，便于前端处理
     frontend_structures = [r["frontend_structure"] for r in results if r.get("success") and r.get("frontend_structure")]
+    
+    # 🆕 详细日志：检查 frontend_structures
+    logger.info(f"📦 Relax completed: {completed} succeeded, {failed} failed")
+    logger.info(f"📦 Total results: {len(results)}, frontend_structures: {len(frontend_structures)}")
+    if frontend_structures:
+        for i, fs in enumerate(frontend_structures):
+            logger.info(f"  📦 Structure {i+1}: {fs.get('formula', 'Unknown')} - cif_file_path: {fs.get('cif_file_path', 'N/A')}")
 
     return {
         "success": completed > 0,
@@ -921,6 +1152,8 @@ async def extract_and_validate_cif(
                 "is_valid": result.get("is_valid", False)
             }
             result["frontend_structure"] = frontend_structure
+            # 🆕 Also populate frontend_structures list for consistency
+            result["frontend_structures"] = [frontend_structure]
         
         return result
 
@@ -1037,18 +1270,36 @@ async def calculate_kappa(
     elif session_id and SESSION_MANAGER_AVAILABLE:
         logger.warning("Session ID provided but failed to build batch working directory", session_id=session_id)
 
-    # 3. Call implementation
-    batch_result = calculate_kappa_from_cif_impl(
-        cif_content=resolved_structures,
-        method=method,
-        temperature=temperature,
-        working_dir=str(working_dir_path) if working_dir_path else None,
-        keep_files=keep_files,
-        session_id=session_id
-    )
+    # 3. Call implementation in worker process
+    # Use spawn context for both Queue and Process to avoid SemLock context mismatch
+    ctx = multiprocessing.get_context("spawn")
+    queue = ctx.Queue()
+    kwargs = {
+        "cif_content": resolved_structures,
+        "method": method,
+        "temperature": temperature,
+        "working_dir": str(working_dir_path) if working_dir_path else None,
+        "keep_files": keep_files,
+        "session_id": session_id
+    }
+    
+    exitcode = await asyncio.to_thread(_run_process_wrapper, _kappa_worker, (queue, kwargs))
+
+    if exitcode != 0 or queue.empty():
+         error_msg = f"Kappa calculation crashed (Exit Code: {exitcode})"
+         if not queue.empty():
+             worker_result = queue.get()
+             if isinstance(worker_result, dict) and "error" in worker_result:
+                 error_msg = worker_result.get("error", error_msg)
+                 if "traceback" in worker_result:
+                     logger.error(f"Worker traceback: {worker_result['traceback']}")
+         batch_result = {"success": False, "error": error_msg}
+    else:
+         batch_result = queue.get()
 
     if keep_files and working_dir_path:
         batch_result["working_directory"] = str(working_dir_path)
+
 
     if batch_result.get("success"):
         response = {

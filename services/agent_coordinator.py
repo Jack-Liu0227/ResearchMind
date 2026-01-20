@@ -15,6 +15,7 @@ import os
 import logging
 
 import uuid
+from pathlib import Path
 
 from typing import Dict, Any, Optional, List
 
@@ -35,6 +36,7 @@ from google.genai import types
 from .config import agent_config, billing_flags
 
 from .data_processor import DataProcessor
+from .session_manager import SessionManager
 
 from .message_handler import MessageHandler
 
@@ -96,6 +98,8 @@ TOOL_FEATURE_MAPPING = {
 
     'calculate_phonon_from_directory': 'batch_phonon', # 4 光子（批量优惠）
 
+    'calculate_kappa': 'kappa',                     # 5 光子
+
     'calculate_kappa_from_cif': 'kappa',            # 5 光子
 
     'calculate_kappa_from_directory': 'batch_kappa', # 4 光子（批量优惠）
@@ -156,6 +160,9 @@ class AgentCoordinator:
         "batch_paper_analysis",
         "generate_research_report",
     }
+    _SESSION_ID_EXEMPT_TOOLS = {
+        "generate_research_plan",
+    }
 
 
 
@@ -180,6 +187,7 @@ class AgentCoordinator:
         self.runners: Dict[str, Runner] = {}
 
         self.adk_sessions: Dict[str, Any] = {}
+        self.session_id_map: Dict[str, str] = {}  # session_key -> session_id
 
         self.session_message_counts: Dict[str, int] = {}  # 跟踪每个会话的消息数息
 
@@ -250,6 +258,43 @@ class AgentCoordinator:
         if task and not task.done():
             task.cancel()
         self.heartbeat_tasks.pop(session_key, None)
+
+    def _get_session_id_for_key(self, session_key: str) -> Optional[str]:
+        session_id = self.session_id_map.get(session_key)
+        if session_id:
+            return session_id
+
+        session = self.adk_sessions.get(session_key)
+        if session:
+            state = getattr(session, "state", None)
+            if isinstance(state, dict):
+                state_session_id = state.get("session_id")
+                if state_session_id:
+                    self.session_id_map[session_key] = state_session_id
+                    return state_session_id
+
+        return None
+
+    def _persist_history_for_session_key(self, session_key: str, reason: str = "") -> None:
+        session = self.adk_sessions.get(session_key)
+        if not session:
+            return
+
+        session_events = getattr(session, "events", None) or []
+        if not session_events:
+            return
+
+        try:
+            from .hybrid_session_manager import HybridSessionManager
+
+            session_id = self._get_session_id_for_key(session_key)
+            stable_key = session_id or "default"
+            HybridSessionManager.save_history(stable_key, session_events)
+
+            suffix = f" reason={reason}" if reason else ""
+            logger.info(f"💾 Saved {len(session_events)} events for {stable_key} ({session_key}){suffix}")
+        except Exception as e:
+            logger.warning(f"Failed to persist history for {session_key}: {e}")
 
     def _restore_history_from_disk(self, history_key: str) -> List[types.Content]:
 
@@ -325,6 +370,507 @@ class AgentCoordinator:
             "text": combined
         }
 
+    def _normalize_tool_result_payload(self, result_data: Any) -> Any:
+        """Best-effort normalization for tool outputs (AgentTool/MCP)."""
+        if result_data is None:
+            return result_data
+
+        # If payload is already a dict, keep it as-is
+        if isinstance(result_data, dict):
+            # Some tool results nest JSON in a top-level content list
+            content = result_data.get("content")
+            if isinstance(content, list):
+                parsed = self._extract_json_from_parts(content)
+                if isinstance(parsed, dict):
+                    return parsed
+            return result_data
+
+        # Try to parse JSON from plain string
+        if isinstance(result_data, str):
+            parsed = self._safe_json_load(result_data)
+            return parsed if parsed is not None else result_data
+
+        # Try to parse JSON from content parts list
+        if isinstance(result_data, list):
+            parsed = self._extract_json_from_parts(result_data)
+            return parsed if parsed is not None else result_data
+
+        return result_data
+
+    def _unwrap_result_payload(self, result_data: Any) -> Any:
+        """Unwrap nested result payloads like {"result": {...}}."""
+        max_depth = 5
+        depth = 0
+
+        while isinstance(result_data, dict) and list(result_data.keys()) == ["result"] and depth < max_depth:
+            depth += 1
+            candidate = result_data.get("result")
+
+            # Direct dict payload
+            if isinstance(candidate, dict):
+                result_data = candidate
+                continue
+
+            # List payload (pick first dict-like item)
+            if isinstance(candidate, list):
+                parsed = self._extract_json_from_parts(candidate)
+                if isinstance(parsed, dict):
+                    result_data = parsed
+                    continue
+                first_dict = next((item for item in candidate if isinstance(item, dict)), None)
+                if first_dict is not None:
+                    result_data = first_dict
+                    continue
+                break
+
+            # String payload (attempt JSON)
+            if isinstance(candidate, str):
+                parsed = self._safe_json_load(candidate)
+                if isinstance(parsed, dict):
+                    result_data = parsed
+                    continue
+                break
+
+            # MCP CallToolResult-like objects
+            if hasattr(candidate, "structuredContent"):
+                structured = getattr(candidate, "structuredContent")
+                if isinstance(structured, dict):
+                    result_data = structured
+                    continue
+
+            if hasattr(candidate, "content"):
+                content = getattr(candidate, "content")
+                parsed = self._extract_json_from_parts(content) if isinstance(content, list) else None
+                if isinstance(parsed, dict):
+                    result_data = parsed
+                    continue
+
+            break
+
+        return result_data
+
+    def _extract_json_from_parts(self, parts: List[Any]) -> Optional[Dict[str, Any]]:
+        for item in parts:
+            if item is None:
+                continue
+            text = getattr(item, "text", None)
+            if text is None and isinstance(item, dict):
+                text = item.get("text")
+            if not text or not isinstance(text, str):
+                continue
+            parsed = self._safe_json_load(text)
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
+    def _safe_json_load(self, raw: str) -> Optional[Dict[str, Any]]:
+        import json
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+
+    def _looks_like_tool_payload(self, data: Dict[str, Any]) -> bool:
+        if not data:
+            return False
+        keys = {
+            "csv_file_path",
+            "csv_download_url",
+            "md_download_url",
+            "summary_file_path",
+            "report_file_path",
+            "structures",
+            "frontend_structures",
+            "database_structures",
+            "generated_structures",
+            "images",
+            "results_file",
+            "batch_results_file",
+            "phonon_dispersion_csv",
+            "phonon_dos_csv",
+            "cif_file_path",
+            "cif_paths",
+            "generated_files",
+        }
+        return any(key in data for key in keys)
+
+    def _collect_tool_payloads(self, data: Any, max_depth: int = 4) -> List[Dict[str, Any]]:
+        payloads: List[Dict[str, Any]] = []
+        seen: set[int] = set()
+
+        def visit(value: Any, depth: int) -> None:
+            if depth > max_depth:
+                return
+            if isinstance(value, dict):
+                is_wrapper = False
+                if "results" in value and isinstance(value.get("results"), list):
+                    wrapper_keys = {
+                        "status",
+                        "success",
+                        "total",
+                        "completed",
+                        "failed",
+                        "results",
+                        "images",
+                        "message",
+                        "error",
+                        "timestamp",
+                    }
+                    if set(value.keys()).issubset(wrapper_keys):
+                        is_wrapper = True
+
+                if self._looks_like_tool_payload(value) and not is_wrapper:
+                    value_id = id(value)
+                    if value_id not in seen:
+                        seen.add(value_id)
+                        payloads.append(value)
+                for item in value.values():
+                    visit(item, depth + 1)
+            elif isinstance(value, list):
+                for item in value:
+                    visit(item, depth + 1)
+
+        visit(data, 0)
+        return payloads
+
+    def _count_csv_rows(self, csv_path: Path) -> int:
+        try:
+            with open(csv_path, 'rb') as f:
+                line_count = sum(1 for _ in f)
+            return max(line_count - 1, 0)
+        except Exception as e:
+            logger.warning(f"Failed to count CSV rows: {e}")
+            return 0
+
+    async def _maybe_emit_papers_csv_artifacts(
+        self,
+        websocket: Any,
+        agent_id: str,
+        session_id: Optional[str],
+        result_data: Any
+    ) -> None:
+        if not session_id:
+            return
+        if isinstance(result_data, dict):
+            if result_data.get("csv_file_path") or result_data.get("csv_download_url"):
+                return
+
+        from utils.paths import get_session_path
+
+        csv_path = get_session_path(session_id, "papers") / "all_papers.csv"
+        if not csv_path.exists():
+            papers_root = get_session_path(session_id, "papers").parent
+            candidates = list(papers_root.glob("session_*/all_papers.csv"))
+            if not candidates:
+                return
+            csv_path = max(candidates, key=lambda p: p.stat().st_mtime)
+
+        total_papers = self._count_csv_rows(csv_path)
+        csv_path_str = str(csv_path)
+        synthetic_output = {
+            "csv_file_path": csv_path_str,
+            "csv_download_url": DataProcessor._build_download_url_from_path(csv_path_str),
+            "total_papers_in_csv": total_papers,
+            "session_id": session_id,
+        }
+
+        await DataProcessor._process_file_links(
+            synthetic_output,
+            agent_id,
+            websocket,
+            session_id
+        )
+
+        await MessageHandler.send_message(websocket, "tool_execution", {
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "toolName": "search_papers",
+            "input": {"session_id": session_id},
+            "output": synthetic_output,
+            "status": "success",
+            "timestamp": datetime.now().isoformat()
+        })
+
+    async def _maybe_emit_analysis_artifacts(
+        self,
+        websocket: Any,
+        agent_id: str,
+        session_id: Optional[str],
+        result_data: Any
+    ) -> None:
+        if not session_id:
+            return
+        if isinstance(result_data, dict):
+            if result_data.get("summary_file_path") or result_data.get("report_file_path"):
+                return
+            if result_data.get("md_download_url"):
+                return
+            if result_data.get("csv_file_path") and "analysis_results" in str(result_data.get("csv_file_path")):
+                return
+
+        from utils.paths import get_session_path
+
+        papers_dir = get_session_path(session_id, "papers")
+        if not papers_dir.exists():
+            return
+
+        analysis_md = None
+        analysis_csv = None
+        md_candidates = list(papers_dir.glob("analysis_*.md"))
+        if md_candidates:
+            analysis_md = max(md_candidates, key=lambda p: p.stat().st_mtime)
+
+        csv_candidates = list(papers_dir.glob("analysis_results_*.csv"))
+        if csv_candidates:
+            analysis_csv = max(csv_candidates, key=lambda p: p.stat().st_mtime)
+
+        if not analysis_md and not analysis_csv:
+            return
+
+        synthetic_output: Dict[str, Any] = {
+            "session_id": session_id,
+        }
+        if analysis_md:
+            synthetic_output["summary_file_path"] = str(analysis_md)
+            synthetic_output["md_download_url"] = DataProcessor._build_download_url_from_path(str(analysis_md))
+        if analysis_csv:
+            synthetic_output["csv_file_path"] = str(analysis_csv)
+            synthetic_output["csv_download_url"] = DataProcessor._build_download_url_from_path(str(analysis_csv))
+
+        await DataProcessor._process_file_links(
+            synthetic_output,
+            agent_id,
+            websocket,
+            session_id
+        )
+
+        await MessageHandler.send_message(websocket, "tool_execution", {
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "toolName": "batch_paper_analysis",
+            "input": {"session_id": session_id},
+            "output": synthetic_output,
+            "status": "success",
+            "timestamp": datetime.now().isoformat()
+        })
+
+    async def _maybe_emit_database_structures_from_storage(
+        self,
+        websocket: Any,
+        agent_id: str,
+        session_id: Optional[str],
+        result_data: Any,
+        max_files: int = 5
+    ) -> None:
+        if not session_id:
+            return
+
+        if isinstance(result_data, dict):
+            # 如果已经有结构数据或文件路径，说明已经处理过了，不要重复发送
+            if result_data.get("structures") or result_data.get("database_structures"):
+                return
+            if result_data.get("frontend_structures") or result_data.get("generated_structures"):
+                return
+            if result_data.get("cif_file_path") or result_data.get("cif_paths"):
+                return
+            # 🔧 新增：如果是optimize_batch_results处理过的结果（有count但structures被移除），
+            # 说明结构已经在data_processor中发送过了，不要重复加载
+            if result_data.get("count") and result_data.get("database"):
+                logger.info(f"⏭️ Skipping storage emission - structures already processed by data_processor")
+                return
+
+        try:
+            from utils.paths import get_session_path
+            from .structure_converter import StructureConverter
+
+            database_dir = get_session_path(session_id, "database")
+            if not database_dir.exists():
+                return
+
+            cif_files = sorted(
+                database_dir.glob("*.cif"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            if not cif_files:
+                return
+
+            structures = []
+            selected_files = cif_files[:max_files]
+            for cif_path in selected_files:
+                try:
+                    cif_content = cif_path.read_text(encoding="utf-8", errors="ignore")
+                except Exception as e:
+                    logger.warning(f"?? Failed to read CIF: {cif_path} ({e})")
+                    continue
+
+                source = "Database"
+                filename = cif_path.name
+                if filename.startswith("MP_"):
+                    source = "MP"
+                elif filename.startswith("OQMD_"):
+                    source = "OQMD"
+                elif filename.startswith("COD_"):
+                    source = "COD"
+                elif filename.startswith("AFLOW_"):
+                    source = "AFLOW"
+
+                # 🔧 修复：从文件名提取化学式
+                # 格式示例：
+                #   OQMD_NaCl_306107_20260120_054036.cif -> NaCl
+                #   MP_mp-1234_Fe2O3.cif -> Fe2O3
+                #   COD_1234_NaCl.cif -> NaCl
+                #   AFLOW_auid123_CaTiO3.cif -> CaTiO3
+                composition = cif_path.stem
+                
+                # 移除数据库前缀
+                for prefix in ["MP_", "OQMD_", "COD_", "AFLOW_", "Database_"]:
+                    if composition.startswith(prefix):
+                        composition = composition[len(prefix):]
+                        break
+                
+                # 提取化学式部分
+                parts = composition.split("_")
+                if len(parts) >= 2:
+                    # 如果第一部分看起来像ID（纯数字、mp-xxx、auid-xxx等），取第二部分
+                    first_part_lower = parts[0].lower()
+                    if (parts[0].isdigit() or 
+                        first_part_lower.startswith("mp-") or 
+                        first_part_lower.startswith("auid") or
+                        first_part_lower.startswith("cod-")):
+                        composition = parts[1] if len(parts) > 1 else parts[0]
+                    else:
+                        # 第一部分就是化学式
+                        composition = parts[0]
+                else:
+                    composition = parts[0]
+
+                converted = StructureConverter.convert_cif_to_structure(
+                    cif_content=cif_content,
+                    name=cif_path.stem,
+                    composition=composition or cif_path.stem,
+                    source=source
+                )
+                if converted:
+                    converted["cif_file_path"] = str(cif_path)
+                    # 🔧 修复：确保结构数据被标准化（统一formula字段）
+                    converted = StructureConverter.standardize_structure_data(converted, source)
+                    structures.append(converted)
+
+            if not structures:
+                return
+
+            logger.info(f"?? Emitting {len(structures)} database structures from storage for {session_id}")
+
+            await DataProcessor._process_file_links(
+                {"cif_paths": [str(path) for path in selected_files]},
+                agent_id,
+                websocket,
+                session_id
+            )
+
+            await DataProcessor._send_message(websocket, "structure_data", {
+                "structures": structures,
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "timestamp": datetime.now().isoformat(),
+                "total": len(structures),
+                "max_display": DataProcessor.MAX_STRUCTURES
+            })
+
+        except Exception as e:
+            logger.warning(f"?? Failed to emit database structures from storage: {e}")
+
+    def _infer_tool_name_from_result(self, tool_result: Any, result_data: Any) -> Optional[str]:
+        """Best-effort tool name inference from result payloads."""
+        for attr in ("name", "tool_name", "toolName", "function_name", "functionName"):
+            if hasattr(tool_result, attr):
+                value = getattr(tool_result, attr)
+                if isinstance(value, str) and value:
+                    return value
+
+        if isinstance(result_data, dict):
+            for key in ("tool_name", "toolName", "tool", "name", "function_name", "functionName"):
+                value = result_data.get(key)
+                if isinstance(value, str) and value:
+                    return value
+
+        return None
+
+    def _select_pending_tool_record(
+        self,
+        session_key: str,
+        tool_result: Any = None,
+        result_data: Any = None
+    ) -> Optional[Dict[str, Any]]:
+        """Pick the pending tool call record most likely matching the tool result."""
+        records = self.current_tool_calls.get(session_key, [])
+        if not records:
+            return None
+
+        inferred_name = self._infer_tool_name_from_result(tool_result, result_data)
+        if inferred_name:
+            for record in reversed(records):
+                if record.get("status") == "pending" and record.get("name") == inferred_name:
+                    return record
+
+        for record in reversed(records):
+            if record.get("status") == "pending":
+                return record
+
+        return None
+
+    def _save_evidence_from_result(self, agent_id: str, result_data: Any, session_id: Optional[str]) -> None:
+        if not session_id or not isinstance(result_data, dict):
+            return
+
+        if agent_id == "deep_research_agent":
+            payload = {
+                "csv_download_url": result_data.get("csv_download_url"),
+                "md_download_url": result_data.get("md_download_url"),
+                "csv_file_path": result_data.get("csv_file_path"),
+                "summary_file_path": result_data.get("summary_file_path") or result_data.get("report_file_path"),
+                "total_papers_in_csv": result_data.get("total_papers_in_csv"),
+                "topic": result_data.get("topic") or result_data.get("query"),
+            }
+            SessionManager.save_evidence(session_id, "literature", payload)
+            return
+
+        if agent_id == "database_agent":
+            structures = result_data.get("structures")
+            if isinstance(structures, list) and structures:
+                top = []
+                for item in structures[:3]:
+                    if not isinstance(item, dict):
+                        continue
+                    source = item.get("source") or {}
+                    if not isinstance(source, dict):
+                        source = {}
+                    top.append({
+                        "formula": item.get("formula"),
+                        "id": item.get("id") or item.get("material_id"),
+                        "source": source.get("database"),
+                        "cif_file_path": item.get("cif_file_path") or item.get("cif_path"),
+                    })
+                if top:
+                    SessionManager.save_evidence(session_id, "database", {"structures": top})
+            return
+
+        if agent_id == "simulation_agent":
+            payload = {
+                "thermal_conductivity": result_data.get("thermal_conductivity"),
+                "method": result_data.get("method"),
+                "temperature": result_data.get("temperature"),
+                "results_file": result_data.get("results_file"),
+                "batch_results_file": result_data.get("batch_results_file"),
+                "phonon_dispersion_csv": result_data.get("phonon_dispersion_csv"),
+                "phonon_dos_csv": result_data.get("phonon_dos_csv"),
+                "cif_filename": result_data.get("cif_filename"),
+            }
+            SessionManager.save_evidence(session_id, "simulation", payload)
+            return
+
     def _archive_truncated_history(
         self,
         session_id: Optional[str],
@@ -358,6 +904,48 @@ class AgentCoordinator:
         except Exception as e:
             logger.warning(f"Failed to archive truncated history for {session_id}: {e}")
 
+    def _infer_routing_targets(self, content: str) -> List[str]:
+        if not content or not isinstance(content, str):
+            return []
+
+        stripped = content.strip()
+        confirmations = {
+            "确认", "是", "好的", "好", "继续", "开始", "可以", "执行", "确定",
+            "ok", "okay", "yes", "y"
+        }
+        if stripped in confirmations:
+            return []
+
+        text = stripped.lower()
+        targets: set[str] = set()
+
+        literature_keywords = [
+            "文献", "论文", "综述", "检索", "搜索", "参考文献", "citation",
+            "arxiv", "tavily", "semantic scholar", "literature", "paper"
+        ]
+        database_keywords = [
+            "数据库", "材料数据库", "结构", "晶体", "材料属性", "材料性质",
+            "materials project", "oqmd", "cod", "aflow", "mp-"
+        ]
+        simulation_keywords = [
+            "仿真", "计算", "声子", "热导率", "弛豫", "能量", "kappa",
+            "phonon", "relax", "simulation"
+        ]
+        experiment_keywords = [
+            "实验方案", "实验设计", "验证路线", "验证方案", "实验计划", "实验"
+        ]
+
+        if any(k in text for k in literature_keywords):
+            targets.add("deep_research_agent")
+        if any(k in text for k in database_keywords):
+            targets.add("database_agent")
+        if any(k in text for k in simulation_keywords):
+            targets.add("simulation_agent")
+        if any(k in text for k in experiment_keywords):
+            targets.add("experiment_plan_agent")
+
+        return list(targets)
+
 
 
     async def process_chat_message(
@@ -376,7 +964,9 @@ class AgentCoordinator:
 
         retry_count: int = 0,
 
-        attachments: Optional[List[Dict[str, Any]]] = None
+        attachments: Optional[List[Dict[str, Any]]] = None,
+
+        allow_router: bool = True
 
     ) -> None:
 
@@ -403,8 +993,7 @@ class AgentCoordinator:
         """
 
         max_retries = 1  # 最多重息息
-
-
+        session_key: Optional[str] = None
 
         try:
 
@@ -421,6 +1010,44 @@ class AgentCoordinator:
             if not session_id:
                 await MessageHandler.send_error(websocket, "Session ID is required")
                 return
+
+            # Router fallback for research coordinator
+            if allow_router and agent_id == "research_coordinator":
+                targets = self._infer_routing_targets(content)
+                if targets:
+                    if "experiment_plan_agent" in targets:
+                        ordered_targets = ["experiment_plan_agent"]
+                    else:
+                        preferred_order = ["database_agent", "simulation_agent", "deep_research_agent"]
+                        ordered_targets = [t for t in preferred_order if t in targets]
+                        if not ordered_targets:
+                            ordered_targets = targets
+
+                    name_map = {
+                        "deep_research_agent": "文献研究助手",
+                        "database_agent": "数据库查询助手",
+                        "simulation_agent": "仿真计算助手",
+                        "experiment_plan_agent": "实验方案推荐",
+                    }
+
+                    for target_agent in ordered_targets:
+                        await MessageHandler.send_message(websocket, "status", {
+                            "status": "info",
+                            "message": f"已自动转交给{name_map.get(target_agent, target_agent)}处理",
+                            "agentId": target_agent,
+                            "sessionId": session_id
+                        })
+                        await self.process_chat_message(
+                            client_id=client_id,
+                            websocket=websocket,
+                            content=content,
+                            agent_id=target_agent,
+                            session_id=session_id,
+                            retry_count=retry_count,
+                            attachments=attachments,
+                            allow_router=False
+                        )
+                    return
 
 
 
@@ -695,27 +1322,13 @@ class AgentCoordinator:
 
                     # 确保 session_id 存在（如果为 None，生成一个唯一的）
 
-                    actual_session_id = session_id
+                    from utils.session import ensure_session_id
 
-                    if not actual_session_id:
+                    actual_session_id = ensure_session_id(session_id)
 
-                        # 统一使用 session_{timestamp}_{random_id} 格式
+                    if not session_id:
 
-                        import time
-
-                        import random
-
-                        import string
-
-
-
-                        timestamp = int(time.time() * 1000)  # 毫秒级时间戳
-
-                        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-
-                        actual_session_id = f"session_{timestamp}_{random_id}"
-
-                        logger.info(f"📝 Generated session_id for file upload: {actual_session_id}")
+                        logger.info(f"?? Generated session_id for file upload: {actual_session_id}")
 
 
 
@@ -1155,6 +1768,10 @@ class AgentCoordinator:
                 "message": "任务已停止。",
             })
             self._stop_task_heartbeat(session_key)
+            if session_key:
+                self._persist_history_for_session_key(session_key, reason="error")
+            if session_key:
+                self._persist_history_for_session_key(session_key, reason="task_cancelled")
             return
         except Exception as e:
 
@@ -1235,6 +1852,38 @@ class AgentCoordinator:
 
 
 
+            # 检查是否是LLM服务端错误（空响应/非法JSON）
+            if "InternalServerError" in error_msg or "OpenAIException" in error_msg or "Expecting value" in error_msg:
+                if retry_count < max_retries:
+                    backoff = 1 + retry_count
+                    logger.info(f"🔄 Retrying LLM request (attempt {retry_count + 1}/{max_retries}) after {backoff}s...")
+                    await MessageHandler.send_message(
+                        websocket,
+                        "status",
+                        {
+                            "status": "retrying",
+                            "message": "LLM 服务异常，正在重试...",
+                            "agent_id": agent_id
+                        }
+                    )
+                    import asyncio
+                    await asyncio.sleep(backoff)
+                    await self.process_chat_message(
+                        client_id=client_id,
+                        websocket=websocket,
+                        content=content,
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        retry_count=retry_count + 1,
+                        allow_router=allow_router
+                    )
+                    return
+                await MessageHandler.send_error(
+                    websocket,
+                    "LLM service error. Please retry later.",
+                )
+                return
+
             # 检查是否是MCP连接错误
 
             if "Connection closed" in error_msg or "ReadTimeout" in error_msg:
@@ -1295,7 +1944,9 @@ class AgentCoordinator:
 
                         session_id=session_id,
 
-                        retry_count=retry_count + 1
+                        retry_count=retry_count + 1,
+
+                        allow_router=allow_router
 
                     )
 
@@ -1314,7 +1965,70 @@ class AgentCoordinator:
 
                 await MessageHandler.send_error(websocket, f"处理失败: {error_msg}")
 
-
+    def _ensure_tool_calls_completeness(self, events: List[Any]) -> List[Any]:
+        """
+        确保事件列表中的 tool_calls 都有对应的 tool 响应。
+        如果最后一条 assistant 消息包含 tool_calls 但后面没有 tool 响应，
+        则移除这条消息及其之后的所有消息，避免 OpenAI API 错误。
+        
+        Args:
+            events: 事件列表
+            
+        Returns:
+            修正后的事件列表
+        """
+        if not events:
+            return events
+        
+        try:
+            # 从后向前扫描，查找未配对的 tool_calls
+            i = len(events) - 1
+            while i >= 0:
+                event = events[i]
+                role = getattr(event, 'role', None)
+                
+                # 如果是 assistant 消息
+                if role == 'assistant':
+                    # 检查是否有 tool_calls
+                    has_tool_calls = False
+                    if hasattr(event, 'tool_calls') and event.tool_calls:
+                        has_tool_calls = True
+                    elif hasattr(event, 'get_function_calls'):
+                        try:
+                            tool_calls = event.get_function_calls()
+                            if tool_calls:
+                                has_tool_calls = True
+                        except:
+                            pass
+                    
+                    if has_tool_calls:
+                        # 检查后面是否有对应的 tool 响应
+                        has_tool_response = False
+                        for j in range(i + 1, len(events)):
+                            next_event = events[j]
+                            next_role = getattr(next_event, 'role', None)
+                            if next_role == 'tool':
+                                has_tool_response = True
+                                break
+                            elif next_role in ['assistant', 'user']:
+                                # 如果遇到新的 assistant 或 user 消息，说明没有 tool 响应
+                                break
+                        
+                        if not has_tool_response:
+                            # 移除这条 tool_calls 消息及其之后的所有消息
+                            logger.warning(f"⚠️ Removing incomplete tool_calls at position {i} (no tool response found)")
+                            return events[:i]
+                    
+                    # 找到第一条完整的 assistant 消息，停止搜索
+                    break
+                
+                i -= 1
+            
+            return events
+            
+        except Exception as e:
+            logger.error(f"❌ Error in _ensure_tool_calls_completeness: {e}", exc_info=True)
+            return events
 
     async def _truncate_session_history(
 
@@ -1389,9 +2103,15 @@ class AgentCoordinator:
 
                         if keep_count > 0:
                             removed_events = history[1:-keep_count]
+                            new_events = [history[0]] + history[-keep_count:]
                         else:
                             removed_events = history[1:]
-                        session.events = [history[0]] + history[-keep_count:]
+                            new_events = [history[0]]
+                        
+                        # 🔧 修复：确保不会截断未完成的 tool_calls
+                        # 检查保留的最后一条消息是否是 tool_calls，如果是，则需要回溯到上一个完整的对话轮次
+                        new_events = self._ensure_tool_calls_completeness(new_events)
+                        session.events = new_events
 
                 else:
 
@@ -1401,9 +2121,14 @@ class AgentCoordinator:
 
                         if keep_target > 0:
                             removed_events = history[:-keep_target]
+                            new_events = history[-keep_target:]
                         else:
                             removed_events = history[:]
-                        session.events = history[-keep_target:]
+                            new_events = []
+                        
+                        # 🔧 修复：确保不会截断未完成的 tool_calls
+                        new_events = self._ensure_tool_calls_completeness(new_events)
+                        session.events = new_events
 
 
 
@@ -1504,6 +2229,7 @@ class AgentCoordinator:
         if session_id:
 
             initial_state['session_id'] = session_id
+            self.session_id_map[session_key] = session_id
 
             logger.info(f"🔍 [SESSION_STATE] 设置 session_id={session_id} 息ADK session state")
 
@@ -1877,19 +2603,13 @@ class AgentCoordinator:
 
             
 
-            elif tool_name == 'batch_calculate_kappa':
-
+            elif tool_name in ['batch_calculate_kappa', 'calculate_kappa', 'calculate_phonon', 'relax_structure', 'calculate_energy']:
                 structures = tool_args.get('structures')
-
                 if isinstance(structures, list):
-
                     quantity = len(structures)
-
                     if quantity == 0:
-
                         quantity = 1
-
-                    logger.info(f"Batch tool {tool_name} specified {quantity} files.")
+                    logger.info(f"Batch tool {tool_name} specified {quantity} structures.")
 
 
 
@@ -2089,46 +2809,58 @@ class AgentCoordinator:
 
                     return (False, 0)
 
-                should_charge = False
-                quantity = 0
-                reason = "no_results"
+                if feature_type == 'search':
+                    should_charge = False
+                    quantity = 0
+                    reason = "no_results"
 
-                papers = result.get('papers') or result.get('final_papers')
-                if isinstance(papers, list):
-                    if len(papers) > 0:
-                        should_charge = True
-                        quantity = 1
-                        reason = "papers_list"
-                else:
-                    # Unified search response may not include papers list; rely on counts.
-                    total_results = result.get('total_results')
-                    if isinstance(total_results, int) and total_results > 0:
-                        should_charge = True
-                        quantity = 1
-                        reason = "total_results"
-                    papers_added = result.get('papers_added')
-                    if not should_charge and isinstance(papers_added, int) and papers_added > 0:
-                        should_charge = True
-                        quantity = 1
-                        reason = "papers_added"
-                    total_papers_in_csv = result.get('total_papers_in_csv')
-                    if not should_charge and isinstance(total_papers_in_csv, int) and total_papers_in_csv > 0:
-                        should_charge = True
-                        quantity = 1
-                        reason = "total_papers_in_csv"
+                    papers = result.get('papers') or result.get('final_papers')
+                    if isinstance(papers, list):
+                        if len(papers) > 0:
+                            should_charge = True
+                            quantity = 1
+                            reason = "papers_list"
+                    else:
+                        # Unified search response may not include papers list; rely on counts.
+                        total_results = result.get('total_results')
+                        if isinstance(total_results, int) and total_results > 0:
+                            should_charge = True
+                            quantity = 1
+                            reason = "total_results"
+                        papers_added = result.get('papers_added')
+                        if not should_charge and isinstance(papers_added, int) and papers_added > 0:
+                            should_charge = True
+                            quantity = 1
+                            reason = "papers_added"
+                        total_papers_in_csv = result.get('total_papers_in_csv')
+                        if not should_charge and isinstance(total_papers_in_csv, int) and total_papers_in_csv > 0:
+                            should_charge = True
+                            quantity = 1
+                            reason = "total_papers_in_csv"
 
-                logger.info(f"[Billing evaluate] feature={feature_type}, should_charge={should_charge}, quantity={quantity}, reason={reason}")
-                return (should_charge, quantity)
+                    logger.info(f"[Billing evaluate] feature={feature_type}, should_charge={should_charge}, quantity={quantity}, reason={reason}")
+                    return (should_charge, quantity)
 
+                # database
                 structures = result.get('structures') or result.get('database_structures') or []
+                count = result.get('count')
 
                 from .config import billing_flags as _flags
 
-                if len(structures) == 0 and not getattr(_flags, 'DB_CHARGE_ON_EMPTY', False):
+                if isinstance(structures, list) and len(structures) > 0:
+                    logger.info("[Billing evaluate] feature=database, should_charge=True, quantity=1, reason=structures_list")
+                    return (True, 1)
 
-                    return (False, 0)
+                if isinstance(count, int) and count > 0:
+                    logger.info("[Billing evaluate] feature=database, should_charge=True, quantity=1, reason=count")
+                    return (True, 1)
 
-                return ((len(structures) > 0 or getattr(_flags, 'DB_CHARGE_ON_EMPTY', False)), 1 if (len(structures) > 0 or getattr(_flags, 'DB_CHARGE_ON_EMPTY', False)) else 0)
+                if getattr(_flags, 'DB_CHARGE_ON_EMPTY', False):
+                    logger.info("[Billing evaluate] feature=database, should_charge=True, quantity=1, reason=charge_on_empty")
+                    return (True, 1)
+
+                logger.info("[Billing evaluate] feature=database, should_charge=False, quantity=0, reason=no_results")
+                return (False, 0)
 
 
 
@@ -2275,18 +3007,19 @@ class AgentCoordinator:
 
 
 
+                                response_agent_id = agent_id
+                                response_metadata = None
+                                if agent_id != "research_coordinator":
+                                    response_agent_id = "research_coordinator"
+                                    response_metadata = {"originAgentId": agent_id}
+
                                 await MessageHandler.send_agent_response(
-
                                     websocket=websocket,
-
-                                    agent_id=agent_id,
-
+                                    agent_id=response_agent_id,
                                     content=text_content,
-
+                                    metadata=response_metadata,
                                     tool_calls=tool_calls if tool_calls else None,
-
                                     billing=billing_data
-
                                 )
 
 
@@ -2373,9 +3106,28 @@ class AgentCoordinator:
 
                             tool_input = tool_call.function.args if isinstance(tool_call.function.args, dict) else {}
 
+                        skip_session_injection = tool_name in self._SESSION_ID_EXEMPT_TOOLS
+
                         # Ensure tools use the active session_id to avoid creating a new one.
-                        if session_id and 'session_id' not in tool_input and 'sessionId' not in tool_input:
+                        if not skip_session_injection and session_id:
+                            if tool_input.get('session_id') not in (None, session_id):
+                                logger.warning(
+                                    f"?? Overriding tool session_id {tool_input.get('session_id')} -> {session_id} for {tool_name}"
+                                )
                             tool_input = {**tool_input, 'session_id': session_id}
+
+                        # Best-effort: inject session_id into the actual tool call args.
+                        if not skip_session_injection and session_id:
+                            if hasattr(tool_call, 'args') and isinstance(tool_call.args, dict):
+                                tool_call.args['session_id'] = session_id
+                            elif hasattr(tool_call, 'input') and isinstance(tool_call.input, dict):
+                                tool_call.input['session_id'] = session_id
+                            elif (
+                                hasattr(tool_call, 'function') and
+                                hasattr(tool_call.function, 'args') and
+                                isinstance(tool_call.function.args, dict)
+                            ):
+                                tool_call.function.args['session_id'] = session_id
 
 
                         # 记录工具调用信息
@@ -2532,8 +3284,7 @@ class AgentCoordinator:
                         # 根据工具名称生成更友好的提示信息
 
                         tool_message = self._get_tool_friendly_message(tool_name)
-                        if tool_name in self._LONG_RUNNING_TOOLS:
-                            self._start_task_heartbeat(session_key, websocket, agent_id, session_id)
+                        self._start_task_heartbeat(session_key, websocket, agent_id, session_id)
 
 
 
@@ -2669,7 +3420,14 @@ class AgentCoordinator:
 
                         logger.info(f"📊 Processing tool result with type: {type(result_data)}")
 
+                        result_data = self._normalize_tool_result_payload(result_data)
+                        result_data = self._unwrap_result_payload(result_data)
+
                         if isinstance(result_data, dict):
+
+                            if result_data.get("should_stop"):
+                                self.stop_flags[session_key] = True
+                                logger.info(f"🛑 Tool requested stop: {session_key}")
 
                             logger.info(f"📊 Result keys: {list(result_data.keys())}")
 
@@ -2790,11 +3548,16 @@ class AgentCoordinator:
                                                         continue
 
                                                 except json.JSONDecodeError as e:
-
-                                                    logger.warning(f"⚠️ content.text is not valid JSON: {e}")
-
-                                                    logger.warning(f"⚠️ content.text value: {first_item.text[:500] if len(first_item.text) > 500 else first_item.text}")
-
+                                                    logger.warning(f"?? content.text is not valid JSON: {e}")
+                                                    logger.warning(f"?? content.text value: {first_item.text[:500] if len(first_item.text) > 500 else first_item.text}")
+                                                    # Friendly fallback: treat raw text as tool error
+                                                    result_data = {
+                                                        "status": "error",
+                                                        "error": first_item.text,
+                                                        "tool_error": True,
+                                                        "error_type": "tool_output_non_json"
+                                                    }
+                                                    break
                                         elif isinstance(content, str):
 
                                             # Try to parse as JSON
@@ -2816,9 +3579,24 @@ class AgentCoordinator:
                                             except json.JSONDecodeError:
 
                                                 logger.warning(f"⚠️ content string is not valid JSON")
+                                                # Friendly fallback: treat raw string as tool error
+                                                result_data = {
+                                                    "status": "error",
+                                                    "error": content,
+                                                    "tool_error": True,
+                                                    "error_type": "tool_output_non_json"
+                                                }
+                                                break
 
 
 
+                                    if not isinstance(result_data, dict):
+                                        result_data = {
+                                            "status": "error",
+                                            "error": "Could not extract structured data from tool result.",
+                                            "tool_error": True,
+                                            "error_type": "tool_output_unparseable"
+                                        }
                                     logger.warning(f"⚠️ Could not extract data from MCP CallToolResult")
 
                                     break
@@ -2841,17 +3619,69 @@ class AgentCoordinator:
 
 
 
-                        await DataProcessor.process_tool_result(
-
-                            result=result_data,
-
-                            agent_id=agent_id,
-
-                            websocket=websocket,
-
-                            session_id=session_id  # Pass session_id
-
+                        pending_record = self._select_pending_tool_record(
+                            session_key,
+                            tool_result=tool_result,
+                            result_data=result_data
                         )
+                        pending_tool_name = pending_record.get("name") if pending_record else None
+                        nested_tool_name = self._infer_tool_name_from_result(tool_result, result_data)
+                        if nested_tool_name and nested_tool_name != pending_tool_name:
+                            await MessageHandler.send_message(websocket, "tool_execution", {
+                                "agentId": agent_id,
+                                "sessionId": session_id,
+                                "toolName": nested_tool_name,
+                                "output": result_data,
+                                "status": "success",
+                                "timestamp": datetime.now().isoformat()
+                            })
+                        if pending_tool_name == "deep_research_agent":
+                            await self._maybe_emit_papers_csv_artifacts(
+                                websocket=websocket,
+                                agent_id=pending_tool_name,
+                                session_id=session_id,
+                                result_data=result_data
+                            )
+                            await self._maybe_emit_analysis_artifacts(
+                                websocket=websocket,
+                                agent_id=pending_tool_name,
+                                session_id=session_id,
+                                result_data=result_data
+                            )
+                        if pending_tool_name in {"batch_paper_analysis", "generate_research_report"}:
+                            await self._maybe_emit_analysis_artifacts(
+                                websocket=websocket,
+                                agent_id=agent_id,
+                                session_id=session_id,
+                                result_data=result_data
+                            )
+
+                        self._save_evidence_from_result(agent_id, result_data, session_id)
+
+                        payloads = self._collect_tool_payloads(result_data)
+                        if payloads:
+                            for payload in payloads:
+                                await DataProcessor.process_tool_result(
+                                    result=payload,
+                                    agent_id=agent_id,
+                                    websocket=websocket,
+                                    session_id=session_id  # Pass session_id
+                                )
+                        else:
+                            await DataProcessor.process_tool_result(
+                                result=result_data,
+                                agent_id=agent_id,
+                                websocket=websocket,
+                                session_id=session_id  # Pass session_id
+                            )
+
+                        if pending_tool_name == "database_agent" and not payloads:
+                            await self._maybe_emit_database_structures_from_storage(
+                                websocket=websocket,
+                                agent_id=agent_id,
+                                session_id=session_id,
+                                result_data=result_data
+                            )
 
 
 
@@ -2867,17 +3697,14 @@ class AgentCoordinator:
 
                                 pending_input = None
 
-                                if session_key in self.current_tool_calls and self.current_tool_calls[session_key]:
-
-                                    for _rec in reversed(self.current_tool_calls[session_key]):
-
-                                        if _rec.get("status") == "pending":
-
-                                            pending_name = _rec.get("name")
-
-                                            pending_input = _rec.get("input")
-
-                                            break
+                                pending_record = self._select_pending_tool_record(
+                                    session_key,
+                                    tool_result=tool_result,
+                                    result_data=result_data
+                                )
+                                if pending_record:
+                                    pending_name = pending_record.get("name")
+                                    pending_input = pending_record.get("input")
 
                                 if not pending_name:
 
@@ -3015,33 +3842,36 @@ class AgentCoordinator:
 
 
 
-                        if session_key in self.current_tool_calls and self.current_tool_calls[session_key]:
+                        pending_record = self._select_pending_tool_record(
+                            session_key,
+                            tool_result=tool_result,
+                            result_data=result_data
+                        )
 
-                            # 找到最后一个pending状态的tool call并更息
+                        status = "success"
+                        error_detail = None
+                        if isinstance(result_data, dict):
+                            if result_data.get("success") is False or result_data.get("error"):
+                                status = "error"
+                                error_detail = result_data.get("message") or result_data.get("error") or "tool_failed"
 
-                            for tool_call_record in reversed(self.current_tool_calls[session_key]):
+                        if pending_record:
+                            pending_record["output"] = result_data
+                            pending_record["status"] = status
+                            if error_detail:
+                                pending_record["error"] = error_detail
 
-                                if tool_call_record.get("status") == "pending":
-
-                                    tool_call_record["output"] = result_data
-
-                                    tool_call_record["status"] = "success"
-
-                                    tool_name = tool_call_record.get("name")
-
-                                    tool_input = tool_call_record.get("input")
-
-                                    tool_timestamp = tool_call_record.get("timestamp")
-
-                                    break
-
+                            tool_name = pending_record.get("name")
+                            tool_input = pending_record.get("input")
+                            tool_timestamp = pending_record.get("timestamp")
 
 
-                        # 🆕 发送工具执行成功消息到前端
+
+                        # 🆕 发送工具执行消息到前端
 
                         if tool_name:
 
-                            logger.info(f"🔧 发送工具执行消息(success): {tool_name}")
+                            logger.info(f"🔧 发送工具执行消息({status}): {tool_name}")
 
                             if not self.should_stop(session_key):
                                 await MessageHandler.send_message(websocket, "tool_execution", {
@@ -3056,13 +3886,13 @@ class AgentCoordinator:
 
                                 "output": result_data,
 
-                                "status": "success",
+                                "status": status,
 
                                 "timestamp": tool_timestamp or datetime.now().isoformat()
 
                             })
                             else:
-                                logger.info(f"🔧 Skip tool_execution success dispatch due to stop flag: {session_key}")
+                                logger.info(f"🔧 Skip tool_execution {status} dispatch due to stop flag: {session_key}")
 
                         # 清理已完成的工具调用记录，避免影响后续扣费与状态
                         if session_key in self.current_tool_calls:
@@ -3086,7 +3916,38 @@ class AgentCoordinator:
 
                     else:
 
-                        logger.warning(f"⚠️ Could not extract result data from tool_result: {type(tool_result)}")
+                        logger.warning(f"?? Could not extract result data from tool_result: {type(tool_result)}")
+
+                        pending_record = self._select_pending_tool_record(
+                            session_key,
+                            tool_result=tool_result,
+                            result_data=None
+                        )
+                        if pending_record:
+                            pending_record["status"] = "error"
+                            pending_record["error"] = "tool_result_missing"
+                            tool_name = pending_record.get("name")
+                            tool_input = pending_record.get("input")
+                            tool_timestamp = pending_record.get("timestamp")
+
+                            if not self.should_stop(session_key):
+                                await MessageHandler.send_message(websocket, "tool_execution", {
+                                    "agentId": agent_id,
+                                    "sessionId": session_id,
+                                    "toolName": tool_name,
+                                    "input": tool_input,
+                                    "status": "error",
+                                    "error": "tool_result_missing",
+                                    "timestamp": tool_timestamp or datetime.now().isoformat()
+                                })
+
+                        if session_key in self.current_tool_calls:
+                            remaining = [
+                                record for record in self.current_tool_calls[session_key]
+                                if record.get("status") == "pending"
+                            ]
+                            self.current_tool_calls[session_key] = remaining
+
 
 
 
@@ -3120,11 +3981,14 @@ class AgentCoordinator:
 
         if session_key in self.session_services:
 
+            self._persist_history_for_session_key(session_key, reason="clear_session")
+
             del self.session_services[session_key]
 
             del self.runners[session_key]
 
             del self.adk_sessions[session_key]
+            self.session_id_map.pop(session_key, None)
 
             if session_key in self.session_message_counts:
 
@@ -3164,11 +4028,14 @@ class AgentCoordinator:
 
         for key in keys_to_remove:
 
+            self._persist_history_for_session_key(key, reason="client_disconnect")
+
             del self.session_services[key]
 
             del self.runners[key]
 
             del self.adk_sessions[key]
+            self.session_id_map.pop(key, None)
 
             if key in self.session_message_counts:
 
@@ -3286,7 +4153,8 @@ class AgentCoordinator:
                 logger.info(f"Canceled active task: {session_key}")
         except Exception as e:
             logger.warning(f"Failed to cancel active task: {e}")
-            logger.warning(f"⚠️ 取消活跃任务失败: {e}")
+
+        self._persist_history_for_session_key(session_key, reason="stop_requested")
 
 
 

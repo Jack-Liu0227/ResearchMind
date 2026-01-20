@@ -3,7 +3,7 @@
  */
 
 import React, { useMemo, useState, useEffect } from 'react'
-import { Download, ExternalLink, Image as ImageIcon, FileText, Table as TableIcon, ChevronDown, ChevronRight, CheckSquare, Square, BarChart3, Calendar, User, BookOpen, Award, RefreshCw, AlertCircle, X } from 'lucide-react'
+import { Download, ExternalLink, Image as ImageIcon, FileText, Table as TableIcon, ChevronDown, ChevronRight, CheckSquare, Square, BarChart3, Calendar, User, BookOpen, Award, RefreshCw, AlertCircle, X, ArrowDown, ArrowUp } from 'lucide-react'
 import StructureViewerThreeJS from './StructureViewerThreeJS'
 import StructureList from './StructureList'
 import FullscreenViewer from './FullscreenViewer'
@@ -816,6 +816,8 @@ interface FilesTabProps {
 
 const FilesTab: React.FC<FilesTabProps> = ({ files }) => {
   const [previewKey, setPreviewKey] = useState<string | null>(null)
+  // 🆕 文件类型筛选状态
+  const [filterType, setFilterType] = useState<string>('all')
 
   console.log('📁 FilesTab - rendering with files:', files.length)
   files.forEach((file, index) => {
@@ -827,6 +829,26 @@ const FilesTab: React.FC<FilesTabProps> = ({ files }) => {
       filePath: file.filePath
     })
   })
+
+  // 🆕 获取所有唯一的文件类型
+  const availableTypes = useMemo(() => {
+    const types = new Set<string>()
+    files.forEach(file => {
+      const type = formatFileType(file.type)
+      types.add(type)
+    })
+    return Array.from(types).sort()
+  }, [files])
+
+  // 🆕 根据筛选条件过滤文件
+  const filteredFiles = useMemo(() => {
+    if (filterType === 'all') return files
+    
+    return files.filter(file => {
+      const fileType = formatFileType(file.type)
+      return fileType === filterType
+    })
+  }, [files, filterType])
 
   if (!files.length) {
     return (
@@ -898,88 +920,140 @@ const FilesTab: React.FC<FilesTabProps> = ({ files }) => {
   }
 
   return (
-    <div className="flex-1 overflow-auto p-4 space-y-3">
-      {files.map((file, index) => {
-        const url = buildDownloadUrl(file)
-        const displayName = getFileDisplayName(file)
-        const sourceLabel = file.sourceMessageId ? `#${file.sourceMessageId.slice(-6)}` : 'system'
-        const created = file.createdAt ? new Date(file.createdAt) : null
-        const key = file.id || url || `${file.type || 'file'}-${displayName}-${index}`
-
-        return (
-          <React.Fragment key={key}>
-            <div
-              className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3 shadow-sm hover:border-blue-300 transition-colors"
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* 🆕 筛选栏 */}
+      {availableTypes.length > 1 && (
+        <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200 bg-gray-50">
+          <div className="flex items-center gap-2">
+            <label htmlFor="file-type-filter" className="text-sm font-medium text-gray-700">
+              文件类型：
+            </label>
+            <select
+              id="file-type-filter"
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
-              <div className="flex items-center space-x-3 min-w-0">
-                <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-50">
-                  {getFileIcon(file.type)}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate" title={displayName}>
-                    {displayName}
-                  </p>
-                  <div className="flex items-center flex-wrap gap-2 text-xs text-gray-500 mt-1">
-                    <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 font-medium">
-                      {formatFileType(file.type)}
-                    </span>
-                    <span>{sourceLabel}</span>
-                    {created && <span>{created.toLocaleString()}</span>}
+              <option value="all">全部 ({files.length})</option>
+              {availableTypes.map(type => {
+                const count = files.filter(f => formatFileType(f.type) === type).length
+                return (
+                  <option key={type} value={type}>
+                    {type} ({count})
+                  </option>
+                )
+              })}
+            </select>
+            {filterType !== 'all' && (
+              <button
+                onClick={() => setFilterType('all')}
+                className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors"
+                title="清除筛选"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 文件列表 */}
+      <div className="flex-1 overflow-auto p-4 space-y-3">
+        {filteredFiles.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+            <FileText className="w-10 h-10 mb-3 text-gray-300" />
+            <p>没有 {filterType} 类型的文件</p>
+            <button
+              onClick={() => setFilterType('all')}
+              className="mt-2 text-sm text-blue-600 hover:text-blue-700"
+            >
+              显示全部文件
+            </button>
+          </div>
+        ) : (
+          filteredFiles.map((file, index) => {
+            const url = buildDownloadUrl(file)
+            const displayName = getFileDisplayName(file)
+            const sourceLabel = file.sourceMessageId ? `#${file.sourceMessageId.slice(-6)}` : 'system'
+            const created = file.createdAt ? new Date(file.createdAt) : null
+            const key = file.id || url || `${file.type || 'file'}-${displayName}-${index}`
+
+            return (
+              <React.Fragment key={key}>
+                <div
+                  className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3 shadow-sm hover:border-blue-300 transition-colors"
+                >
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-50">
+                      {getFileIcon(file.type)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate" title={displayName}>
+                        {displayName}
+                      </p>
+                      <div className="flex items-center flex-wrap gap-2 text-xs text-gray-500 mt-1">
+                        <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 font-medium">
+                          {formatFileType(file.type)}
+                        </span>
+                        <span>{sourceLabel}</span>
+                        {created && <span>{created.toLocaleString()}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2 flex-shrink-0">
+                    <button
+                      onClick={() => handleDownload(file)}
+                      className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-500 disabled:opacity-40 whitespace-nowrap"
+                      disabled={!url}
+                    >
+                      <Download className="w-4 h-4 mr-1" />
+                      Download
+                    </button>
+                    <button
+                      onClick={() => handleCopyLink(file)}
+                      className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 whitespace-nowrap"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      onClick={() => handleOpen(file, key)}
+                      className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 whitespace-nowrap"
+                      disabled={!url}
+                    >
+                      <ExternalLink className="w-4 h-4 mr-1" />
+                      View
+                    </button>
                   </div>
                 </div>
-              </div>
-              <div className="flex items-center space-x-2 flex-shrink-0">
-                <button
-                  onClick={() => handleDownload(file)}
-                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-500 disabled:opacity-40 whitespace-nowrap"
-                  disabled={!url}
-                >
-                  <Download className="w-4 h-4 mr-1" />
-                  Download
-                </button>
-                <button
-                  onClick={() => handleCopyLink(file)}
-                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 whitespace-nowrap"
-                >
-                  Copy
-                </button>
-                <button
-                  onClick={() => handleOpen(file, key)}
-                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 whitespace-nowrap"
-                  disabled={!url}
-                >
-                  <ExternalLink className="w-4 h-4 mr-1" />
-                  View
-                </button>
-              </div>
-            </div>
-            {previewKey === key && url && (
-              <div className="mt-2">
-                {(() => {
-                  const fileType = (file.type || '').toLowerCase()
-                  console.log('📄 Rendering preview for file:', {
-                    key,
-                    type: fileType,
-                    url,
-                    displayName
-                  })
+                {previewKey === key && url && (
+                  <div className="mt-2">
+                    {(() => {
+                      const fileType = (file.type || '').toLowerCase()
+                      console.log('📄 Rendering preview for file:', {
+                        key,
+                        type: fileType,
+                        url,
+                        displayName
+                      })
 
-                  if (fileType.startsWith('csv') || fileType === 'csv') {
-                    console.log('📊 Rendering CsvViewer for:', displayName)
-                    return <CsvViewer url={url} filename={displayName} defaultExpanded={true} />
-                  } else if (fileType.startsWith('md') || fileType === 'md') {
-                    console.log('📝 Rendering MarkdownViewer for:', displayName)
-                    return <MarkdownViewer url={url} filename={displayName} defaultExpanded={true} />
-                  } else {
-                    console.warn('⚠️ Unknown file type for preview:', fileType)
-                    return null
-                  }
-                })()}
-              </div>
-            )}
-          </React.Fragment>
-        )
-      })}
+                      if (fileType.startsWith('csv') || fileType === 'csv') {
+                        console.log('📊 Rendering CsvViewer for:', displayName)
+                        return <CsvViewer url={url} filename={displayName} defaultExpanded={true} />
+                      } else if (fileType.startsWith('md') || fileType === 'md') {
+                        console.log('📝 Rendering MarkdownViewer for:', displayName)
+                        return <MarkdownViewer url={url} filename={displayName} defaultExpanded={true} />
+                      } else {
+                        console.warn('⚠️ Unknown file type for preview:', fileType)
+                        return null
+                      }
+                    })()}
+                  </div>
+                )}
+              </React.Fragment>
+            )
+          })
+        )}
+      </div>
     </div>
   )
 }
@@ -992,7 +1066,8 @@ const PapersTab: React.FC = () => {
   const [papers, setPapers] = useState<any[]>([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
-  const [sortBy, setSortBy] = useState<'published' | 'score'>('published')
+  const [sortBy, setSortBy] = useState<'published' | 'score' | 'citations' | 'quartile'>('citations') // 默认为引用排序
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc') // 默认为降序
   const [filterSource, setFilterSource] = useState<string>('all')
   const [filterTopic, setFilterTopic] = useState<string>('all')  // 🆕 主题筛选
   const [groupByTopic, setGroupByTopic] = useState<boolean>(true)  // 🆕 是否按主题分组
@@ -1117,11 +1192,38 @@ const PapersTab: React.FC = () => {
     .filter(p => filterSource === 'all' || p.source === filterSource)
     .filter(p => filterTopic === 'all' || (p.topic || '') === filterTopic)  // 🆕 主题筛选
     .sort((a, b) => {
+      let diff = 0
       if (sortBy === 'published') {
-        return new Date(b.published).getTime() - new Date(a.published).getTime()
+        const timeA = new Date(a.published).getTime() || 0
+        const timeB = new Date(b.published).getTime() || 0
+        diff = timeB - timeA
+      } else if (sortBy === 'citations') {
+        const getCitations = (p: any) => {
+          // 优先使用 paper 对象中的引用数
+          return Number(p.citation_count ?? p.citations ?? p.cited_by_count ?? 0)
+        }
+        diff = getCitations(b) - getCitations(a)
+      } else if (sortBy === 'quartile') {
+        const getQuartileScore = (p: any) => {
+          // 综合 CAS 和 JCR 分区，优先取较好的（数字小的）
+          // Q1 -> 4分, Q2 -> 3分, Q3 -> 2分, Q4 -> 1分, 无 -> 0分
+          const parseQ = (q: string) => {
+             if (!q) return 0;
+             if (q.includes('Q1') || q.includes('1区')) return 4;
+             if (q.includes('Q2') || q.includes('2区')) return 3;
+             if (q.includes('Q3') || q.includes('3区')) return 2;
+             if (q.includes('Q4') || q.includes('4区')) return 1;
+             return 0;
+          }
+          const s1 = parseQ(p.cas_quartile);
+          const s2 = parseQ(p.jcr_quartile);
+          return Math.max(s1, s2);
+        }
+        diff = getQuartileScore(b) - getQuartileScore(a)
       } else {
-        return (b.score || 0) - (a.score || 0)
+        diff = (b.score || 0) - (a.score || 0)
       }
+      return sortOrder === 'asc' ? -diff : diff
     })
 
   // 获取唯一的来源列表
@@ -1249,6 +1351,13 @@ session_id="${sessionId}"`
     setSelectedIds(newSelectedIds)
   }
 
+  // 🆕 更新文献信息（用于异步加载的数据回流，如引用量）
+  const handleUpdatePaper = (paperId: string, updates: Partial<any>) => {
+    setPapers(prevPapers => prevPapers.map(p => 
+      p.paper_id === paperId ? { ...p, ...updates } : p
+    ))
+  }
+
   // 全选/取消全选（仅更新本地状态）
   const handleToggleSelectAll = () => {
     const newSelectedIds = selectedIds.length === filteredPapers.length ? [] : filteredPapers.map(p => p.paper_id)
@@ -1334,14 +1443,25 @@ session_id="${sessionId}"`
             ))}
           </select>
 
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as 'published' | 'score')}
-            className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1"
-          >
-            <option value="published">按时间</option>
-            <option value="score">按相关性</option>
-          </select>
+          <div className="flex flex-1 items-center gap-1 min-w-0">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'published' | 'score' | 'citations' | 'quartile')}
+              className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1 min-w-0"
+            >
+              <option value="citations">按引用</option>
+              <option value="quartile">按分区</option>
+              <option value="published">按时间</option>
+              <option value="score">按相关性</option>
+            </select>
+            <button
+              onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+              className="p-1 border border-gray-300 rounded bg-white hover:bg-gray-50 text-gray-600 flex-shrink-0"
+              title={sortOrder === 'desc' ? "当前降序 (高→低)，点击切换为升序" : "当前升序 (低→高)，点击切换为降序"}
+            >
+              {sortOrder === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : <ArrowUp className="w-3.5 h-3.5" />}
+            </button>
+          </div>
         </div>
 
         {/* 🆕 第三行：按主题筛选和分组切换（始终显示） */}
@@ -1418,6 +1538,7 @@ session_id="${sessionId}"`
                         index={index + 1}
                         selected={selectedIds.includes(paper.paper_id)}
                         onToggleSelect={() => handleToggleSelect(paper.paper_id)}
+                        onUpdatePaper={handleUpdatePaper}
                       />
                     ))}
                   </div>
@@ -1434,6 +1555,7 @@ session_id="${sessionId}"`
                 index={index + 1}
                 selected={selectedIds.includes(paper.paper_id)}
                 onToggleSelect={() => handleToggleSelect(paper.paper_id)}
+                onUpdatePaper={handleUpdatePaper}
               />
             ))}
           </div>
@@ -1451,9 +1573,10 @@ interface PaperCardCompactProps {
   index: number
   selected: boolean
   onToggleSelect: () => void
+  onUpdatePaper?: (paperId: string, updates: Partial<any>) => void
 }
 
-const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selected, onToggleSelect }) => {
+const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selected, onToggleSelect, onUpdatePaper }) => {
   const [expanded, setExpanded] = useState(false)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [detailedInfo, setDetailedInfo] = useState<any>(null)
@@ -1694,14 +1817,46 @@ const PaperCardCompact: React.FC<PaperCardCompactProps> = ({ paper, index, selec
 
   useEffect(() => {
     if (resolvedCitations === null) return
-    setDetailedInfo((prev: any) => (prev ? { ...prev, citations: resolvedCitations } : prev))
-  }, [resolvedCitations])
+    setDetailedInfo((prev: any) => (prev ? { ...prev, citations: resolvedCitations } : { citations: resolvedCitations }))
+    
+    // 🆕 同步引用量到父组件状态，以支持排序
+    if (onUpdatePaper && paper.paper_id) {
+       const key = 'citation_count'; // 统一使用 citation_count 存储
+       const current = Number(paper[key] ?? paper.citations ?? paper.cited_by_count ?? -1);
+       if (current !== resolvedCitations) {
+           console.log(`🔄 [PaperCard] 更新父组件引用量: ${paper.paper_id} -> ${resolvedCitations}`)
+           onUpdatePaper(paper.paper_id, { [key]: resolvedCitations })
+       }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedCitations, paper.paper_id])
 
   // 🔍 监听 journalInfo 状态变化
   useEffect(() => {
     console.log('🔄 [状态] journalInfo 状态变化:', journalInfo)
     console.log('🔄 [状态] journalInfo 详情:', JSON.stringify(journalInfo, null, 2))
-  }, [journalInfo])
+
+    // 🆕 同步期刊分区信息到父组件状态，以支持排序
+    if (journalInfo && onUpdatePaper && paper.paper_id) {
+       const updates: any = {}
+       let hasUpdate = false
+
+       if (journalInfo.jcr_quartile && paper.jcr_quartile !== journalInfo.jcr_quartile) {
+         updates.jcr_quartile = journalInfo.jcr_quartile
+         hasUpdate = true
+       }
+       if (journalInfo.cas_quartile && paper.cas_quartile !== journalInfo.cas_quartile) {
+         updates.cas_quartile = journalInfo.cas_quartile
+         hasUpdate = true
+       }
+       
+       if (hasUpdate) {
+         console.log(`🔄 [PaperCard] 更新父组件分区信息: ${paper.paper_id}`, updates)
+         onUpdatePaper(paper.paper_id, updates)
+       }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [journalInfo, paper.paper_id])
 
   // 🆕 检查 journalInfo 是否有任何有用的数据
   const hasUsefulJournalInfo = (info: any): boolean => {

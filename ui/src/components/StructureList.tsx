@@ -127,7 +127,8 @@ const StructureList: React.FC = () => {
 
     // 🔧 只传递 file_path 和 source
     const structures = nonRelaxedStructs.map(s => ({
-      file_path: (s as any).cif_file_path,
+      file_path: (s as any).cif_file_path || (s as any).file_path || (s as any).path,
+      filename: (s as any).cifFilename || (s as any).metadata?.filename || (s as any).formula,
       source: s.source?.database === 'Upload' ? 'upload' :
         s.source?.database === 'Relaxed' ? 'relax' :
           s.source?.database === 'Generated' ? 'generate' :
@@ -171,7 +172,8 @@ device="cuda"`
 
     // 🔧 只传递 file_path 和 source
     const structures = selectedStructs.map(s => ({
-      file_path: (s as any).cif_file_path,
+      file_path: (s as any).cif_file_path || (s as any).file_path || (s as any).path, // 兼容上传文件的路径
+      filename: (s as any).cifFilename || (s as any).metadata?.filename || (s as any).formula,
       source: s.source?.database === 'Upload' ? 'upload' :
         s.source?.database === 'Relaxed' ? 'relax' :
           s.source?.database === 'Generated' ? 'generate' :
@@ -209,7 +211,8 @@ device="cuda"`
     const structures = currentSessionStructures
       .filter(s => selectedStructureIds.includes(s.id))
       .map(s => ({
-        file_path: (s as any).cif_file_path,
+        file_path: (s as any).cif_file_path || (s as any).file_path || (s as any).path, // 兼容上传文件的路径
+        filename: (s as any).cifFilename || (s as any).metadata?.filename || (s as any).formula,
         source: s.source?.database === 'Upload' ? 'upload' :
           s.source?.database === 'Relaxed' ? 'relax' :
             s.source?.database === 'Generated' ? 'generate' :
@@ -244,7 +247,8 @@ device="cuda"`
     const structures = currentSessionStructures
       .filter(s => selectedStructureIds.includes(s.id))
       .map(s => ({
-        file_path: (s as any).cif_file_path,
+        file_path: (s as any).cif_file_path || (s as any).file_path || (s as any).path, // 兼容上传文件的路径
+        filename: (s as any).cifFilename || (s as any).metadata?.filename || (s as any).formula,
         source: s.source?.database === 'Upload' ? 'upload' :
           s.source?.database === 'Relaxed' ? 'relax' :
             s.source?.database === 'Generated' ? 'generate' :
@@ -408,10 +412,11 @@ temperature=300.0`
         <>
           {/* 移动端遮罩层 */}
           <div
-            className="md:hidden fixed inset-0 bg-black/20 z-40"
+            className="md:hidden fixed inset-0 bg-black/20 z-[90]"
             onClick={() => setShowActions(false)}
           />
-          <div className="md:static fixed bottom-0 left-0 right-0 z-[100] bg-white md:bg-gradient-to-r md:from-blue-50 md:to-indigo-50 border-t md:border-b md:border-t-0 border-blue-200 px-4 pt-4 pb-32 md:py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] md:shadow-none space-y-3 md:space-y-2 animate-in slide-in-from-bottom duration-200">
+          {/* 增加 padding-bottom 以适配移动端浏览器菜单栏 - 增加底部间距 */}
+          <div className="md:static fixed bottom-0 left-0 right-0 z-[100] bg-white md:bg-gradient-to-r md:from-blue-50 md:to-indigo-50 border-t md:border-b md:border-t-0 border-blue-200 px-4 pt-4 pb-[max(4rem,calc(env(safe-area-inset-bottom)+2rem))] md:py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] md:shadow-none space-y-3 md:space-y-2 animate-in slide-in-from-bottom duration-200">
             <div className="flex items-center justify-between md:block">
               <p className="text-sm font-medium text-gray-700 md:text-gray-600 md:text-xs md:font-normal">
                 对选中的 {selectedCount} 个结构执行计算：

@@ -7,6 +7,7 @@ Export Tools Module (导出工具模块)
 3. 保存报告到文件
 4. 清理CSV中的无效数据
 """
+import glob
 import os
 import shutil
 from typing import Dict, Any, List, Tuple, Optional
@@ -702,6 +703,16 @@ def save_papers_to_csv(
                     else:
                         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                         saved_file_path = os.path.join(save_dir, f'{file_prefix}_{timestamp}.csv')
+
+                # Cleanup legacy all_papers_<timestamp>.csv so we only keep all_papers.csv
+                if append_mode and file_prefix == 'all_papers':
+                    legacy_pattern = os.path.join(save_dir, 'all_papers_*.csv')
+                    for legacy_path in glob.glob(legacy_pattern):
+                        try:
+                            os.remove(legacy_path)
+                            logger.info("Removed legacy all_papers CSV", path=legacy_path)
+                        except OSError as cleanup_error:
+                            logger.warning("Failed to remove legacy all_papers CSV", path=legacy_path, error=str(cleanup_error))
 
                 # 追加模式：合并现有数据
                 if append_mode and os.path.exists(saved_file_path):

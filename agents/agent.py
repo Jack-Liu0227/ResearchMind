@@ -36,9 +36,11 @@ from .callbacks import trim_llm_request_context, record_llm_usage
 from .deep_research_agent.agent import root_agent as deep_research_agent
 from .database_agent.agent import root_agent as database_agent
 from .simulation_agent.agent import root_agent as simulation_agent
+from .experiment_plan_agent.agent import root_agent as experiment_plan_agent
 
 # 从环境变量获取模型配置
 MODEL = os.getenv('MODEL_USE', 'gemini/gemini-2.5-flash')
+
 
 # 创建主研究协调 Agent
 research_coordinator = LlmAgent(
@@ -59,6 +61,7 @@ research_coordinator = LlmAgent(
         AgentTool(agent=deep_research_agent),
         AgentTool(agent=database_agent),
         AgentTool(agent=simulation_agent),
+        AgentTool(agent=experiment_plan_agent),
     ],
     before_model_callback=trim_llm_request_context,  # 防止上下文超过 token 限制
     after_model_callback=record_llm_usage  # 记录 LLM 使用情况并计费

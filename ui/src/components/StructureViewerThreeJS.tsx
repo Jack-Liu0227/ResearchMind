@@ -175,9 +175,14 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
   const [fillBoundaries, setFillBoundaries] = useState(true); // New state for boundary completion
   const [showLabels, setShowLabels] = useState(false); // Toggle for atom labels
 
+  const normalizeElementSymbol = (raw: string) => {
+    const match = raw.match(/[A-Z][a-z]?/);
+    return match ? match[0] : raw;
+  };
+
   const getUniqueElements = (atoms: any[]) => {
     const elements = new Set<string>();
-    atoms.forEach(atom => elements.add(atom.element));
+    atoms.forEach(atom => elements.add(normalizeElementSymbol(atom.element)));
     return Array.from(elements).sort();
   };
 
@@ -654,9 +659,10 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
         'Al': baseRadius * 1.2
       };
 
-      const radius = elementRadius[atom.element as keyof typeof elementRadius] || baseRadius;
+      const normalizedElement = normalizeElementSymbol(atom.element);
+      const radius = elementRadius[normalizedElement as keyof typeof elementRadius] || baseRadius;
       const geometry = new THREE.SphereGeometry(radius, 32, 16);
-      const color = atomColor[atom.element.toLowerCase()] || atomColor.default;
+      const color = atomColor[normalizedElement.toLowerCase()] || atomColor.default;
       const material = new THREE.MeshStandardMaterial({
         color: new THREE.Color(color),
         roughness: 0.3,
@@ -664,13 +670,13 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
       });
       const sphere = new THREE.Mesh(geometry, material);
       sphere.position.set(x, y, z);
-      sphere.name = `${atom.element}_${index}`;
-      sphere.userData = { element: atom.element, position: [x, y, z], index };
+      sphere.name = `${normalizedElement}_${index}`;
+      sphere.userData = { element: normalizedElement, position: [x, y, z], index };
       atomGroup.add(sphere);
 
       // Add label if enabled
       if (showLabels) {
-        const sprite = createTextLabel(atom.element, '#FFFFFF', 0.8);
+        const sprite = createTextLabel(normalizedElement, '#FFFFFF', 0.8);
         if (sprite) {
           sprite.position.set(x, y, z);
           atomGroup.add(sprite);
@@ -718,8 +724,8 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
         if (distance > 4.0) continue;
         if (distance < 0.1) continue; // 重叠原子不绘制
 
-        const el1 = list[i].element;
-        const el2 = list[j].element;
+        const el1 = normalizeElementSymbol(list[i].element);
+        const el2 = normalizeElementSymbol(list[j].element);
         const r1 = covalentRadii[el1] || 1.1; // 默认值 1.1
         const r2 = covalentRadii[el2] || 1.1;
 
@@ -730,8 +736,8 @@ const StructureViewerThreeJS: React.FC<Props> = ({ structure }) => {
           const midpoint = new THREE.Vector3().addVectors(point1, point2).multiplyScalar(0.5);
 
           // 创建两个半圆柱 (不同颜色)
-          const color1 = atomColor[list[i].element.toLowerCase()] || atomColor.default;
-          const color2 = atomColor[list[j].element.toLowerCase()] || atomColor.default;
+          const color1 = atomColor[el1.toLowerCase()] || atomColor.default;
+          const color2 = atomColor[el2.toLowerCase()] || atomColor.default;
 
           // 第一个半圆柱 (原子1到中点)
           const cylinder1 = createCylinder(point1, midpoint, color1);

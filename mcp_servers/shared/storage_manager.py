@@ -11,6 +11,7 @@
 import os
 import json
 import sys
+import re
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -33,6 +34,12 @@ SESSION_DATA_DIR = session_data_root()
 ensure_dirs(SESSION_DATA_DIR)
 
 
+def _is_valid_session_id(session_id: Optional[str]) -> bool:
+    if not session_id or not isinstance(session_id, str):
+        return False
+    return re.fullmatch(r"session_\d{13}_[a-z0-9]{8}", session_id) is not None
+
+
 def get_session_storage_path(
     session_id: str,
     data_type: str,
@@ -42,6 +49,7 @@ def get_session_storage_path(
     topic: Optional[str] = None
 ) -> Path:
     """
+
     获取会话存储路径
 
     Args:
@@ -55,6 +63,9 @@ def get_session_storage_path(
     Returns:
         存储路径
     """
+    if not _is_valid_session_id(session_id):
+        raise ValueError(f"Invalid session_id: {session_id}")
+
     # 根据数据类型确定子目录
     if data_type == "papers":
         base_path = SESSION_DATA_DIR / "papers" / session_id
@@ -173,6 +184,8 @@ def get_file_url(file_path: Path, data_type: str, session_id: Optional[str] = No
             return f"/api/structures/{session_id}/relaxed/{filename}"
         elif data_type == "generated_structures":
             return f"/api/images/generated_structures/{session_id}/generated/{filename}"
+        elif data_type == "database":
+            return f"/api/structures/{session_id}/database/{filename}"
         elif data_type == "papers":
             return f"/api/download/papers/{session_id}/{filename}"
         else:
@@ -189,4 +202,3 @@ def get_file_url(file_path: Path, data_type: str, session_id: Optional[str] = No
         return f"/api/download/{filename}"
     else:
         return f"/files/{data_type}/{filename}"
-

@@ -22,7 +22,7 @@ class StructureConverter:
         cif_content: str,
         name: str,
         composition: str,
-        source: str = "Unknown"
+        source: str = "Database"
     ) -> Optional[Dict[str, Any]]:
         """
         Convert CIF content to frontend structure format
@@ -51,12 +51,12 @@ class StructureConverter:
                 logger.warning(f"⚠️ CIF content seems too short ({len(cif_content)} chars), may be truncated")
 
             # 检查CIF内容是否包含必要的关键字
-            required_keywords = ['data_', 'loop_', '_cell_length_a']
+            required_keywords = ['data_', '_cell_length_a']
             missing_keywords = [kw for kw in required_keywords if kw not in cif_content]
             if missing_keywords:
                 logger.warning(f"⚠️ CIF content missing keywords: {missing_keywords}")
-                # Early fallback for obviously invalid CIF to avoid heavy parsing
-                raise ValueError(f"Invalid CIF: missing keywords {missing_keywords}")
+                # Don't raise error, let pymatgen try to parse or fail gracefully
+                # raise ValueError(f"Invalid CIF: missing keywords {missing_keywords}")
 
             structure_id = str(uuid.uuid4())
             
@@ -76,6 +76,7 @@ class StructureConverter:
             # Ensure display_struct is always defined to avoid UnboundLocalError
             display_struct = None
 
+            # Try to auto-detect format if pymatgen fails
             try:
                 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
@@ -84,15 +85,38 @@ class StructureConverter:
                 logger.info(f"   CIF content length: {len(cif_content)} characters")
                 logger.info(f"   CIF content starts with: {cif_content[:100]}")
 
-                # Parse CIF using pymatgen
-                struct = Structure.from_str(cif_content, fmt="cif")
-                logger.info(f"✅ CIF parsed successfully")
+                try:
+                    # Try explicit CIF format first
+                    struct = Structure.from_str(cif_content, fmt="cif")
+                    logger.info(f"✅ CIF parsed successfully as CIF format")
+                except Exception as cif_error:
+                    # 🔧 修复：如果不是标准CIF，尝试自动检测格式（支持POSCAR等）
+                    # Check if it looks like a POSCAR
+                    if "Direct" in cif_content or "Cartesian" in cif_content or any(x in cif_content.splitlines()[0] for x in ["POSCAR", "CONTCAR", "SrTiO3", "system"]):
+                        logger.info("ℹ️ Content looks like POSCAR/VASP format, trying auto-detection")
+                        try:
+                            struct = Structure.from_str(cif_content) # Auto-detect
+                            logger.info(f"✅ Structure parsed successfully with auto-detection")
+                        except Exception as auto_error:
+                            logger.warning(f"⚠️ Auto-detection failed: {auto_error}")
+                            raise cif_error # Re-raise original error if auto-detect fails
+                    else:
+                        raise cif_error
 
                 # Analyze symmetry and get primitive and conventional cells
                 try:
                     sga = SpacegroupAnalyzer(struct)
                     primitive_structure = sga.get_primitive_standard_structure()
                     conventional_structure = sga.get_conventional_standard_structure()
+                    
+                    # 🔧 修复：使用 SpacegroupAnalyzer 获取的空间群覆盖从 CIF 提取的值
+                    # 这样可以确保即使 CIF 文件中没有空间群信息，也能正确显示
+                    try:
+                        space_group = sga.get_space_group_symbol()
+                        logger.info(f"✅ Space group from analyzer: {space_group}")
+                    except Exception as sg_error:
+                        logger.warning(f"⚠️ Could not get space group symbol: {sg_error}")
+                        # 保留从 CIF 提取的值
 
                     # Get refined formula
                     composition = primitive_structure.composition.reduced_formula
@@ -258,7 +282,7 @@ class StructureConverter:
                     if m2:
                         formula = m2.group(1).strip()
             except Exception:
-                formula = composition or "Unknown"
+                formula = composition or name or "N/A"
 
             # Extract lattice parameters if present
             lattice_params = None
@@ -290,7 +314,7 @@ class StructureConverter:
                 "formula": formula,
                 "source": {
                     "database": source,
-                    "materialId": "unknown",
+                    "materialId": name or "N/A",
                 },
                 "spaceGroup": StructureConverter._extract_space_group(cif_content),
                 "cifContent": cif_content,
@@ -322,13 +346,56 @@ class StructureConverter:
                     parts = line.split()
                     if len(parts) > 1:
                         return ' '.join(parts[1:]).strip('"\'')
-            return "Unknown"
+            return "N/A"
         except Exception as e:
             logger.warning(f"Failed to extract space group: {e}")
-            return "Unknown"
+            return "N/A"
+
+    @staticmethod
+    def _infer_source_database(data: Dict[str, Any], default: str) -> str:
+        if default and default != "Unknown":
+            return default
+
+        for key in ("database", "db"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value
+
+        metadata = data.get("metadata", {})
+        if isinstance(metadata, dict):
+            for key in ("database", "source"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value:
+                    return value
+
+        for filename_key in ("cif_file_path", "cifFilename"):
+            filename = data.get(filename_key)
+            if isinstance(filename, str) and filename:
+                name = filename.split("\\")[-1].split("/")[-1]
+                if name.startswith("MP_"):
+                    return "MP"
+                if name.startswith("OQMD_"):
+                    return "OQMD"
+                if name.startswith("COD_"):
+                    return "COD"
+                if name.startswith("AFLOW_"):
+                    return "AFLOW"
+
+        material_id = data.get("material_id") or data.get("materialId")
+        if isinstance(material_id, str) and material_id.startswith("mp-"):
+            return "MP"
+        if data.get("aflow_id") or data.get("auid"):
+            return "AFLOW"
+        if data.get("cod_id"):
+            return "COD"
+        if data.get("entry_id") or data.get("icsd_id"):
+            return "OQMD"
+
+        # 🔧 修复：即使无法确定具体数据库，也返回通用的Database而不是Unknown
+        return default if default and default != "Unknown" else "Database"
     
     @staticmethod
-    def standardize_structure_data(data: Dict[str, Any], source_type: str = "Unknown") -> Dict[str, Any]:
+    def standardize_structure_data(data: Dict[str, Any], source_type: str = "Database") -> Dict[str, Any]:
         """
         Standardize structure data from different sources
 
@@ -352,16 +419,18 @@ class StructureConverter:
             original_source = standardized.get("source")
             logger.info(f"🔍 Standardizing structure - Original source: {original_source}, source_type param: {source_type}")
 
+            resolved_source = StructureConverter._infer_source_database(standardized, source_type)
+
             # Standardize source field
             if "source" not in standardized or not isinstance(standardized["source"], dict):
-                logger.info(f"📝 Creating new source field with database={source_type}")
+                logger.info(f"📝 Creating new source field with database={resolved_source}")
                 standardized["source"] = {
-                    "database": source_type,
+                    "database": resolved_source,
                     "materialId": standardized.get("id", "unknown")
                 }
             elif "database" not in standardized["source"]:
-                logger.info(f"📝 Adding database={source_type} to existing source")
-                standardized["source"]["database"] = source_type
+                logger.info(f"📝 Adding database={resolved_source} to existing source")
+                standardized["source"]["database"] = resolved_source
             else:
                 logger.info(f"✅ Keeping existing source.database={standardized['source']['database']}")
             
@@ -399,6 +468,21 @@ class StructureConverter:
             # Ensure properties field exists
             if "properties" not in standardized:
                 standardized["properties"] = {}
+
+            # 🔧 修复：统一 formula 字段（前端期望 formula 字段）
+            # 不同数据库使用不同的字段名：MP用formula_pretty，OQMD用composition，COD用chemical_formula
+            current_formula = standardized.get("formula", "")
+            # 如果formula不存在、为空、或是无效值（N/A, Unknown等），尝试从其他字段提取
+            if not current_formula or current_formula in ("N/A", "Unknown", "unknown") or current_formula.startswith("Structure_"):
+                formula = (
+                    standardized.get("formula_pretty") or
+                    standardized.get("composition") or
+                    standardized.get("chemical_formula") or
+                    standardized.get("name") or
+                    f"Structure_{standardized.get('id', 'N/A')[:8]}"
+                )
+                standardized["formula"] = formula
+                logger.info(f"📝 Unified formula field: {current_formula} -> {formula}")
 
             # Preserve important properties if they exist in metadata or top-level
             for prop_key in ["density", "volume", "bandGap", "energyAboveHull", "numAtoms", "spaceGroupNumber", "crystalSystem"]:
@@ -462,6 +546,7 @@ class StructureConverter:
 
             # Method 1: frontend_structures field (preferred)
             if "frontend_structures" in result and isinstance(result["frontend_structures"], list):
+                logger.info(f"✅ [structure_converter] Found frontend_structures: {len(result['frontend_structures'])} items")
                 # Process each frontend structure to ensure it has complete data
                 for i, struct in enumerate(result["frontend_structures"]):
                     if isinstance(struct, dict):
@@ -528,6 +613,19 @@ class StructureConverter:
                 logger.info(f"✅ Found {len(result['frontend_structures'])} structures in frontend_structures")
                 # frontend_structures are already standardized, skip standardization step
                 skip_standardization = True
+
+            # Method 1.5: frontend_structure field (singular)
+            elif "frontend_structure" in result and isinstance(result["frontend_structure"], dict):
+                logger.info("🔍 Found singular frontend_structure")
+                struct = result["frontend_structure"]
+                # Check for completeness
+                has_lattice = "latticeParameters" in struct and isinstance(struct["latticeParameters"], dict)
+                has_atoms = "atoms" in struct and isinstance(struct["atoms"], list) and len(struct["atoms"]) > 0
+                
+                if has_lattice and has_atoms:
+                    structures.append(struct)
+                    skip_standardization = True
+                    logger.info(f"✅ Extracted singular frontend_structure: {struct.get('formula', 'Unknown')}")
 
             # Method 2: structures field
             elif "structures" in result and isinstance(result["structures"], list):
@@ -610,17 +708,35 @@ class StructureConverter:
                                 
                                 structures.append(converted)
                         else:
-                            # Already in frontend format or unknown format
-                            logger.info(f"🔍 Structure {i+1} already in frontend format or unknown format")
-                            structures.append(struct)
+                            # 🔧 修复：没有 CIF 内容的结构不应该被添加
+                            # 这些结构无法正确显示（缺少晶格参数、原子位置等关键信息）
+                            logger.warning(f"⚠️ Structure {i+1} has no CIF content, skipping")
+                            # 如果这是一个已经格式化的结构（有 latticeParameters 和 atoms），可以保留
+                            if struct.get("latticeParameters") and struct.get("atoms"):
+                                logger.info(f"✅ Structure {i+1} has lattice and atoms, keeping")
+                                structures.append(struct)
                     else:
-                        structures.append(struct)
+                        logger.warning(f"⚠️ Structure {i+1} is not a dict, skipping")
                 logger.info(f"✅ Found {len(structures)} structures in structures field")
             
             # Method 3: single structure field
+            # 🔧 修复：跳过OQMD/COD等数据库格式中的嵌套structure字段（只是元数据）
+            # 只处理真正的完整结构对象（有latticeParameters和atoms的）
             elif "structure" in result and isinstance(result["structure"], dict):
-                structures.append(result["structure"])
-                logger.info("✅ Found 1 structure in structure field")
+                struct = result["structure"]
+                # 检查是否是完整的结构对象（有latticeParameters和atoms）
+                # 而不是数据库格式中的元数据结构（只有space_group, unit_cell等）
+                has_lattice_params = "latticeParameters" in struct
+                has_atoms = "atoms" in struct and isinstance(struct["atoms"], list)
+                is_metadata_only = "space_group" in struct or "unit_cell" in struct
+                
+                if has_lattice_params and has_atoms and not is_metadata_only:
+                    # 这是一个完整的结构，可以使用
+                    structures.append(struct)
+                    logger.info("✅ Found 1 complete structure in structure field")
+                else:
+                    # 这只是元数据，跳过（真正的结构应该在structures数组或其他地方）
+                    logger.info("⏭️ Skipping metadata-only structure field (not a complete structure)")
             
             # Method 4: CIF content
             elif "cif_content" in result or "cif_contents" in result:
@@ -667,6 +783,33 @@ class StructureConverter:
                 logger.info(f"📊 Total structures extracted: {len(structures)}")
             elif structures and skip_standardization:
                 logger.info(f"📊 Total structures extracted: {len(structures)} (already standardized, skipped standardization step)")
+
+            # 🔧 去重：基于 material_id 或 id 去除重复结构
+            if structures:
+                seen_ids = set()
+                unique_structures = []
+                for struct in structures:
+                    # 尝试多个可能的 ID 字段
+                    struct_id = (
+                        struct.get("id") or
+                        struct.get("source", {}).get("materialId") or
+                        struct.get("material_id") or
+                        struct.get("metadata", {}).get("entry_id") or
+                        struct.get("metadata", {}).get("material_id") or
+                        # 如果没有 ID，使用 formula + volume 作为唯一标识
+                        f"{struct.get('formula', 'Unknown')}_{struct.get('properties', {}).get('volume', '')}"
+                    )
+                    
+                    if struct_id not in seen_ids:
+                        seen_ids.add(struct_id)
+                        unique_structures.append(struct)
+                    else:
+                        logger.info(f"🔄 Skipping duplicate structure: {struct.get('formula', 'Unknown')} (ID: {struct_id})")
+                
+                removed_count = len(structures) - len(unique_structures)
+                if removed_count > 0:
+                    logger.info(f"✂️ Removed {removed_count} duplicate structures, {len(unique_structures)} unique structures remain")
+                structures = unique_structures
 
         except Exception as e:
             logger.error(f"❌ Failed to extract structures from tool result: {e}", exc_info=True)

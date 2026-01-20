@@ -13,6 +13,7 @@ import aiohttp
 import asyncio
 import json
 import os
+import sys
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from io import BytesIO
@@ -21,11 +22,18 @@ import structlog
 import warnings
 import time
 import itertools
+from pathlib import Path as PathLib
 
 # Suppress PyPDF2 warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="PyPDF2")
 
 logger = structlog.get_logger(__name__)
+
+# Ensure project root is importable for shared utils
+_ROOT_DIR = PathLib(__file__).resolve().parents[4]
+if str(_ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(_ROOT_DIR))
+
 
 # 超时配置
 DEFAULT_TIMEOUT = 30
@@ -133,15 +141,16 @@ def search_arxiv_papers(topic: str, max_results: int = 5, session_id: str = None
         # 使用会话文件夹管理器获取文件夹路径
         from ..shared.session_folder_manager import get_session_folder
 
-        # 如果有 session_id，使用会话文件夹；否则创建临时会话
-        if session_id:
-            path = get_session_folder(session_id, topic)
-        else:
-            # 创建临时会话ID
-            import uuid
-            temp_session_id = str(uuid.uuid4())
-            path = get_session_folder(temp_session_id, topic)
-            logger.info(f"Created temporary session: {temp_session_id}")
+        if not session_id:
+            logger.warning("Missing session_id for ArXiv search; refusing to create temporary session.")
+            return {
+                "status": "error",
+                "error": "missing_session_id",
+                "message": "session_id is required for ArXiv search."
+            }
+
+        # 使用会话文件夹管理器获取文件夹路径
+        path = get_session_folder(session_id, topic)
 
         file_path = os.path.join(path, "papers_info.json")
 

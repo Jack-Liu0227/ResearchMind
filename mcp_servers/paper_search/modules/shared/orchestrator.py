@@ -259,16 +259,34 @@ class DeepResearchOrchestrator:
         import asyncio
 
         primary_query = plan.get('primary_query', '')
+        related_queries = plan.get('related_queries', []) or []
+        queries = [primary_query] + [q for q in related_queries if q]
+        # De-duplicate while preserving order and cap to 2 queries.
+        seen = set()
+        normalized_queries = []
+        for q in queries:
+            q = q.strip()
+            if not q or q in seen:
+                continue
+            seen.add(q)
+            normalized_queries.append(q)
+        if len(normalized_queries) > 2:
+            normalized_queries = normalized_queries[:2]
+        if not normalized_queries:
+            normalized_queries = [primary_query]
 
         async def search_single_source(source_name: str) -> List[PaperResult]:
             """异步搜索单个源"""
             try:
                 source = SearchSourceFactory.create(source_name)
                 if source and source.is_available():
-                    logger.info(f"Searching {source_name} for: {primary_query}")
-                    papers = await source.search(primary_query, max_results_per_source)
-                    logger.info(f"Found {len(papers)} papers from {source_name}")
-                    return papers
+                    collected: List[PaperResult] = []
+                    for query in normalized_queries:
+                        logger.info(f"Searching {source_name} for: {query}")
+                        papers = await source.search(query, max_results_per_source)
+                        logger.info(f"Found {len(papers)} papers from {source_name} for query: {query}")
+                        collected.extend(papers)
+                    return collected
                 else:
                     logger.warning(f"Source {source_name} is not available")
                     return []
